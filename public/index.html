@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CyberLab</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <main id="app">
+    <header>
+      <h1>CyberLab On-Prem</h1>
+      <p id="user-status">checking session...</p>
+    </header>
+
+    <section id="login-section">
+      <h2>Sign in</h2>
+      <form id="login-form">
+        <label>Username <input type="text" id="username" autocomplete="username" required /></label>
+        <label>Password <input type="password" id="password" autocomplete="current-password" required /></label>
+        <button type="submit">Log in</button>
+      </form>
+      <p id="login-msg" class="msg"></p>
+    </section>
+
+    <section id="mfa-section" hidden>
+      <h2>Enter MFA code</h2>
+      <form id="mfa-form">
+        <label>6-digit code <input type="text" id="mfa-token" inputmode="numeric" pattern="\d{6}" maxlength="6" required /></label>
+        <button type="submit">Verify</button>
+      </form>
+      <p id="mfa-msg" class="msg"></p>
+    </section>
+
+    <section id="dashboard-section" hidden>
+      <h2>Dashboard</h2>
+      <p>You are signed in. The full UI is being built incrementally.</p>
+      <p>API health: <a href="/healthz">/healthz</a></p>
+      <button id="logout-btn">Log out</button>
+    </section>
+  </main>
+  <script src="/js/app.js"></script>
+</body>
+</html>
