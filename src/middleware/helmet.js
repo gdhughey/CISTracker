@@ -26,8 +26,13 @@ const cspDirectives = {
 // Gating on NODE_ENV=production is wrong: the app can run in "production"
 // mode behind plain HTTP nginx (e.g. on a LAN), and upgradeInsecureRequests
 // would rewrite every subresource to https:// and break the page.
+// NOTE: helmet's useDefaults=true *adds* upgrade-insecure-requests by
+// default, so we must explicitly set it to null to remove it from the
+// emitted CSP — leaving the key unset is not enough.
 if (config.tlsEnabled) {
   cspDirectives.upgradeInsecureRequests = [];
+} else {
+  cspDirectives.upgradeInsecureRequests = null;
 }
 
 module.exports = helmet({
