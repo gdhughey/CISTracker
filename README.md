@@ -11,7 +11,37 @@ Built to run on a dedicated Ubuntu Server with no cloud dependencies. Replaces t
 - **Auth:** bcrypt + server-side sessions + HttpOnly cookies + TOTP MFA
 - **Vision:** Ollama running `qwen2.5vl:7b` (local), with optional Anthropic Sonnet fallback
 - **Reverse proxy:** nginx
-- **Process manager:** pm2
+- **Process manager:** systemd
+
+## Install on Ubuntu Server (one command)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gdhughey/cyberlab-onprem/main/install.sh | sudo bash
+```
+
+This installs Node.js 20, nginx, Ollama + the vision model, creates a `cyberlab` system user, clones the repo to `/opt/cyberlab/app`, generates a fresh `.env` with a random `SESSION_SECRET` and admin password, runs migrations, registers a systemd service, and brings up nginx on port 80.
+
+The initial admin password is printed at the end and also saved to `/root/cyberlab-admin-password`. You will be forced to change it on first login.
+
+Re-running the installer updates the app in place while preserving the database, uploads, and `.env`.
+
+### Uninstall
+
+```bash
+# Keeps database + uploads + .env
+curl -fsSL https://raw.githubusercontent.com/gdhughey/cyberlab-onprem/main/scripts/uninstall.sh | sudo bash
+
+# Delete everything
+curl -fsSL https://raw.githubusercontent.com/gdhughey/cyberlab-onprem/main/scripts/uninstall.sh | sudo bash -s -- --purge
+```
+
+### Installer environment overrides
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CYBERLAB_BRANCH` | `main` | Git branch to install from |
+| `CYBERLAB_OLLAMA_MODEL` | `qwen2.5vl:7b` | Vision model to pull |
+| `CYBERLAB_SKIP_OLLAMA` | `0` | Set to `1` to skip Ollama entirely |
 
 ## Quick start (development)
 
