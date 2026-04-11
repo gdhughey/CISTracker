@@ -1,44 +1,274 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>CyberLab</title>
-  <link rel="stylesheet" href="/css/app.css" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#08111f">
+<title>CyberLab Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Sora:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-  <main id="app">
-    <header>
-      <h1>CyberLab On-Prem</h1>
-      <p id="user-status">checking session...</p>
-    </header>
 
-    <section id="login-section">
-      <h2>Sign in</h2>
-      <form id="login-form">
-        <label>Username <input type="text" id="username" autocomplete="username" required /></label>
-        <label>Password <input type="password" id="password" autocomplete="current-password" required /></label>
-        <button type="submit">Log in</button>
-      </form>
-      <p id="login-msg" class="msg"></p>
-    </section>
+<div class="navbar">
+  <button id="backBtn" class="back-btn" onclick="swPage('checkout')">&#8592;</button>
+  <div class="logo"><div class="ndot"></div>CYBERLAB TRACKER</div>
+  <div class="nav-right">
+    <div id="gearWrap">
+      <button id="gearBtn" onclick="toggleGear()">&#9881;</button>
+      <div id="gearDrop">
+        <div id="miAdmin" class="gear-item gear-admin" onclick="showAdmin()">👥 Admin Panel</div>
+        <div class="gear-item" onclick="showChp()">🔑 Change Password</div>
+        <div class="gear-item" onclick="showMfa()">📱 Setup MFA</div>
+        <div class="gear-item gear-danger" onclick="doLogout()">🚪 Sign Out</div>
+      </div>
+    </div>
+  </div>
+</div>
 
-    <section id="mfa-section" hidden>
-      <h2>Enter MFA code</h2>
-      <form id="mfa-form">
-        <label>6-digit code <input type="text" id="mfa-token" inputmode="numeric" pattern="\d{6}" maxlength="6" required /></label>
-        <button type="submit">Verify</button>
-      </form>
-      <p id="mfa-msg" class="msg"></p>
-    </section>
+<div class="scroll" id="scr">
 
-    <section id="dashboard-section" hidden>
-      <h2>Dashboard</h2>
-      <p>You are signed in. The full UI is being built incrementally.</p>
-      <p>API health: <a href="/healthz">/healthz</a></p>
-      <button id="logout-btn">Log out</button>
-    </section>
-  </main>
-  <script src="/js/app.js"></script>
+  <!-- ═══════ CHECK OUT ═══════ -->
+  <div class="page on" id="pg-checkout">
+    <div class="card">
+      <div class="ctitle">👤 Who's Checking Out?</div>
+      <div class="note">You are signed in as <span id="curUser" class="accent"></span></div>
+      <div class="chips" id="chips"></div>
+      <div class="aur">
+        <input type="text" class="fi" id="nuInput" placeholder="Add name..." autocomplete="off">
+        <button class="btn bo bsm" onclick="addU()">+ Add</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ctitle">📦 Equipment Entry</div>
+      <div class="mtog">
+        <button class="mt on" onclick="swMode('scan')" id="mt-scan">📷 AI Scan</button>
+        <button class="mt" onclick="swMode('manual')" id="mt-manual">✏️ Manual</button>
+      </div>
+
+      <div id="scanMode">
+        <div class="note">Snap a photo — Ollama (local) reads the name, serial number &amp; barcode.</div>
+        <div class="dz" id="dz">
+          <input type="file" accept="image/*" onchange="handleFile(event)">
+          <div class="dzi">📸</div>
+          <div class="dzt">Take photo or choose from library</div>
+          <div class="dzs">JPG / PNG, up to 10 MB</div>
+        </div>
+        <div id="imgPrev" class="hidden">
+          <div id="imgGrid"></div>
+          <div class="brow">
+            <button class="btn bp" id="scanbtn" onclick="doScan()">🤖 Scan with AI</button>
+            <button class="btn bo bsm" onclick="clearImg()">✕ Clear</button>
+          </div>
+        </div>
+        <div id="scanSpin" class="hidden">
+          <div class="sw"><div class="sp"></div><span id="scanMsg">Analyzing...</span></div>
+        </div>
+      </div>
+
+      <div id="manualMode" class="hidden">
+        <div class="note">For cables, adapters &amp; small items without barcodes.</div>
+        <div class="fr">
+          <div class="fg"><label class="fl">Name *</label><input type="text" class="fi" id="m_name" placeholder="e.g. Cat6 Cable"></div>
+          <div class="fg"><label class="fl">Type</label><input type="text" class="fi" id="m_type" placeholder="e.g. Cable"></div>
+        </div>
+        <div class="fr">
+          <div class="fg"><label class="fl">Serial #</label><input type="text" class="fi" id="m_serial" placeholder="If available"></div>
+          <div class="fg"><label class="fl">Barcode</label><input type="text" class="fi" id="m_barcode" placeholder="If available"></div>
+        </div>
+        <div class="fg"><label class="fl">Notes</label><input type="text" class="fi" id="m_notes" placeholder="Condition, color, qty..."></div>
+        <button class="btn bp bfull" onclick="prepManual()">Next → Review</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="vcard">
+      <div class="ctitle">✅ Verify Before Saving</div>
+      <div class="vbox">
+        <div class="vbt">⚠️ Edit anything that looks wrong</div>
+        <div class="vr"><span class="vk">Equipment</span><input class="vi" id="v_name" type="text"></div>
+        <div class="vr"><span class="vk">Type</span><input class="vi" id="v_type" type="text"></div>
+        <div class="vr"><span class="vk">Serial #</span><input class="vi" id="v_serial" type="text"></div>
+        <div class="vr"><span class="vk">Barcode</span><input class="vi" id="v_barcode" type="text"></div>
+        <div class="vr"><span class="vk">Notes</span><input class="vi" id="v_notes" type="text"></div>
+        <div id="confW" class="hidden">
+          <div class="cbar"><div class="cfill" id="cfill"></div></div>
+          <div class="clbl" id="clbl"></div>
+        </div>
+      </div>
+      <div class="vmeta">
+        <span class="accent bold" id="v_user"></span> ·
+        <span id="v_dt" class="mono small"></span>
+      </div>
+      <div class="brow">
+        <button class="btn bg" id="confbtn" onclick="confirmCO()">✔ Save Checkout</button>
+        <button class="btn bo bsm" onclick="cancelV()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ CHECK IN ═══════ -->
+  <div class="page" id="pg-checkin">
+    <div class="card">
+      <div class="ctitle">📥 Currently Checked Out</div>
+      <div id="ciList"><div class="es"><div class="ei">📥</div><div class="et">Tap Refresh to load</div></div></div>
+      <button class="btn bo bsm bfull mt10" onclick="loadCI()">🔄 Refresh</button>
+    </div>
+  </div>
+
+  <!-- ═══════ LOG ═══════ -->
+  <div class="page" id="pg-log">
+    <div class="card">
+      <div class="ctitle">📋 Activity Log</div>
+      <div id="logW"><div class="es"><div class="ei">📋</div><div class="et">Tap Refresh to load</div></div></div>
+      <button class="btn bo bsm bfull mt10" onclick="loadLog()">🔄 Refresh</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="btabs">
+  <button class="bt on" onclick="swPage('checkout')" id="bt-checkout"><span class="i">📤</span>Check Out</button>
+  <button class="bt" onclick="swPage('checkin')" id="bt-checkin"><span class="i">📥</span>Check In</button>
+  <button class="bt" onclick="swPage('log')" id="bt-log"><span class="i">📋</span>Log</button>
+</div>
+
+<div id="toast"></div>
+
+<!-- ═══════ LOGIN OVERLAY ═══════ -->
+<div id="lo" class="ov">
+  <div class="ov-card">
+    <div class="ov-title">🔒 CYBERLAB</div>
+    <div class="ov-sub">Authorized Personnel Only</div>
+
+    <div id="lf">
+      <input id="lu" placeholder="Username" autocomplete="username" class="ov-input">
+      <input id="lp" type="password" placeholder="Password" autocomplete="current-password" class="ov-input">
+      <button onclick="doLogin()" class="ov-btn">Sign In</button>
+      <div class="ov-link" onclick="showForgot()">Forgot password?</div>
+      <div id="le" class="ov-err"></div>
+    </div>
+
+    <div id="cf" class="hidden">
+      <div class="ov-warn">First login — set your new password</div>
+      <input id="np1" type="password" placeholder="New password" autocomplete="new-password" class="ov-input">
+      <input id="np2" type="password" placeholder="Confirm password" autocomplete="new-password" class="ov-input">
+      <div class="ov-hint">Min 10 chars, upper, lower, digit, special</div>
+      <button onclick="doForceChg()" class="ov-btn">Set Password</button>
+      <div id="ce" class="ov-err"></div>
+    </div>
+
+    <div id="vf" class="hidden">
+      <div class="ov-icon">📱</div>
+      <div class="ov-warn accent">Two-Factor Authentication</div>
+      <div class="ov-sub">Enter the 6-digit code from your authenticator app</div>
+      <input id="mc2" placeholder="000000" type="tel" maxlength="6" autocomplete="one-time-code" class="ov-input center mono">
+      <button onclick="doMfaLoginVerify()" class="ov-btn">Verify</button>
+      <div id="me2" class="ov-err"></div>
+    </div>
+
+    <div id="fp" class="hidden">
+      <div class="ov-warn">Reset Password</div>
+      <div class="ov-sub">Enter your email — we'll send a reset link.</div>
+      <input id="fpEmail" type="email" placeholder="you@example.com" class="ov-input">
+      <button onclick="doForgot()" class="ov-btn">Send Reset Link</button>
+      <div class="ov-link" onclick="showLoginForm()">← Back to login</div>
+      <div id="fpMsg" class="ov-err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ ADMIN PANEL ═══════ -->
+<div id="adminOv" class="ov hidden">
+  <div class="admin-wrap">
+    <div class="admin-head">
+      <div class="admin-title">👥 Admin Panel</div>
+      <button class="btn bo bsm" onclick="hideAdmin()">✕ Close</button>
+    </div>
+
+    <div class="admin-tabs">
+      <button class="admin-tab on" data-tab="users" onclick="swAdmin('users')">Users</button>
+      <button class="admin-tab" data-tab="overdue" onclick="swAdmin('overdue')">Overdue</button>
+      <button class="admin-tab" data-tab="audit" onclick="swAdmin('audit')">Audit</button>
+    </div>
+
+    <div id="adm-users" class="admin-pane on">
+      <div class="card">
+        <div class="ctitle">➕ Create User</div>
+        <div class="fr">
+          <div class="fg"><label class="fl">Username</label><input id="nuName" class="fi" placeholder="alice"></div>
+          <div class="fg"><label class="fl">Email</label><input id="nuEmail" type="email" class="fi" placeholder="alice@example.com"></div>
+        </div>
+        <div class="fr">
+          <div class="fg"><label class="fl">Temp password</label><input id="nuPass" type="text" class="fi" placeholder="min 10 chars"></div>
+          <div class="fg"><label class="fl">Role</label>
+            <select id="nuRole" class="fi">
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn bp bfull" onclick="adminCreateUser()">Create User</button>
+        <div id="nuErr" class="ov-err"></div>
+      </div>
+
+      <div class="card">
+        <div class="ctitle">Users</div>
+        <div id="adminUL"><div class="es"><div class="et">Loading...</div></div></div>
+      </div>
+
+      <div class="card hidden" id="userDetail">
+        <div class="ctitle"><span id="udName">User</span> <button class="btn bo bsm" onclick="hideUserDetail()">Back</button></div>
+        <div id="udBody"></div>
+      </div>
+    </div>
+
+    <div id="adm-overdue" class="admin-pane">
+      <div class="card">
+        <div class="ctitle">⏰ Overdue Items</div>
+        <div id="overdueList"><div class="es"><div class="et">Loading...</div></div></div>
+      </div>
+    </div>
+
+    <div id="adm-audit" class="admin-pane">
+      <div class="card">
+        <div class="ctitle">📜 Audit Log</div>
+        <div id="auditList"><div class="es"><div class="et">Loading...</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ CHANGE PASSWORD MODAL ═══════ -->
+<div id="chpOv" class="ov hidden">
+  <div class="ov-card">
+    <div class="ov-title">🔑 Change Password</div>
+    <input id="cpOld" type="password" placeholder="Current password" class="ov-input">
+    <input id="cpN1" type="password" placeholder="New password" class="ov-input">
+    <input id="cpN2" type="password" placeholder="Confirm new password" class="ov-input">
+    <div class="ov-hint">Min 10 chars, upper, lower, digit, special</div>
+    <button onclick="doChgPass()" class="ov-btn">Change Password</button>
+    <button onclick="hideChp()" class="ov-btn-ghost">Cancel</button>
+    <div id="cpErr" class="ov-err"></div>
+  </div>
+</div>
+
+<!-- ═══════ MFA SETUP MODAL ═══════ -->
+<div id="mfaOv" class="ov hidden">
+  <div class="ov-card">
+    <div class="ov-title">📱 Setup MFA</div>
+    <div class="ov-sub">Scan the QR code with Google Authenticator, Authy, or 1Password.</div>
+    <img id="mfaQr" class="mfa-qr" alt="">
+    <div class="ov-hint">Or enter this key manually:<br><span id="mfaSecret" class="mono accent selectable"></span></div>
+    <input id="mfaCode" placeholder="Enter 6-digit code" type="tel" maxlength="6" autocomplete="one-time-code" class="ov-input center mono">
+    <button onclick="doMfaEnable()" class="ov-btn">Verify &amp; Enable</button>
+    <button onclick="hideMfa()" class="ov-btn-ghost">Cancel</button>
+    <div id="mfaErr" class="ov-err"></div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
 </body>
 </html>
