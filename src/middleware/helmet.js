@@ -2,14 +2,14 @@
 const helmet = require('helmet');
 const config = require('../config');
 
-const isProd = config.env === 'production';
-
 const cspDirectives = {
   defaultSrc: ["'self'"],
   scriptSrc: ["'self'"],
-  styleSrc: ["'self'", "'unsafe-inline'"], // unsafe-inline only for the placeholder UI
-  imgSrc: ["'self'", 'data:', 'blob:'],
-  fontSrc: ["'self'"],
+  // Google Fonts stylesheet is loaded from fonts.googleapis.com
+  styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+  // Google Fonts .woff2 files come from fonts.gstatic.com
+  fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+  imgSrc: ["'self'", 'data:', 'blob:', 'https://api.qrserver.com'],
   connectSrc: ["'self'"],
   objectSrc: ["'none'"],
   frameAncestors: ["'none'"],
@@ -17,9 +17,11 @@ const cspDirectives = {
   formAction: ["'self'"],
 };
 
-// Only force HTTPS upgrade in production, where nginx terminates TLS.
-// In dev (plain HTTP) this directive breaks every subresource.
-if (isProd) {
+// Only force HTTPS upgrade when there's actually TLS in front of us.
+// Gating on NODE_ENV=production is wrong: the app can run in "production"
+// mode behind plain HTTP nginx (e.g. on a LAN), and upgradeInsecureRequests
+// would rewrite every subresource to https:// and break the page.
+if (config.tlsEnabled) {
   cspDirectives.upgradeInsecureRequests = [];
 }
 
@@ -29,11 +31,9 @@ module.exports = helmet({
     directives: cspDirectives,
   },
   crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: false, // browser warns when origin is untrusted (HTTP)
+  crossOriginOpenerPolicy: false,
   referrerPolicy: { policy: 'no-referrer' },
-  // HSTS only makes sense over HTTPS. Sending it over HTTP is ignored by
-  // spec-compliant browsers anyway, but skipping it avoids confusion.
-  hsts: isProd
+  hsts: config.tlsEnabled
     ? { maxAge: 31536000, includeSubDomains: true, preload: false }
     : false,
 });

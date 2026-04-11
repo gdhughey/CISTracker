@@ -19,6 +19,10 @@ const config = {
   env: process.env.NODE_ENV || 'development',
   port: int(process.env.PORT, 3000),
   trustProxy: bool(process.env.TRUST_PROXY, true),
+  // Are we actually behind TLS? Controls HSTS + upgradeInsecureRequests.
+  // Must stay false until nginx has a real cert — otherwise every
+  // subresource (CSS/JS/images) gets force-upgraded to https and fails.
+  tlsEnabled: bool(process.env.TLS_ENABLED, false),
 
   session: {
     secret: required('SESSION_SECRET'),
