@@ -5,6 +5,11 @@ const config = require('../config');
 const cspDirectives = {
   defaultSrc: ["'self'"],
   scriptSrc: ["'self'"],
+  // The ported UI uses inline onclick= attributes on every button. Helmet's
+  // default blocks those via script-src-attr 'none'. 'unsafe-inline' on the
+  // attribute channel is the least-bad option until we refactor to
+  // addEventListener everywhere — it still blocks injected <script> tags.
+  scriptSrcAttr: ["'unsafe-inline'"],
   // Google Fonts stylesheet is loaded from fonts.googleapis.com
   styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
   // Google Fonts .woff2 files come from fonts.gstatic.com
