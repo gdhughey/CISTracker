@@ -44,7 +44,7 @@ info()  { echo -e "  ${DIM}$*${NC}"; }
 banner() {
   echo
   echo -e "${BOLD}${BLUE}┌────────────────────────────────────────────────┐${NC}"
-  echo -e "${BOLD}${BLUE}│${NC}  ${BOLD}CIS Equipment Tracker Installer${NC}                ${BOLD}${BLUE}│${NC}"
+  echo -e "${BOLD}${BLUE}│${NC}  ${BOLD}CIS Tracker Installer${NC}                ${BOLD}${BLUE}│${NC}"
   echo -e "${BOLD}${BLUE}│${NC}  ${DIM}Inventory & checkout tracker${NC}                  ${BOLD}${BLUE}│${NC}"
   echo -e "${BOLD}${BLUE}└────────────────────────────────────────────────┘${NC}"
   echo
@@ -282,7 +282,7 @@ fi
 
 cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]
-Description=CIS Equipment Tracker
+Description=CIS Tracker
 Documentation=https://github.com/gdhughey/cyberlab-onprem
 After=network.target $OLLAMA_DEP
 Wants=network.target $OLLAMA_DEP
