@@ -52,11 +52,12 @@ const config = {
   },
 
   vision: {
+    // 100% local. Ollama only, no cloud fallback — CyberLab classrooms
+    // may not have outbound internet.
     ollamaEnabled: bool(process.env.OLLAMA_ENABLED, true),
     ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
     ollamaModel: process.env.OLLAMA_MODEL || 'qwen2.5vl:7b',
-    ollamaTimeoutMs: int(process.env.OLLAMA_TIMEOUT_MS, 60000),
-    anthropicKey: process.env.ANTHROPIC_API_KEY || '',
+    ollamaTimeoutMs: int(process.env.OLLAMA_TIMEOUT_MS, 180000),
   },
 
   smtp: {

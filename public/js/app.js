@@ -11,6 +11,7 @@ let usr = '';           // selected checkout user (name string)
 let imageFile = null;   // File chosen for scan
 let aiSource = false;   // whether current verify card came from AI
 let cacheLog = [];      // last fetched activity log
+let cacheUsers = [];    // last fetched admin user list (for search filter)
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
@@ -155,7 +156,7 @@ async function doScan() {
   if (!usr) { toast('Select who is checking out!', 'yellow'); return; }
   $('scanSpin').classList.remove('hidden');
   $('scanbtn').disabled = true;
-  $('scanMsg').textContent = 'Analyzing...';
+  $('scanMsg').textContent = 'Analyzing (local AI — can take 30-120s on the test VM)...';
   try {
     const fd = new FormData();
     fd.append('image', imageFile);
@@ -596,58 +597,81 @@ window.swAdmin = swAdmin;
 async function loadAdminUsers() {
   const ul = $('adminUL');
   ul.innerHTML = '<div class="es"><div class="et">Loading...</div></div>';
+  const search = $('userSearch');
+  if (search) search.value = '';
   try {
     const { users } = await api('/api/admin/users');
-    if (!users.length) {
-      ul.innerHTML = '<div class="es"><div class="et">No users.</div></div>';
-      return;
-    }
-    ul.innerHTML = '';
-    users.forEach((u) => {
-      const row = document.createElement('div');
-      row.className = 'user-row';
-      row.addEventListener('click', () => showUserDetail(u.id));
-
-      const main = document.createElement('div');
-      main.className = 'user-main';
-      const nm = document.createElement('div');
-      nm.className = 'user-name';
-      nm.textContent = u.username;
-      const em = document.createElement('div');
-      em.className = 'user-email';
-      em.textContent = u.email || '';
-      main.appendChild(nm);
-      main.appendChild(em);
-
-      const meta = document.createElement('div');
-      meta.className = 'user-meta';
-      if (u.role === 'admin') {
-        const b = document.createElement('span');
-        b.className = 'user-badge admin';
-        b.textContent = 'ADMIN';
-        meta.appendChild(b);
-      }
-      if (u.mfa_enabled) {
-        const b = document.createElement('span');
-        b.className = 'user-badge mfa';
-        b.textContent = 'MFA';
-        meta.appendChild(b);
-      }
-      if (u.locked_until && new Date(u.locked_until) > new Date()) {
-        const b = document.createElement('span');
-        b.className = 'user-badge locked';
-        b.textContent = 'LOCKED';
-        meta.appendChild(b);
-      }
-
-      row.appendChild(main);
-      row.appendChild(meta);
-      ul.appendChild(row);
-    });
+    cacheUsers = users || [];
+    renderAdminUsers(cacheUsers);
   } catch (e) {
     ul.innerHTML = `<div class="es"><div class="et">${esc(e.message)}</div></div>`;
   }
 }
+
+function renderAdminUsers(users) {
+  const ul = $('adminUL');
+  if (!users.length) {
+    ul.innerHTML = '<div class="es"><div class="et">No matching users.</div></div>';
+    return;
+  }
+  ul.innerHTML = '';
+  users.forEach((u) => {
+    const row = document.createElement('div');
+    row.className = 'user-row';
+    row.addEventListener('click', () => showUserDetail(u.id));
+
+    const main = document.createElement('div');
+    main.className = 'user-main';
+    const nm = document.createElement('div');
+    nm.className = 'user-name';
+    nm.textContent = u.username;
+    const em = document.createElement('div');
+    em.className = 'user-email';
+    em.textContent = u.email || '';
+    main.appendChild(nm);
+    main.appendChild(em);
+
+    const meta = document.createElement('div');
+    meta.className = 'user-meta';
+    if (u.role === 'admin') {
+      const b = document.createElement('span');
+      b.className = 'user-badge admin';
+      b.textContent = 'ADMIN';
+      meta.appendChild(b);
+    }
+    if (u.mfa_enabled) {
+      const b = document.createElement('span');
+      b.className = 'user-badge mfa';
+      b.textContent = 'MFA';
+      meta.appendChild(b);
+    }
+    if (u.locked_until && new Date(u.locked_until) > new Date()) {
+      const b = document.createElement('span');
+      b.className = 'user-badge locked';
+      b.textContent = 'LOCKED';
+      meta.appendChild(b);
+    }
+
+    row.appendChild(main);
+    row.appendChild(meta);
+    ul.appendChild(row);
+  });
+}
+
+function filterUsers() {
+  const q = ($('userSearch').value || '').trim().toLowerCase();
+  if (!q) {
+    renderAdminUsers(cacheUsers);
+    return;
+  }
+  const filtered = cacheUsers.filter((u) => {
+    const name = (u.username || '').toLowerCase();
+    const email = (u.email || '').toLowerCase();
+    return name.includes(q) || email.includes(q);
+  });
+  renderAdminUsers(filtered);
+}
+window.filterUsers = filterUsers;
 
 async function adminCreateUser() {
   const username = $('nuName').value.trim();
