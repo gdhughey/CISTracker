@@ -200,7 +200,6 @@
           <div class="fg"><label class="fl">Email</label><input id="nuEmail" type="email" class="fi" placeholder="alice@example.com"></div>
         </div>
         <div class="fr">
-          <div class="fg"><label class="fl">Temp password</label><input id="nuPass" type="text" class="fi" placeholder="min 10 chars"></div>
           <div class="fg"><label class="fl">Role</label>
             <select id="nuRole" class="fi">
               <option value="user">User</option>
@@ -210,6 +209,10 @@
         </div>
         <button class="btn bp bfull" onclick="adminCreateUser()">Create User</button>
         <div id="nuErr" class="ov-err"></div>
+        <div id="nuTempPw" class="hidden" style="margin-top:10px;padding:10px;background:var(--panel2);border:1px solid var(--accent);border-radius:7px;text-align:center;">
+          <div style="font-size:.7rem;color:var(--muted);margin-bottom:4px">TEMP PASSWORD (also emailed)</div>
+          <div id="nuTempPwVal" class="mono accent bold selectable" style="font-size:1.3rem;letter-spacing:.15em"></div>
+        </div>
       </div>
 
       <div class="card">

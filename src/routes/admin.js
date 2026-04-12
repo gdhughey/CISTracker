@@ -1,12 +1,23 @@
 'use strict';
+const crypto = require('crypto');
 const express = require('express');
 const { z } = require('zod');
 const userService = require('../services/userService');
 const equipmentService = require('../services/equipmentService');
 const auditService = require('../services/auditService');
+const emailService = require('../services/emailService');
 const config = require('../config');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+
+function genTempPassword(len = 7) {
+  // Alphanumeric, no confusing chars (0/O, 1/l/I)
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(len);
+  let pw = '';
+  for (let i = 0; i < len; i++) pw += chars[bytes[i] % chars.length];
+  return pw;
+}
 
 const router = express.Router();
 
@@ -15,13 +26,13 @@ router.use(requireAuth, requireRole('admin'));
 const createUserSchema = z.object({
   username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/),
   email: z.string().email(),
-  password: z.string().min(config.auth.passwordMinLength),
+  password: z.string().optional(), // auto-generated if omitted
   role: z.enum(['admin', 'user']).default('user'),
 });
 
 const updateUserSchema = z.object({
   role: z.enum(['admin', 'user']).optional(),
-  reset_password: z.string().min(config.auth.passwordMinLength).optional(),
+  reset_password: z.boolean().optional(), // true = auto-gen new temp password
   unlock: z.boolean().optional(),
 });
 
@@ -43,9 +54,12 @@ router.get('/users/:id(\\d+)', (req, res) => {
 router.post('/users', validate(createUserSchema), async (req, res) => {
   if (userService.getByUsername(req.body.username)) return res.status(409).json({ error: 'Username taken' });
   if (userService.getByEmail(req.body.email)) return res.status(409).json({ error: 'Email already registered' });
-  const user = await userService.createUser({ ...req.body, mustChangePw: 1 });
+  const tempPw = genTempPassword(7);
+  const user = await userService.createUser({ ...req.body, password: tempPw, mustChangePw: 1 });
   req.audit('admin_create_user', req.body.username, { role: req.body.role });
-  res.status(201).json({ user: userService.pickPublic(user) });
+  // Email the student their temp password
+  emailService.sendNewAccount(req.body.email, req.body.username, tempPw).catch(() => {});
+  res.status(201).json({ user: userService.pickPublic(user), tempPassword: tempPw });
 });
 
 router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
@@ -57,14 +71,21 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     req.audit('admin_change_role', user.username, { newRole: req.body.role });
   }
   if (req.body.reset_password) {
-    await userService.setPassword(id, req.body.reset_password);
+    const resetPw = genTempPassword(7);
+    await userService.setPassword(id, resetPw);
+    userService.forcePwChange(id);
     req.audit('admin_reset_password', user.username);
+    // Email the user their new temp password
+    emailService.sendPasswordReset(user.email, user.username, resetPw).catch(() => {});
+    res.locals.tempPassword = resetPw;
   }
   if (req.body.unlock) {
     userService.clearFailedLogins(id);
     req.audit('admin_unlock_user', user.username);
   }
-  res.json({ user: userService.pickPublic(userService.getById(id)) });
+  const result = { user: userService.pickPublic(userService.getById(id)) };
+  if (res.locals.tempPassword) result.tempPassword = res.locals.tempPassword;
+  res.json(result);
 });
 
 router.delete('/users/:id(\\d+)', (req, res) => {

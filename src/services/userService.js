@@ -76,6 +76,10 @@ async function setPassword(userId, newPassword) {
   `).run(hash, userId);
 }
 
+function forcePwChange(userId) {
+  db.prepare("UPDATE users SET must_change_pw = 1, updated_at = datetime('now') WHERE id = ?").run(userId);
+}
+
 function setMfa(userId, secret, enabled) {
   db.prepare(`
     UPDATE users SET mfa_secret = ?, mfa_enabled = ?, updated_at = datetime('now')
@@ -127,6 +131,7 @@ module.exports = {
   recordFailedLogin,
   clearFailedLogins,
   setPassword,
+  forcePwChange,
   setMfa,
   setRecoveryToken,
   findByRecoveryToken,

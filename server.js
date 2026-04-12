@@ -58,6 +58,8 @@ app.use(errorHandler);
 const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`CyberLab on-prem listening on http://0.0.0.0:${config.port} (env=${config.env})`);
+  // Start overdue-reminder cron job
+  require('./src/services/reminderService').start();
 });
 
 function shutdown(signal) {

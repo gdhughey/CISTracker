@@ -226,12 +226,16 @@ OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=$OLLAMA_MODEL
 OLLAMA_TIMEOUT_MS=180000
 
-SMTP_HOST=
+# Gmail SMTP — use an App Password, not your regular password.
+# 1. Enable 2FA on the Google account: myaccount.google.com/security
+# 2. Create an App Password: myaccount.google.com/apppasswords
+# 3. Paste the 16-char app password below (no spaces).
+SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=
 SMTP_PASS=
-SMTP_FROM=cyberlab@example.com
+SMTP_FROM=
 
 REMINDER_DAYS=3
 ALERT_DAYS=5

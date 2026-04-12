@@ -684,22 +684,25 @@ window.filterUsers = filterUsers;
 async function adminCreateUser() {
   const username = $('nuName').value.trim();
   const email = $('nuEmail').value.trim();
-  const password = $('nuPass').value;
   const role = $('nuRole').value;
-  if (!username || !email || !password) {
-    $('nuErr').textContent = 'All fields required';
+  if (!username || !email) {
+    $('nuErr').textContent = 'Username and email required';
     return;
   }
   try {
-    await api('/api/admin/users', {
+    const res = await api('/api/admin/users', {
       method: 'POST',
-      body: JSON.stringify({ username, email, password, role }),
+      body: JSON.stringify({ username, email, role }),
     });
     $('nuName').value = '';
     $('nuEmail').value = '';
-    $('nuPass').value = '';
     $('nuErr').textContent = '';
-    toast('User created', 'green');
+    // Show the auto-generated temp password
+    if (res.tempPassword) {
+      $('nuTempPwVal').textContent = res.tempPassword;
+      $('nuTempPw').classList.remove('hidden');
+    }
+    toast('User created — temp password shown below (also emailed)', 'green');
     loadAdminUsers();
   } catch (err) {
     $('nuErr').textContent = err.message || 'Failed';
@@ -822,14 +825,16 @@ function hideUserDetail() { $('userDetail').classList.add('hidden'); }
 window.hideUserDetail = hideUserDetail;
 
 async function adminResetPw(id, username) {
-  const np = prompt('New temporary password for ' + username + ' (min 10 chars, upper/lower/digit/special):');
-  if (!np) return;
+  if (!confirm('Reset password for ' + username + '? A new temp password will be generated and emailed.')) return;
   try {
-    await api('/api/admin/users/' + id, {
+    const res = await api('/api/admin/users/' + id, {
       method: 'PUT',
-      body: JSON.stringify({ reset_password: np }),
+      body: JSON.stringify({ reset_password: true }),
     });
-    toast('Password reset', 'green');
+    const msg = res.tempPassword
+      ? `Password reset for ${username}. Temp: ${res.tempPassword} (also emailed)`
+      : `Password reset for ${username}`;
+    toast(msg, 'green');
   } catch (err) {
     toast(err.message, 'red');
   }
