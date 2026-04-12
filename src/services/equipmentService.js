@@ -144,7 +144,11 @@ function getCheckoutsForUser(userId) {
   `).all(userId);
 }
 
+function clearLog() {
+  db.prepare('DELETE FROM checkout_log').run();
+}
+
 module.exports = {
   listAll, getById, create, update, remove,
-  checkout, checkin, getLog, getOverdue, getCheckoutsForUser,
+  checkout, checkin, getLog, clearLog, getOverdue, getCheckoutsForUser,
 };

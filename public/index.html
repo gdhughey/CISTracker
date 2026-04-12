@@ -118,7 +118,10 @@
     <div class="card">
       <div class="ctitle">📋 Activity Log</div>
       <div id="logW"><div class="es"><div class="ei">📋</div><div class="et">Tap Refresh to load</div></div></div>
-      <button class="btn bo bsm bfull mt10" onclick="loadLog()">🔄 Refresh</button>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn bo bsm" style="flex:1" onclick="loadLog()">🔄 Refresh</button>
+        <button class="btn bsm" id="clearLogBtn" style="flex:1;background:var(--red);display:none" onclick="clearLog()">🗑 Clear Log</button>
+      </div>
     </div>
   </div>
 

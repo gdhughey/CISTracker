@@ -283,9 +283,17 @@ function renderCI(items) {
     if (e.type) bits.push(e.type);
     if (e.serial_number) bits.push('S/N: ' + e.serial_number);
     if (e.barcode) bits.push('BC: ' + e.barcode);
-    if (e.checked_out_username) bits.push(e.checked_out_username);
     if (e.checked_out_at) bits.push(new Date(e.checked_out_at).toLocaleString());
     meta.textContent = bits.join(' · ');
+    // Show who has it checked out (useful for admins checking in others' items)
+    if (e.checked_out_username) {
+      const userTag = document.createElement('span');
+      userTag.className = 'badge bwarn';
+      userTag.style.marginLeft = '6px';
+      userTag.textContent = e.checked_out_username;
+      name.appendChild(document.createTextNode(' '));
+      name.appendChild(userTag);
+    }
     info.appendChild(name);
     info.appendChild(meta);
     const btn = document.createElement('button');
@@ -313,7 +321,22 @@ async function doCI(id, name) {
 window.doCI = doCI;
 
 // ── Activity log ──────────────────────────────────────────────
+async function clearLog() {
+  if (!confirm('Clear the entire activity log? This cannot be undone.')) return;
+  try {
+    await api('/api/equipment/log', { method: 'DELETE' });
+    toast('Log cleared', 'green');
+    loadLog();
+  } catch (e) {
+    toast(e.message, 'red');
+  }
+}
+window.clearLog = clearLog;
+
 async function loadLog() {
+  // Show clear button for admins
+  const clb = $('clearLogBtn');
+  if (clb) clb.style.display = (ME && ME.role === 'admin') ? '' : 'none';
   const w = $('logW');
   w.innerHTML = '<div class="sw"><div class="sp"></div><span>Fetching...</span></div>';
   try {

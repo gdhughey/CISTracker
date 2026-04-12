@@ -34,11 +34,16 @@ router.get('/', (req, res) => {
   res.json({ items: equipmentService.listAll({ status, checkedOutBy: onlyUserId }) });
 });
 
-// Full activity log is admin-only. Non-admins see only their own history
-// via the Check In tab (client filters by ME.id on /api/equipment).
+// Full activity log is admin-only.
 router.get('/log', requireRole('admin'), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   res.json({ entries: equipmentService.getLog({ limit }) });
+});
+
+router.delete('/log', requireRole('admin'), (req, res) => {
+  equipmentService.clearLog();
+  req.audit('clear_log', null);
+  res.json({ ok: true });
 });
 
 router.get('/:id(\\d+)', (req, res) => {
