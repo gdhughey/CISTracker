@@ -894,18 +894,21 @@ async function loadAudit() {
       return;
     }
     el.innerHTML = '';
+    let html = '<div class="ls"><table><thead><tr><th>Action</th><th>User</th><th>Target</th><th>When</th></tr></thead><tbody>';
     entries.forEach((e) => {
-      const row = document.createElement('div');
-      row.className = 'audit-row';
-      const left = document.createElement('div');
-      left.innerHTML = `<strong class="accent">${esc(e.action)}</strong> · ${esc(e.target || '')}`;
-      const right = document.createElement('div');
-      right.className = 'audit-when';
-      right.textContent = new Date(e.created_at).toLocaleString();
-      row.appendChild(left);
-      row.appendChild(right);
-      el.appendChild(row);
+      const action = esc(e.action || '');
+      const user = esc(e.username || '');
+      const target = esc(e.target || '—');
+      const when = esc(new Date(e.created_at).toLocaleString());
+      html += `<tr>
+        <td><strong class="accent">${action}</strong></td>
+        <td class="bold">${user}</td>
+        <td class="mono small">${target}</td>
+        <td class="mono small" style="color:var(--muted)">${when}</td>
+      </tr>`;
     });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
   } catch (err) {
     el.innerHTML = `<div class="es"><div class="et">${esc(err.message)}</div></div>`;
   }
