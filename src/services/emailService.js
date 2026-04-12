@@ -37,32 +37,32 @@ async function send({ to, subject, text, html }) {
 async function sendPasswordReset(to, username, tempPassword) {
   return send({
     to,
-    subject: 'CyberLab: Your password has been reset',
+    subject: 'CIS Lab: Your password has been reset',
     html: `
       <h2>Password Reset</h2>
       <p>Hi <strong>${username}</strong>,</p>
-      <p>An admin has reset your CyberLab account password.</p>
+      <p>An admin has reset your CIS Lab account password.</p>
       <p>Your temporary password is: <code style="font-size:16px;background:#1e293b;color:#38bdf8;padding:4px 10px;border-radius:4px">${tempPassword}</code></p>
       <p>You will be required to change this password on your next login.</p>
-      <p style="color:#888;font-size:12px">&mdash; CyberLab Equipment Tracker</p>
+      <p style="color:#888;font-size:12px">&mdash; CIS Equipment Tracker</p>
     `,
-    text: `Hi ${username}, your CyberLab password has been reset. Temporary password: ${tempPassword}  — You must change it on next login.`,
+    text: `Hi ${username}, your CIS Lab password has been reset. Temporary password: ${tempPassword}  — You must change it on next login.`,
   });
 }
 
 async function sendNewAccount(to, username, tempPassword) {
   return send({
     to,
-    subject: 'CyberLab: Your account has been created',
+    subject: 'CIS Lab: Your account has been created',
     html: `
-      <h2>Welcome to CyberLab</h2>
+      <h2>Welcome to CIS Lab</h2>
       <p>Hi <strong>${username}</strong>,</p>
-      <p>An account has been created for you on the CyberLab Equipment Tracker.</p>
+      <p>An account has been created for you on the CIS Equipment Tracker.</p>
       <p>Your temporary password is: <code style="font-size:16px;background:#1e293b;color:#38bdf8;padding:4px 10px;border-radius:4px">${tempPassword}</code></p>
       <p>You will be required to change this password on your first login.</p>
-      <p style="color:#888;font-size:12px">&mdash; CyberLab Equipment Tracker</p>
+      <p style="color:#888;font-size:12px">&mdash; CIS Equipment Tracker</p>
     `,
-    text: `Hi ${username}, a CyberLab account was created for you. Temporary password: ${tempPassword}  — You must change it on first login.`,
+    text: `Hi ${username}, a CIS Lab account was created for you. Temporary password: ${tempPassword}  — You must change it on first login.`,
   });
 }
 
@@ -72,16 +72,16 @@ async function sendOverdueReminder(to, username, items) {
     .join('');
   return send({
     to,
-    subject: `CyberLab: ${items.length} item(s) overdue`,
+    subject: `CIS Lab: ${items.length} item(s) overdue`,
     html: `
       <h2>Equipment Overdue Reminder</h2>
       <p>Hi <strong>${username}</strong>,</p>
       <p>The following equipment needs to be returned:</p>
       <ul>${itemList}</ul>
-      <p>Please return these items to the CyberLab as soon as possible.</p>
-      <p style="color:#888;font-size:12px">&mdash; CyberLab Equipment Tracker</p>
+      <p>Please return these items to the CIS Lab as soon as possible.</p>
+      <p style="color:#888;font-size:12px">&mdash; CIS Equipment Tracker</p>
     `,
-    text: `Hi ${username}, you have ${items.length} overdue item(s). Please return them to the CyberLab.`,
+    text: `Hi ${username}, you have ${items.length} overdue item(s). Please return them to the CIS Lab.`,
   });
 }
 
@@ -91,7 +91,7 @@ async function sendAdminAlert(to, overdueItems) {
     .join('');
   return send({
     to,
-    subject: `CyberLab Alert: ${overdueItems.length} item(s) overdue 5+ days`,
+    subject: `CIS Lab Alert: ${overdueItems.length} item(s) overdue 5+ days`,
     html: `
       <h2>Overdue Equipment Alert</h2>
       <p>The following items have been checked out for <strong>5+ days</strong>:</p>
@@ -99,9 +99,9 @@ async function sendAdminAlert(to, overdueItems) {
         <thead><tr style="background:#1e293b;color:#e2e8f0"><th style="padding:6px 8px;border:1px solid #334155">Equipment</th><th style="padding:6px 8px;border:1px solid #334155">Student</th><th style="padding:6px 8px;border:1px solid #334155">Overdue</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p style="color:#888;font-size:12px">&mdash; CyberLab Equipment Tracker</p>
+      <p style="color:#888;font-size:12px">&mdash; CIS Equipment Tracker</p>
     `,
-    text: `CyberLab: ${overdueItems.length} item(s) overdue 5+ days. Check the admin panel.`,
+    text: `CIS Lab: ${overdueItems.length} item(s) overdue 5+ days. Check the admin panel.`,
   });
 }
 
