@@ -253,7 +253,8 @@ td{padding:8px 8px;border-bottom:1px solid rgba(26,45,74,.45);vertical-align:top
 }
 
 /* ── Admin panel ── */
-.admin-wrap{max-width:720px;width:100%;padding:1.5rem 1rem;margin:0 auto;}
+.admin-wrap{max-width:720px;width:100%;padding:1.5rem 1rem;margin:0 auto;min-height:min-content;}
+#adminOv{align-items:flex-start;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .admin-head{
   display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;
   border-bottom:1px solid #1e3a5f;padding-bottom:1rem;
