@@ -772,19 +772,39 @@ async function showUserDetail(id) {
       currentCheckouts.forEach((e) => {
         const row = document.createElement('div');
         row.className = 'overdue-row';
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '8px';
         const days = e.checked_out_at
           ? Math.floor((Date.now() - new Date(e.checked_out_at).getTime()) / 86400000)
           : 0;
         if (days >= 5) row.classList.add('alert');
         else if (days >= 3) row.classList.add('warn');
+        const info = document.createElement('div');
+        info.style.flex = '1';
         const nm = document.createElement('div');
         nm.className = 'cname';
         nm.textContent = e.name;
         const meta = document.createElement('div');
         meta.className = 'overdue-days';
         meta.textContent = `${days} day${days === 1 ? '' : 's'} · ${new Date(e.checked_out_at).toLocaleDateString()}`;
-        row.appendChild(nm);
-        row.appendChild(meta);
+        info.appendChild(nm);
+        info.appendChild(meta);
+        row.appendChild(info);
+        const ciBtn = document.createElement('button');
+        ciBtn.className = 'btn bg bsm';
+        ciBtn.textContent = '📥 In';
+        ciBtn.addEventListener('click', async () => {
+          try {
+            await api(`/api/equipment/${e.id}/checkin`, {
+              method: 'POST',
+              body: JSON.stringify({ source: 'Manual' }),
+            });
+            toast(`"${e.name}" checked in`, 'green');
+            showUserDetail(user.id);
+          } catch (err) { toast(err.message, 'red'); }
+        });
+        row.appendChild(ciBtn);
         body.appendChild(row);
       });
     }
