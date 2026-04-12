@@ -894,15 +894,32 @@ async function loadAudit() {
       return;
     }
     el.innerHTML = '';
+    const badgeMap = {
+      login_success: ['LOGIN', 'bin'],
+      login_failed: ['FAIL', 'bout'],
+      logout: ['OUT', 'bwarn'],
+      checkout: ['C/O', 'bout'],
+      checkin: ['C/I', 'bin'],
+      vision_scan: ['SCAN', 'bscan'],
+      password_changed: ['PW', 'bwarn'],
+      admin_create_user: ['NEW', 'bin'],
+      admin_change_role: ['ROLE', 'bwarn'],
+      admin_reset_password: ['RESET', 'bwarn'],
+      admin_delete_user: ['DEL', 'bout'],
+      admin_unlock_user: ['UNLOCK', 'bin'],
+      equipment_create: ['ADD', 'bin'],
+      equipment_update: ['EDIT', 'bwarn'],
+      equipment_delete: ['DEL', 'bout'],
+    };
     let html = '<div class="ls"><table><thead><tr><th>Action</th><th>User</th><th>Target</th><th>When</th></tr></thead><tbody>';
     entries.forEach((e) => {
-      const action = esc(e.action || '');
+      const [label, cls] = badgeMap[e.action] || [esc(e.action), 'bwarn'];
       const user = esc(e.username || '');
       const target = esc(e.target || '—');
       const when = esc(new Date(e.created_at).toLocaleString());
       html += `<tr>
-        <td><strong class="accent">${action}</strong></td>
-        <td class="bold">${user}</td>
+        <td><span class="badge ${cls}">${label}</span></td>
+        <td class="accent bold">${user}</td>
         <td class="mono small">${target}</td>
         <td class="mono small" style="color:var(--muted)">${when}</td>
       </tr>`;
