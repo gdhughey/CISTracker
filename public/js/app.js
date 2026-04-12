@@ -55,6 +55,8 @@ function toast(msg, type) {
 
 // ── Page switching ────────────────────────────────────────────
 function swPage(p, fromPop) {
+  // Non-admins can't see the log page — bounce to checkout.
+  if (p === 'log' && (!ME || ME.role !== 'admin')) p = 'checkout';
   $('backBtn').style.display = p === 'checkout' ? 'none' : 'inline-block';
   if (!fromPop) history.pushState({ page: p }, '', location.href);
   ['checkout', 'checkin', 'log'].forEach((x) => {
@@ -69,26 +71,8 @@ window.swPage = swPage;
 
 window.addEventListener('popstate', (e) => swPage((e.state && e.state.page) || 'checkout', true));
 
-// ── Checkout: user chips ──────────────────────────────────────
-function selU(el, name) {
-  document.querySelectorAll('.chip').forEach((c) => c.classList.remove('on'));
-  el.classList.add('on');
-  usr = name;
-}
-window.selU = selU;
-
-function addU() {
-  const v = $('nuInput').value.trim();
-  if (!v) return;
-  const c = document.createElement('div');
-  c.className = 'chip';
-  c.textContent = v;
-  c.addEventListener('click', () => selU(c, v));
-  $('chips').appendChild(c);
-  $('nuInput').value = '';
-  selU(c, v);
-}
-window.addU = addU;
+// Checkouts are always recorded against the signed-in account server-side
+// (see routes/equipment.js using req.user.username), so there's no picker.
 
 // ── Checkout: entry mode ──────────────────────────────────────
 function swMode(m) {
@@ -153,7 +137,6 @@ window.clearImg = clearImg;
 // ── AI scan ───────────────────────────────────────────────────
 async function doScan() {
   if (!imageFile) { toast('No image selected!', 'yellow'); return; }
-  if (!usr) { toast('Select who is checking out!', 'yellow'); return; }
   $('scanSpin').classList.remove('hidden');
   $('scanbtn').disabled = true;
   $('scanMsg').textContent = 'Analyzing (local AI — can take 30-120s on the test VM)...';
@@ -181,7 +164,6 @@ window.doScan = doScan;
 
 // ── Manual entry ──────────────────────────────────────────────
 function prepManual() {
-  if (!usr) { toast('Select who is checking out!', 'yellow'); return; }
   const n = $('m_name').value.trim();
   if (!n) { toast('Equipment name required!', 'yellow'); return; }
   popV({
@@ -233,7 +215,7 @@ async function confirmCO() {
     type: $('v_type').value.trim(),
     serial_number: $('v_serial').value.trim(),
     barcode: $('v_barcode').value.trim(),
-    notes: [$('v_notes').value.trim(), usr ? `for: ${usr}` : ''].filter(Boolean).join(' · '),
+    notes: $('v_notes').value.trim(),
   };
   const btn = $('confbtn');
   btn.disabled = true;
@@ -268,7 +250,12 @@ async function loadCI() {
   l.innerHTML = '<div class="sw"><div class="sp"></div><span>Loading...</span></div>';
   try {
     const { items } = await api('/api/equipment?status=checked_out');
-    renderCI(items || []);
+    let list = items || [];
+    // Non-admins only see items they themselves checked out.
+    if (ME && ME.role !== 'admin') {
+      list = list.filter((e) => e.checked_out_by === ME.id);
+    }
+    renderCI(list);
   } catch (e) {
     l.innerHTML = `<div class="es"><div class="et">${esc(e.message)}</div></div>`;
   }
@@ -473,16 +460,14 @@ async function onAuthed() {
   hideLogin();
   $('curUser').textContent = ME.username;
   usr = ME.username;
-  // Seed the chips with the current user + any existing chips
-  const chips = $('chips');
-  chips.innerHTML = '';
-  const c = document.createElement('div');
-  c.className = 'chip on';
-  c.textContent = ME.username;
-  c.addEventListener('click', () => selU(c, ME.username));
-  chips.appendChild(c);
-  // Toggle admin gear entry
-  $('miAdmin').classList.toggle('on', ME.role === 'admin');
+  // Admin-only UI: gear menu entry + Log tab.
+  const isAdmin = ME.role === 'admin';
+  $('miAdmin').classList.toggle('on', isAdmin);
+  const logBtn = $('bt-log');
+  logBtn.classList.toggle('hidden', !isAdmin);
+  logBtn.style.display = isAdmin ? '' : 'none';
+  // If a non-admin had the log page active (e.g. stale history), bounce them.
+  if (!isAdmin && $('pg-log').classList.contains('on')) swPage('checkout');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -934,7 +919,6 @@ async function loadAudit() {
   $('lp').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   $('mc2').addEventListener('keydown', (e) => { if (e.key === 'Enter') doMfaLoginVerify(); });
   $('np2').addEventListener('keydown', (e) => { if (e.key === 'Enter') doForceChg(); });
-  $('nuInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addU(); });
 
   try {
     const me = await api('/api/auth/me');

@@ -1,22 +1,22 @@
 'use strict';
 const db = require('../db/connection');
 
-function listAll({ status } = {}) {
-  if (status) {
-    return db.prepare(`
-      SELECT e.*, u.username AS checked_out_username
-      FROM equipment e
-      LEFT JOIN users u ON u.id = e.checked_out_by
-      WHERE e.status = ?
-      ORDER BY e.name
-    `).all(status);
+function listAll({ status, checkedOutBy } = {}) {
+  const conds = [];
+  const params = [];
+  if (status) { conds.push('e.status = ?'); params.push(status); }
+  if (checkedOutBy !== undefined) {
+    conds.push('e.checked_out_by = ?');
+    params.push(checkedOutBy);
   }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
   return db.prepare(`
     SELECT e.*, u.username AS checked_out_username
     FROM equipment e
     LEFT JOIN users u ON u.id = e.checked_out_by
+    ${where}
     ORDER BY e.name
-  `).all();
+  `).all(...params);
 }
 
 function getById(id) {

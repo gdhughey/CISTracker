@@ -15,21 +15,34 @@ async function scanWithOllama(imageBase64) {
     const r = await fetch(`${config.vision.ollamaUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      // Note: we intentionally do NOT set format:'json' here.
+      // Combining vision inputs with Ollama's forced-JSON grammar crashes
+      // qwen2.5vl (HTTP 500). We ask for JSON in the prompt instead and
+      // extract it loosely below.
       body: JSON.stringify({
         model: config.vision.ollamaModel,
         prompt: PROMPT,
         images: [imageBase64],
         stream: false,
-        format: 'json',
       }),
       signal: controller.signal,
     });
-    if (!r.ok) throw new Error(`Ollama HTTP ${r.status}`);
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      throw new Error(`Ollama HTTP ${r.status}: ${body.slice(0, 500)}`);
+    }
     const data = await r.json();
+    const raw = String(data.response || '');
+    // Extract the first {...} block — models sometimes wrap JSON in prose
+    // or markdown fences despite being asked not to.
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) {
+      throw new Error(`Ollama returned non-JSON response: ${raw.slice(0, 200)}`);
+    }
     try {
-      return JSON.parse(data.response);
-    } catch {
-      throw new Error('Ollama returned non-JSON response');
+      return JSON.parse(match[0]);
+    } catch (e) {
+      throw new Error(`Ollama JSON parse failed: ${e.message} | raw: ${match[0].slice(0, 200)}`);
     }
   } finally {
     clearTimeout(timeout);

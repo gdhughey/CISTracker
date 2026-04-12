@@ -21,16 +21,34 @@ const router = express.Router();
 
 router.use(requireAuth, scanLimiter);
 
-router.post('/', upload.single('image'), async (req, res, next) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-    const base64 = req.file.buffer.toString('base64');
-    const result = await visionService.scanImage(base64, req.file.mimetype);
-    req.audit('vision_scan', null, { source: result.source });
-    res.json({ result });
-  } catch (err) {
-    next(err);
+router.post(
+  '/',
+  (req, res, next) => {
+    console.log('[scan] hit route, content-type:', req.headers['content-type']);
+    upload.single('image')(req, res, (err) => {
+      if (err) {
+        console.error('[scan] multer error:', err.message);
+        return res.status(400).json({ error: err.message });
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      console.log('[scan] multer ok, file?', !!req.file, 'size:', req.file && req.file.size);
+      if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+      console.log('[scan] calling ollama at', config.vision.ollamaUrl, 'model', config.vision.ollamaModel);
+      const base64 = req.file.buffer.toString('base64');
+      const result = await visionService.scanImage(base64, req.file.mimetype);
+      console.log('[scan] ollama returned:', JSON.stringify(result).slice(0, 200));
+      req.audit('vision_scan', null, { source: result.source });
+      res.json({ result });
+    } catch (err) {
+      console.error('[scan] FAILED:', err.message);
+      console.error(err.stack);
+      next(err);
+    }
   }
-});
+);
 
 module.exports = router;

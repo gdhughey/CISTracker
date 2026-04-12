@@ -31,8 +31,16 @@ app.use(loadSession);
 app.use(audit);
 app.use(issueToken);
 
-// Static frontend
-app.use(express.static(path.join(__dirname, 'public')));
+// Static frontend.
+// No-store on HTML/JS so users never run stale code after a deploy.
+// Other static assets (css, fonts, images) fall through to defaults.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (/\.(html|js)$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  },
+}));
 
 // Healthcheck (no auth, no rate limit)
 app.get('/healthz', (_req, res) => res.json({ ok: true, version: '0.1.0' }));

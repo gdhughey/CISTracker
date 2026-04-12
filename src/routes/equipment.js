@@ -28,10 +28,15 @@ router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const status = req.query.status;
-  res.json({ items: equipmentService.listAll({ status }) });
+  // Non-admins only see items they themselves checked out.
+  // Admins see everything.
+  const onlyUserId = req.user.role === 'admin' ? undefined : req.user.id;
+  res.json({ items: equipmentService.listAll({ status, checkedOutBy: onlyUserId }) });
 });
 
-router.get('/log', (req, res) => {
+// Full activity log is admin-only. Non-admins see only their own history
+// via the Check In tab (client filters by ME.id on /api/equipment).
+router.get('/log', requireRole('admin'), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   res.json({ entries: equipmentService.getLog({ limit }) });
 });
