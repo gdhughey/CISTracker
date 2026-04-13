@@ -867,9 +867,9 @@ async function adminToggleRole(id, currentRole) {
       method: 'PUT',
       body: JSON.stringify({ role: newRole }),
     });
-    toast('Role updated', 'green');
-    showUserDetail(id);
-    loadAdminUsers();
+    toast('Role → ' + newRole, 'green');
+    await loadAdminUsers();
+    await showUserDetail(id);
   } catch (err) {
     toast(err.message, 'red');
   }
@@ -882,7 +882,7 @@ async function adminUnlock(id) {
       body: JSON.stringify({ unlock: true }),
     });
     toast('Unlocked', 'green');
-    showUserDetail(id);
+    await showUserDetail(id);
   } catch (err) {
     toast(err.message, 'red');
   }
@@ -893,7 +893,7 @@ async function adminDeleteUser(id) {
     await api('/api/admin/users/' + id, { method: 'DELETE' });
     toast('User deleted', 'green');
     hideUserDetail();
-    loadAdminUsers();
+    await loadAdminUsers();
   } catch (err) {
     toast(err.message, 'red');
   }
