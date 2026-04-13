@@ -9,6 +9,7 @@ const emailService = require('../services/emailService');
 const config = require('../config');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const sessionService = require('../services/sessionService');
 
 function genTempPassword(len = 7) {
   // Alphanumeric, no confusing chars (0/O, 1/l/I)
@@ -69,12 +70,16 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
   if (req.body.role) {
     userService.updateRole(id, req.body.role);
     req.audit('admin_change_role', user.username, { newRole: req.body.role });
+    // Kill their sessions so the role change takes effect immediately
+    sessionService.destroyAllForUser(id);
   }
   if (req.body.reset_password) {
     const resetPw = genTempPassword(7);
     await userService.setPassword(id, resetPw);
     userService.forcePwChange(id);
     req.audit('admin_reset_password', user.username);
+    // Kill sessions so they must log in with the new password
+    sessionService.destroyAllForUser(id);
     // Email the user their new temp password
     emailService.sendPasswordReset(user.email, user.username, resetPw).catch(() => {});
     res.locals.tempPassword = resetPw;
@@ -93,6 +98,8 @@ router.delete('/users/:id(\\d+)', (req, res) => {
   if (id === req.user.id) return res.status(400).json({ error: "You can't delete yourself" });
   const user = userService.getById(id);
   if (!user) return res.status(404).json({ error: 'Not found' });
+  // Kill their sessions first so they're immediately logged out
+  sessionService.destroyAllForUser(id);
   userService.deleteUser(id);
   req.audit('admin_delete_user', user.username);
   res.json({ ok: true });
