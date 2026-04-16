@@ -8,7 +8,7 @@
 
 let ME = null;          // current signed-in user
 let usr = '';           // selected checkout user (name string)
-let imageFile = null;   // File chosen for scan
+let imageFiles = [];    // Files chosen for scan (up to 4)
 let aiSource = false;   // whether current verify card came from AI
 let cacheLog = [];      // last fetched activity log
 let cacheUsers = [];    // last fetched admin user list (for search filter)
@@ -85,6 +85,8 @@ function swMode(m) {
 window.swMode = swMode;
 
 // ── Image picking + compression ───────────────────────────────
+const MAX_IMAGES = 4;
+
 function compressImage(file, cb) {
   const r = new FileReader();
   r.onload = (ev) => {
@@ -106,25 +108,73 @@ function compressImage(file, cb) {
   r.readAsDataURL(file);
 }
 
-function handleFile(e) {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
-  compressImage(file, (blob, dataUrl) => {
-    imageFile = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
-    const grid = $('imgGrid');
-    grid.innerHTML = '';
+function renderImageGrid() {
+  const grid = $('imgGrid');
+  grid.innerHTML = '';
+  imageFiles.forEach((entry, idx) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'img-thumb';
     const img = document.createElement('img');
-    img.src = dataUrl;
-    grid.appendChild(img);
-    $('imgPrev').classList.remove('hidden');
-    $('dz').classList.add('hidden');
-    $('vcard').classList.add('hidden');
+    img.src = entry.dataUrl;
+    const rm = document.createElement('button');
+    rm.className = 'img-rm';
+    rm.textContent = '✕';
+    rm.addEventListener('click', (e) => {
+      e.stopPropagation();
+      imageFiles.splice(idx, 1);
+      if (!imageFiles.length) { clearImg(); return; }
+      renderImageGrid();
+    });
+    wrap.appendChild(img);
+    wrap.appendChild(rm);
+    grid.appendChild(wrap);
+  });
+  const addBtn = $('addMoreBtn');
+  if (addBtn) addBtn.style.display = imageFiles.length >= MAX_IMAGES ? 'none' : '';
+}
+
+function addFiles(files) {
+  const remaining = MAX_IMAGES - imageFiles.length;
+  const toAdd = Array.from(files).slice(0, remaining);
+  if (!toAdd.length) { toast(`Max ${MAX_IMAGES} images`, 'yellow'); return; }
+  let processed = 0;
+  toAdd.forEach((file) => {
+    compressImage(file, (blob, dataUrl) => {
+      imageFiles.push({
+        file: new File([blob], `scan${imageFiles.length}.jpg`, { type: 'image/jpeg' }),
+        dataUrl,
+      });
+      processed++;
+      if (processed === toAdd.length) {
+        renderImageGrid();
+        $('imgPrev').classList.remove('hidden');
+        $('dz').classList.add('hidden');
+        $('vcard').classList.add('hidden');
+      }
+    });
   });
 }
-window.handleFile = handleFile;
+
+function handleFiles(e) {
+  const files = e.target.files;
+  if (!files || !files.length) return;
+  addFiles(files);
+}
+window.handleFiles = handleFiles;
+
+function addMore() {
+  if (imageFiles.length >= MAX_IMAGES) { toast(`Max ${MAX_IMAGES} images`, 'yellow'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.multiple = true;
+  inp.addEventListener('change', (e) => addFiles(e.target.files));
+  inp.click();
+}
+window.addMore = addMore;
 
 function clearImg() {
-  imageFile = null;
+  imageFiles = [];
   $('imgGrid').innerHTML = '';
   $('imgPrev').classList.add('hidden');
   $('dz').classList.remove('hidden');
@@ -138,14 +188,15 @@ window.clearImg = clearImg;
 let _scanning = false;
 async function doScan() {
   if (_scanning) { toast('Scan already in progress — please wait', 'yellow'); return; }
-  if (!imageFile) { toast('No image selected!', 'yellow'); return; }
+  if (!imageFiles.length) { toast('No images selected!', 'yellow'); return; }
   _scanning = true;
   $('scanSpin').classList.remove('hidden');
   $('scanbtn').disabled = true;
-  $('scanMsg').textContent = 'Analyzing (local AI — can take 30-120s on CPU)...';
+  const n = imageFiles.length;
+  $('scanMsg').textContent = `Analyzing ${n} image${n > 1 ? 's' : ''} (local AI — can take 30-120s on CPU)...`;
   try {
     const fd = new FormData();
-    fd.append('image', imageFile);
+    imageFiles.forEach((entry) => fd.append('images', entry.file));
     const res = await api('/api/scan', { method: 'POST', body: fd });
     const r = res.result || {};
     popV({

@@ -45,18 +45,19 @@
       </div>
 
       <div id="scanMode">
-        <div class="note">Snap a photo — Ollama (local) reads the name, serial number &amp; barcode.</div>
+        <div class="note">Snap 1-4 photos (front, back, label, barcode) — more angles = better results.</div>
         <div class="dz" id="dz">
-          <input type="file" accept="image/*" onchange="handleFile(event)">
+          <input type="file" accept="image/*" multiple onchange="handleFiles(event)">
           <div class="dzi">📸</div>
-          <div class="dzt">Take photo or choose from library</div>
-          <div class="dzs">JPG / PNG, up to 10 MB</div>
+          <div class="dzt">Take photos or choose from library</div>
+          <div class="dzs">Up to 4 images · JPG / PNG · 10 MB each</div>
         </div>
         <div id="imgPrev" class="hidden">
-          <div id="imgGrid"></div>
+          <div id="imgGrid" class="img-grid"></div>
           <div class="brow">
+            <button class="btn bo bsm" id="addMoreBtn" onclick="addMore()">＋ Add More</button>
             <button class="btn bp" id="scanbtn" onclick="doScan()">🤖 Scan with AI</button>
-            <button class="btn bo bsm" onclick="clearImg()">✕ Clear</button>
+            <button class="btn bo bsm" onclick="clearImg()">✕ Clear All</button>
           </div>
         </div>
         <div id="scanSpin" class="hidden">

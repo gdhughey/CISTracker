@@ -5,12 +5,16 @@ const config = require('../config');
 // We surface whatever Ollama returns — including low-confidence results —
 // so the user can correct them on the verify card.
 
-const PROMPT = `Identify this piece of equipment. Read any visible serial numbers, model numbers, or barcodes from labels. Return ONLY valid JSON, no other text:
+const PROMPT_SINGLE = `Identify this piece of equipment. Read any visible serial numbers, model numbers, or barcodes from labels. Return ONLY valid JSON, no other text:
 {"name":"<short product name>","type":"<category>","serial":"<serial if visible, else empty>","barcode":"<barcode digits if visible, else empty>","confidence":<0-1>}`;
 
-async function scanWithOllama(imageBase64) {
+const PROMPT_MULTI = `These images show the SAME piece of equipment from different angles. Combine all visible information from every image to identify it. Read any visible serial numbers, model numbers, or barcodes from labels across all images. Return ONLY valid JSON, no other text:
+{"name":"<short product name>","type":"<category>","serial":"<serial if visible, else empty>","barcode":"<barcode digits if visible, else empty>","confidence":<0-1>}`;
+
+async function callOllama(imagesBase64) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.vision.ollamaTimeoutMs);
+  const prompt = imagesBase64.length > 1 ? PROMPT_MULTI : PROMPT_SINGLE;
   try {
     const r = await fetch(`${config.vision.ollamaUrl}/api/generate`, {
       method: 'POST',
@@ -21,8 +25,8 @@ async function scanWithOllama(imageBase64) {
       // extract it loosely below.
       body: JSON.stringify({
         model: config.vision.ollamaModel,
-        prompt: PROMPT,
-        images: [imageBase64],
+        prompt,
+        images: imagesBase64,
         stream: false,
       }),
       signal: controller.signal,
@@ -49,12 +53,21 @@ async function scanWithOllama(imageBase64) {
   }
 }
 
-async function scanImage(imageBase64 /* , mimeType */) {
+// New: accepts array of base64 images
+async function scanImages(imagesBase64) {
   if (!config.vision.ollamaEnabled) {
     throw new Error('Vision scanning is disabled (OLLAMA_ENABLED=false)');
   }
-  const result = await scanWithOllama(imageBase64);
+  if (!imagesBase64 || !imagesBase64.length) {
+    throw new Error('No images provided');
+  }
+  const result = await callOllama(imagesBase64);
   return { ...result, source: 'ollama' };
 }
 
-module.exports = { scanImage };
+// Backward compat: single image
+async function scanImage(imageBase64) {
+  return scanImages([imageBase64]);
+}
+
+module.exports = { scanImage, scanImages };
