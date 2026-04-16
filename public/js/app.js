@@ -135,11 +135,14 @@ function clearImg() {
 window.clearImg = clearImg;
 
 // ── AI scan ───────────────────────────────────────────────────
+let _scanning = false;
 async function doScan() {
+  if (_scanning) { toast('Scan already in progress — please wait', 'yellow'); return; }
   if (!imageFile) { toast('No image selected!', 'yellow'); return; }
+  _scanning = true;
   $('scanSpin').classList.remove('hidden');
   $('scanbtn').disabled = true;
-  $('scanMsg').textContent = 'Analyzing (local AI — can take 30-120s on the test VM)...';
+  $('scanMsg').textContent = 'Analyzing (local AI — can take 30-120s on CPU)...';
   try {
     const fd = new FormData();
     fd.append('image', imageFile);
@@ -156,6 +159,7 @@ async function doScan() {
   } catch (err) {
     toast('Scan failed: ' + err.message, 'red');
   } finally {
+    _scanning = false;
     $('scanSpin').classList.add('hidden');
     $('scanbtn').disabled = false;
   }
