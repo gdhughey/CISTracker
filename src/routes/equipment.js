@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+const QRCode = require('qrcode');
 const { z } = require('zod');
 const equipmentService = require('../services/equipmentService');
 const { validate } = require('../middleware/validate');
@@ -44,6 +45,31 @@ router.delete('/log', requireRole('admin'), (req, res) => {
   equipmentService.clearLog();
   req.audit('clear_log', null);
   res.json({ ok: true });
+});
+
+// Suggest the next CIS-NNNNNN asset ID. Admin-only since adding inventory
+// items is an admin task.
+router.get('/next-asset-id', requireRole('admin'), (req, res) => {
+  res.json({ asset_id: equipmentService.nextAssetId() });
+});
+
+// Render a printable QR label for an existing equipment row. The QR
+// encodes the barcode/asset ID only — never a URL.
+router.get('/:id(\\d+)/label', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const item = equipmentService.getById(id);
+    if (!item) return res.status(404).json({ error: 'Not found' });
+    const code = (item.barcode || '').trim();
+    if (!code) return res.status(400).json({ error: 'Item has no asset ID / barcode to encode' });
+    const qr = await QRCode.toDataURL(code, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      scale: 8,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    });
+    res.json({ asset_id: code, name: item.name, qr_data_url: qr });
+  } catch (err) { next(err); }
 });
 
 router.get('/:id(\\d+)', (req, res) => {

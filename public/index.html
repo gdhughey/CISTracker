@@ -123,6 +123,29 @@
   <!-- ═══════ INVENTORY (admin) ═══════ -->
   <div class="page" id="pg-inventory">
     <div class="card">
+      <div class="ctitle">➕ Add Item</div>
+      <div class="note">Create a new equipment row and print its QR label. Asset ID is auto-generated and used as the barcode.</div>
+      <div class="fr">
+        <div class="fg"><label class="fl" for="ai_name">Name *</label><input id="ai_name" class="fi" type="text" placeholder="e.g. Cisco Catalyst 2960"></div>
+        <div class="fg"><label class="fl" for="ai_type">Type</label><input id="ai_type" class="fi" type="text" placeholder="e.g. Switch"></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label class="fl" for="ai_serial">Serial #</label><input id="ai_serial" class="fi" type="text" placeholder="If available"></div>
+        <div class="fg">
+          <label class="fl" for="ai_assetid">Asset ID / Barcode</label>
+          <input id="ai_assetid" class="fi mono" type="text" placeholder="CIS-000001">
+        </div>
+      </div>
+      <div class="fg"><label class="fl" for="ai_notes">Notes</label><input id="ai_notes" class="fi" type="text" placeholder="Condition, location..."></div>
+      <div class="brow">
+        <button class="btn bp" onclick="addInventoryItem()">＋ Create &amp; Print Label</button>
+        <button class="btn bo bsm" onclick="addInventoryItem(true)">Create only</button>
+        <button class="btn bo bsm" onclick="suggestAssetId()">↻ New ID</button>
+      </div>
+      <div id="ai_err" class="ov-err" role="alert"></div>
+    </div>
+
+    <div class="card">
       <div class="ctitle">
         <span>📦 Inventory</span>
         <button class="btn bo bsm" aria-label="Refresh inventory" onclick="loadInventory()">🔄 Refresh</button>
@@ -317,6 +340,26 @@
     <button onclick="saveEqEdit()" class="ov-btn">Save Changes</button>
     <button onclick="hideEqEdit()" class="ov-btn-ghost">Cancel</button>
     <div id="eqEditErr" class="ov-err" role="alert"></div>
+  </div>
+</div>
+
+<!-- ═══════ PRINT LABEL MODAL ═══════ -->
+<div id="labelOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="labelTitle">
+  <div class="ov-card label-modal">
+    <div class="ov-title" id="labelTitle">🏷 Print Label</div>
+    <div class="ov-sub">2 in × 1 in. Use your browser's print dialog and set scale to 100%.</div>
+    <div id="labelStage" class="label-stage">
+      <div id="labelSheet" class="qr-label" aria-label="Equipment label preview">
+        <div class="qr-label-img"><img id="labelQr" alt=""></div>
+        <div class="qr-label-text">
+          <div id="labelName" class="qr-label-name"></div>
+          <div id="labelAssetId" class="qr-label-id"></div>
+        </div>
+      </div>
+    </div>
+    <button onclick="doPrintLabel()" class="ov-btn">🖨 Print</button>
+    <button onclick="hideLabel()" class="ov-btn-ghost">Close</button>
+    <div id="labelErr" class="ov-err" role="alert"></div>
   </div>
 </div>
 

@@ -19,6 +19,25 @@ function listAll({ status, checkedOutBy } = {}) {
   `).all(...params);
 }
 
+// Compute the next asset ID in the CIS-NNNNNN sequence by scanning
+// existing barcodes. Pads to 6 digits but accepts longer numbers.
+const ASSET_ID_PREFIX = 'CIS-';
+function nextAssetId() {
+  const rows = db.prepare(
+    "SELECT barcode FROM equipment WHERE barcode LIKE 'CIS-%'"
+  ).all();
+  let max = 0;
+  for (const r of rows) {
+    const m = /^CIS-(\d+)$/i.exec((r.barcode || '').trim());
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+  }
+  const next = max + 1;
+  return ASSET_ID_PREFIX + String(next).padStart(6, '0');
+}
+
 function getById(id) {
   return db.prepare(`
     SELECT e.*, u.username AS checked_out_username
@@ -179,4 +198,5 @@ function clearLog() {
 module.exports = {
   listAll, getById, create, update, remove, findByIdentifier,
   checkout, checkin, getLog, clearLog, getOverdue, getCheckoutsForUser,
+  nextAssetId,
 };

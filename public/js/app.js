@@ -466,11 +466,109 @@ async function loadInventory() {
     const { items } = await api('/api/equipment');
     cacheInv = items || [];
     renderInventory();
+    // Pre-fill the next asset ID if the field is empty.
+    const aid = $('ai_assetid');
+    if (aid && !aid.value.trim()) suggestAssetId();
   } catch (e) {
     l.innerHTML = `<div class="es es-err"><div class="ei" aria-hidden="true">⚠️</div><div class="et">${esc(e.message)}</div></div>`;
   }
 }
 window.loadInventory = loadInventory;
+
+// Ask the server for the next CIS-NNNNNN asset ID and drop it into the
+// Add Item form's asset-ID field.
+async function suggestAssetId() {
+  const aid = $('ai_assetid');
+  if (!aid) return;
+  try {
+    const { asset_id } = await api('/api/equipment/next-asset-id');
+    aid.value = asset_id;
+  } catch (e) {
+    // Non-fatal — the admin can still type one in manually.
+  }
+}
+window.suggestAssetId = suggestAssetId;
+
+async function addInventoryItem(skipLabel) {
+  const errEl = $('ai_err');
+  errEl.textContent = '';
+  const name = $('ai_name').value.trim();
+  if (!name) { errEl.textContent = 'Name is required'; return; }
+  let assetId = $('ai_assetid').value.trim();
+  if (!assetId) {
+    try {
+      const r = await api('/api/equipment/next-asset-id');
+      assetId = r.asset_id;
+      $('ai_assetid').value = assetId;
+    } catch (e) {
+      errEl.textContent = 'Could not generate asset ID: ' + (e.message || '');
+      return;
+    }
+  }
+  const payload = {
+    name,
+    type: $('ai_type').value.trim(),
+    serial_number: $('ai_serial').value.trim(),
+    barcode: assetId,
+    notes: $('ai_notes').value.trim(),
+  };
+  try {
+    const { item } = await api('/api/equipment', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    toast('Added: ' + item.name, 'green');
+    // Clear the form (but pre-fill the next asset ID).
+    $('ai_name').value = '';
+    $('ai_type').value = '';
+    $('ai_serial').value = '';
+    $('ai_notes').value = '';
+    $('ai_assetid').value = '';
+    suggestAssetId();
+    loadInventory();
+    if (!skipLabel) showLabelFor(item.id);
+  } catch (e) {
+    errEl.textContent = e.message || 'Failed to create';
+  }
+}
+window.addInventoryItem = addInventoryItem;
+
+// ── Print Label modal ─────────────────────────────────────────
+async function showLabelFor(equipmentId) {
+  _lastFocusedBeforeOverlay = document.activeElement;
+  const ov = $('labelOv');
+  $('labelErr').textContent = '';
+  $('labelName').textContent = '';
+  $('labelAssetId').textContent = '';
+  $('labelQr').removeAttribute('src');
+  ov.classList.remove('hidden');
+  document.body.classList.add('label-open');
+  try {
+    const data = await api(`/api/equipment/${equipmentId}/label`);
+    $('labelQr').src = data.qr_data_url;
+    $('labelName').textContent = data.name || '';
+    $('labelAssetId').textContent = data.asset_id || '';
+  } catch (e) {
+    $('labelErr').textContent = e.message || 'Could not load label';
+  }
+}
+window.showLabelFor = showLabelFor;
+
+function hideLabel() {
+  $('labelOv').classList.add('hidden');
+  document.body.classList.remove('label-open');
+  if (_lastFocusedBeforeOverlay && _lastFocusedBeforeOverlay.focus) {
+    _lastFocusedBeforeOverlay.focus();
+  }
+}
+window.hideLabel = hideLabel;
+
+function doPrintLabel() {
+  // The print stylesheet hides everything except .qr-label, so just call
+  // the browser's print dialog. Works the same for reprints.
+  window.print();
+}
+window.doPrintLabel = doPrintLabel;
 
 function setInvStatus(s) {
   invStatus = s;
@@ -542,6 +640,15 @@ function renderInventory() {
     editBtn.textContent = '✏️ Edit';
     editBtn.addEventListener('click', () => showEqEdit(e));
     actions.appendChild(editBtn);
+    if (e.barcode && e.barcode.trim()) {
+      const labelBtn = document.createElement('button');
+      labelBtn.className = 'btn bo bsm';
+      labelBtn.type = 'button';
+      labelBtn.setAttribute('aria-label', `Print label for ${e.name}`);
+      labelBtn.textContent = '🏷 Label';
+      labelBtn.addEventListener('click', () => showLabelFor(e.id));
+      actions.appendChild(labelBtn);
+    }
     if (e.status === 'available') {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn br bsm';
