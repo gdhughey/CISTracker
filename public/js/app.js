@@ -564,12 +564,10 @@ function hideLabel() {
 window.hideLabel = hideLabel;
 
 function doPrintLabel() {
-  // Build an isolated 2in x 1in print document in a new window so the
+  // Build an isolated 40mm x 30mm print document in a new window so the
   // browser's "Save as PDF" / printer driver only sees the label, not the
-  // surrounding modal/page. This avoids issues where the visibility-hidden
-  // approach produced a mostly blank page in some browsers.
+  // surrounding modal/page. Sized for the user's 40x30mm thermal labels.
   const qrSrc = $('labelQr').getAttribute('src') || '';
-  const name = $('labelName').textContent || '';
   const assetId = $('labelAssetId').textContent || '';
   if (!qrSrc) {
     $('labelErr').textContent = 'Label is still loading. Please wait a moment and try again.';
@@ -578,50 +576,62 @@ function doPrintLabel() {
 
   // No inline script: the parent (this window) drives the print to avoid
   // running afoul of the page's CSP, which does not allow inline scripts.
+  // Layout: 40mm x 30mm (landscape). A 26mm square QR on the left preserves
+  // a generous quiet zone; the right column holds the asset ID + "CIS Tracker"
+  // footer. Item name is intentionally omitted from the print to avoid
+  // crowding the QR — readability of the code is more important.
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Label ${esc(assetId)}</title>
 <style>
-  @page { size: 2in 1in; margin: 0; }
+  @page { size: 40mm 30mm; margin: 0; }
   html, body {
     margin: 0; padding: 0; background: #fff; color: #000;
-    width: 2in; height: 1in; overflow: hidden;
+    width: 40mm; height: 30mm; overflow: hidden;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .lbl {
-    width: 2in; height: 1in; box-sizing: border-box;
-    display: flex; align-items: center; gap: 0.08in;
-    padding: 0.05in; background: #fff; color: #000;
+    width: 40mm; height: 30mm; box-sizing: border-box;
+    display: flex; align-items: center; gap: 1mm;
+    padding: 1mm; background: #fff; color: #000;
     font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
     overflow: hidden;
   }
-  .lbl-img { width: 0.9in; height: 0.9in; flex: 0 0 auto; }
-  .lbl-img img { width: 100%; height: 100%; display: block; }
-  .lbl-text {
-    flex: 1; min-width: 0;
-    display: flex; flex-direction: column; justify-content: center;
-    gap: 0.04in; overflow: hidden;
+  .lbl-img {
+    width: 26mm; height: 26mm; flex: 0 0 auto;
+    background: #fff; padding: 0; box-sizing: border-box;
   }
-  .lbl-name {
-    font-size: 9pt; font-weight: 700; line-height: 1.1;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-family: "Sora", system-ui, sans-serif;
+  .lbl-img img {
+    width: 100%; height: 100%; display: block;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  .lbl-text {
+    flex: 1; min-width: 0; height: 26mm;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 0.5mm; overflow: hidden;
   }
   .lbl-id {
-    font-size: 10pt; font-weight: 700; letter-spacing: 0.02em;
+    font-size: 8pt; font-weight: 700; letter-spacing: 0.02em;
+    line-height: 1.05; word-break: break-all; overflow: hidden;
+    color: #000;
+  }
+  .lbl-foot {
+    font-size: 5pt; font-weight: 600; letter-spacing: 0.04em;
+    color: #000; text-transform: uppercase; line-height: 1;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: "Sora", system-ui, sans-serif;
   }
 </style></head>
 <body>
   <div class="lbl">
     <div class="lbl-img"><img id="qr" alt="QR" src="${esc(qrSrc)}"></div>
     <div class="lbl-text">
-      <div class="lbl-name">${esc(name)}</div>
       <div class="lbl-id">${esc(assetId)}</div>
+      <div class="lbl-foot">CIS Tracker</div>
     </div>
   </div>
 </body></html>`;
 
-  const w = window.open('', '_blank', 'width=420,height=260');
+  const w = window.open('', '_blank', 'width=360,height=260');
   if (!w) {
     $('labelErr').textContent = 'Popup blocked. Allow popups for this site to print labels.';
     return;

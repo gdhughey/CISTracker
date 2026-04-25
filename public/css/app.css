@@ -452,26 +452,35 @@ td{padding:9px 8px;border-bottom:1px solid rgba(26,45,74,.45);vertical-align:top
   padding:12px;margin:12px 0;display:flex;justify-content:center;
 }
 .qr-label{
-  /* On screen: show at the actual print size so the admin sees what they
-     get. The @page rules below handle the printer side. */
-  width:2in;height:1in;background:#fff;color:#000;
-  display:flex;align-items:center;gap:.08in;
-  padding:.05in;box-sizing:border-box;
+  /* On screen: show at the actual print size (40mm x 30mm) so the admin
+     sees what they get. Print is driven by an isolated popup window — see
+     doPrintLabel() in app.js — so the @media print rules here are only a
+     safety net for direct Ctrl+P. */
+  width:40mm;height:30mm;background:#fff;color:#000;
+  display:flex;align-items:center;gap:1mm;
+  padding:1mm;box-sizing:border-box;
   font-family:"JetBrains Mono",monospace;
 }
-.qr-label-img{width:.9in;height:.9in;flex:0 0 auto;}
-.qr-label-img img{width:100%;height:100%;display:block;}
+.qr-label-img{width:26mm;height:26mm;flex:0 0 auto;}
+.qr-label-img img{
+  width:100%;height:100%;display:block;
+  image-rendering:pixelated;image-rendering:crisp-edges;
+}
 .qr-label-text{
-  flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;
-  gap:.04in;overflow:hidden;
+  flex:1;min-width:0;height:26mm;
+  display:flex;flex-direction:column;justify-content:center;
+  gap:.5mm;overflow:hidden;
 }
 .qr-label-name{
-  font-size:9pt;font-weight:700;line-height:1.1;
+  /* Kept for the on-screen preview only — the printed label omits the name
+     to keep the QR uncrowded on 40x30mm stock. */
+  font-size:7pt;font-weight:600;line-height:1.1;color:#444;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   font-family:"Sora",sans-serif;
 }
 .qr-label-id{
-  font-size:10pt;font-weight:700;letter-spacing:.02em;
+  font-size:8pt;font-weight:700;letter-spacing:.02em;line-height:1.05;
+  word-break:break-all;overflow:hidden;color:#000;
 }
 
 @media print{
@@ -492,16 +501,17 @@ td{padding:9px 8px;border-bottom:1px solid rgba(26,45,74,.45);vertical-align:top
   body.label-open .ov-sub,
   body.label-open .ov-btn,
   body.label-open .ov-btn-ghost,
-  body.label-open .ov-err{display:none !important;}
+  body.label-open .ov-err,
+  body.label-open .qr-label-name{display:none !important;}
   body.label-open .label-stage{
     border:none !important;padding:0 !important;margin:0 !important;
     background:#fff !important;display:block !important;
   }
   body.label-open .qr-label{
-    width:2in;height:1in;background:#fff !important;color:#000 !important;
+    width:40mm;height:30mm;background:#fff !important;color:#000 !important;
     border:none;page-break-after:avoid;
   }
-  @page{size:2in 1in;margin:0;}
+  @page{size:40mm 30mm;margin:0;}
   html,body{background:#fff !important;}
 }
 
