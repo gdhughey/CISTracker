@@ -4,7 +4,10 @@ const config = require('../config');
 
 const cspDirectives = {
   defaultSrc: ["'self'"],
-  scriptSrc: ["'self'"],
+  // unpkg.com is allowed so the @zxing/browser QR scanner library can load
+  // from a CDN without bundling. The library itself is integrity-pinnable
+  // by version in index.html.
+  scriptSrc: ["'self'", 'https://unpkg.com'],
   // The ported UI uses inline onclick= attributes on every button. Helmet's
   // default blocks those via script-src-attr 'none'. 'unsafe-inline' on the
   // attribute channel is the least-bad option until we refactor to
@@ -15,6 +18,9 @@ const cspDirectives = {
   // Google Fonts .woff2 files come from fonts.gstatic.com
   fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
   imgSrc: ["'self'", 'data:', 'blob:', 'https://api.qrserver.com'],
+  // 'blob:' / 'mediaSrc' allows the live <video> stream from getUserMedia
+  // (the camera-based QR scanner on Check Out / Check In).
+  mediaSrc: ["'self'", 'blob:'],
   connectSrc: ["'self'"],
   objectSrc: ["'none'"],
   frameAncestors: ["'none'"],

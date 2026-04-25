@@ -950,6 +950,8 @@ document.addEventListener('keydown', (e) => {
   }
   // Close any visible overlay on Escape
   if (e.key === 'Escape') {
+    if (!$('confirmOv').classList.contains('hidden')) { closeConfirmModal(); return; }
+    if (!$('scanOv').classList.contains('hidden')) { closeScanModal(); return; }
     if (!$('eqEditOv').classList.contains('hidden')) { hideEqEdit(); return; }
     if (!$('chpOv').classList.contains('hidden')) { hideChp(); return; }
     if (!$('mfaOv').classList.contains('hidden')) { hideMfa(); return; }
@@ -1470,6 +1472,261 @@ async function loadAudit() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// QR SCAN: Check Out / Check In
+// ═══════════════════════════════════════════════════════════
+let _scanReader = null;        // ZXing BrowserMultiFormatReader instance
+let _scanControls = null;      // controls returned by decodeFromVideoDevice
+let _scanStream = null;        // raw MediaStream (manual fallback)
+let _scanMode = null;          // 'checkout' | 'checkin'
+let _scanBusy = false;         // guard against double-handling a single decode
+let _pendingItem = null;       // matched item awaiting confirmation
+let _pendingMode = null;       // 'checkout' | 'checkin' for pending item
+
+function setScanStatus(msg, kind) {
+  const el = $('scanStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.classList.remove('err', 'ok');
+  if (kind) el.classList.add(kind);
+}
+
+function startCheckoutScan() { openScanModal('checkout'); }
+window.startCheckoutScan = startCheckoutScan;
+
+function startCheckinScan() { openScanModal('checkin'); }
+window.startCheckinScan = startCheckinScan;
+
+async function openScanModal(mode) {
+  _scanMode = mode;
+  _scanBusy = false;
+  _lastFocusedBeforeOverlay = document.activeElement;
+  $('scanTitle').textContent = mode === 'checkout' ? '📷 Scan to Check Out' : '📷 Scan to Check In';
+  $('scanSub').textContent = mode === 'checkout'
+    ? 'Point the camera at the QR label of the item to check out.'
+    : 'Point the camera at the QR label of the item to check in.';
+  $('scanErr').textContent = '';
+  $('scanManualInput').value = '';
+  setScanStatus('Starting camera...', '');
+  $('scanOv').classList.remove('hidden');
+  await startScanner();
+  setTimeout(() => $('scanManualInput').focus({ preventScroll: true }), 30);
+}
+
+async function startScanner() {
+  // Prefer ZXing if it loaded; fall back to a clear manual-only message.
+  const ZX = window.ZXingBrowser || window.ZXing || null;
+  if (!ZX || !ZX.BrowserMultiFormatReader) {
+    setScanStatus('Camera scanner unavailable — use manual entry below.', 'err');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setScanStatus('Camera not available on this device — use manual entry.', 'err');
+    return;
+  }
+  try {
+    _scanReader = new ZX.BrowserMultiFormatReader();
+    const video = $('scanVideo');
+    // Prefer the rear camera on phones.
+    const constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
+    _scanControls = await _scanReader.decodeFromConstraints(constraints, video, (result, err, controls) => {
+      if (result && !_scanBusy) {
+        _scanBusy = true;
+        const text = (result.getText && result.getText()) || result.text || '';
+        handleScannedCode(text);
+      }
+      // err is a NotFoundException on every frame with no code — ignore it.
+    });
+    setScanStatus('Looking for a QR code...', '');
+  } catch (err) {
+    let msg = err && err.message ? err.message : 'Could not start camera';
+    if (err && (err.name === 'NotAllowedError' || /permission/i.test(msg))) {
+      msg = 'Camera permission denied. Use manual entry below or grant access in your browser.';
+    } else if (err && err.name === 'NotFoundError') {
+      msg = 'No camera detected on this device. Use manual entry below.';
+    }
+    setScanStatus(msg, 'err');
+  }
+}
+
+function stopScanner() {
+  try { if (_scanControls && _scanControls.stop) _scanControls.stop(); } catch {}
+  _scanControls = null;
+  try { if (_scanReader && _scanReader.reset) _scanReader.reset(); } catch {}
+  _scanReader = null;
+  // Belt-and-braces: stop any tracks still attached to the <video>.
+  const video = $('scanVideo');
+  if (video) {
+    const stream = video.srcObject;
+    if (stream && stream.getTracks) stream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
+    video.srcObject = null;
+  }
+  if (_scanStream && _scanStream.getTracks) {
+    _scanStream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
+  }
+  _scanStream = null;
+}
+
+function closeScanModal() {
+  stopScanner();
+  $('scanOv').classList.add('hidden');
+  _scanMode = null;
+  _scanBusy = false;
+  if (_lastFocusedBeforeOverlay && _lastFocusedBeforeOverlay.focus) {
+    _lastFocusedBeforeOverlay.focus();
+  }
+}
+window.closeScanModal = closeScanModal;
+
+async function scanLookupManual() {
+  const input = $('scanManualInput');
+  const code = (input.value || '').trim();
+  if (!code) { setScanStatus('Enter an asset ID to look up.', 'err'); input.focus(); return; }
+  _scanBusy = true;
+  await handleScannedCode(code);
+}
+window.scanLookupManual = scanLookupManual;
+
+async function handleScannedCode(rawCode) {
+  const code = (rawCode || '').trim();
+  if (!code) { _scanBusy = false; return; }
+  setScanStatus(`Looking up "${code}"...`, '');
+  try {
+    const { item } = await api('/api/equipment/lookup?code=' + encodeURIComponent(code));
+    setScanStatus(`Found: ${item.name}`, 'ok');
+    // Quickly stop the camera once we have a match — keep modal up briefly
+    // so the user sees the "Found" status before the confirm modal opens.
+    stopScanner();
+    closeScanModal();
+    openConfirmModal(item, _scanMode || 'checkout');
+  } catch (err) {
+    const status = err && err.status;
+    if (status === 404) {
+      setScanStatus(`No item matches "${code}". Check the label or enter the asset ID manually.`, 'err');
+    } else {
+      setScanStatus(err.message || 'Lookup failed', 'err');
+    }
+    // Allow another attempt without closing the modal.
+    _scanBusy = false;
+  }
+}
+
+function openConfirmModal(item, mode) {
+  _pendingItem = item;
+  _pendingMode = mode;
+  const isCheckout = mode === 'checkout';
+  const isAvail = item.status === 'available';
+  const isOut = item.status === 'checked_out';
+
+  $('confirmTitle').textContent = isCheckout ? '✅ Confirm Check Out' : '✅ Confirm Check In';
+  $('confirmErr').textContent = '';
+
+  // Build details block
+  const det = $('confirmDetails');
+  det.innerHTML = '';
+  const nameRow = document.createElement('div');
+  nameRow.className = 'cd-name';
+  nameRow.textContent = item.name || '(unnamed)';
+  const statusBadge = document.createElement('span');
+  statusBadge.className = 'cd-status ' + (isAvail ? 'avail' : 'out');
+  statusBadge.textContent = isAvail ? 'AVAILABLE' : 'CHECKED OUT';
+  nameRow.appendChild(statusBadge);
+  det.appendChild(nameRow);
+
+  function row(k, v) {
+    if (!v) return;
+    const r = document.createElement('div');
+    r.className = 'cd-row';
+    const kk = document.createElement('span'); kk.className = 'cd-key'; kk.textContent = k;
+    const vv = document.createElement('span'); vv.className = 'cd-val'; vv.textContent = v;
+    r.appendChild(kk); r.appendChild(vv); det.appendChild(r);
+  }
+  row('Asset ID', item.barcode);
+  row('Type', item.type);
+  row('Serial #', item.serial_number);
+  row('Notes', item.notes);
+  if (isOut && item.checked_out_username) row('Checked out by', item.checked_out_username);
+  if (isOut && item.checked_out_at) row('Checked out at', new Date(item.checked_out_at).toLocaleString());
+
+  // Decide button + sub-text based on (mode, status) combinations.
+  const sub = $('confirmSub');
+  const yesBtn = $('confirmYesBtn');
+  yesBtn.disabled = false;
+  yesBtn.classList.remove('br', 'bg');
+  if (isCheckout) {
+    if (isAvail) {
+      sub.textContent = 'This item is available. Confirm checkout?';
+      yesBtn.textContent = '✔ Confirm Check Out';
+      yesBtn.classList.add('bg');
+    } else {
+      sub.textContent = 'This item is already checked out — cannot check it out again.';
+      yesBtn.textContent = 'Cannot Check Out';
+      yesBtn.disabled = true;
+    }
+  } else {
+    if (isOut) {
+      const ownsIt = ME && (ME.role === 'admin' || item.checked_out_by === ME.id);
+      if (ownsIt) {
+        sub.textContent = 'Confirm check-in for this item?';
+        yesBtn.textContent = '✔ Confirm Check In';
+        yesBtn.classList.add('bg');
+      } else {
+        sub.textContent = `This item was checked out by ${item.checked_out_username || 'another user'} — only they (or an admin) can check it in.`;
+        yesBtn.textContent = 'Cannot Check In';
+        yesBtn.disabled = true;
+      }
+    } else {
+      sub.textContent = 'This item is already checked in.';
+      yesBtn.textContent = 'Cannot Check In';
+      yesBtn.disabled = true;
+    }
+  }
+
+  $('confirmOv').classList.remove('hidden');
+  setTimeout(() => { if (!yesBtn.disabled) yesBtn.focus(); }, 30);
+}
+
+function closeConfirmModal() {
+  $('confirmOv').classList.add('hidden');
+  _pendingItem = null;
+  _pendingMode = null;
+}
+window.closeConfirmModal = closeConfirmModal;
+
+async function doConfirmAction() {
+  const item = _pendingItem;
+  const mode = _pendingMode;
+  if (!item || !mode) { closeConfirmModal(); return; }
+  const yesBtn = $('confirmYesBtn');
+  const original = yesBtn.textContent;
+  yesBtn.disabled = true;
+  yesBtn.textContent = 'Working...';
+  try {
+    if (mode === 'checkout') {
+      await api(`/api/equipment/${item.id}/checkout`, {
+        method: 'POST',
+        body: JSON.stringify({ source: 'Barcode' }),
+      });
+      toast(`Checked out: ${item.name}`, 'green');
+    } else {
+      await api(`/api/equipment/${item.id}/checkin`, {
+        method: 'POST',
+        body: JSON.stringify({ source: 'Barcode' }),
+      });
+      toast(`Checked in: ${item.name}`, 'green');
+    }
+    closeConfirmModal();
+    // Refresh whichever tab is visible.
+    if ($('pg-checkin').classList.contains('on')) loadCI();
+    if ($('pg-inventory') && $('pg-inventory').classList.contains('on')) loadInventory();
+  } catch (err) {
+    $('confirmErr').textContent = err.message || 'Action failed';
+    yesBtn.disabled = false;
+    yesBtn.textContent = original;
+  }
+}
+window.doConfirmAction = doConfirmAction;
+
+// ═══════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════
 (async function boot() {
@@ -1484,6 +1741,22 @@ async function loadAudit() {
   // Click outside ov-card to dismiss (but only the equipment edit and MFA — keep
   // login/admin/forced-pw modal sticky to avoid accidental dismissal).
   $('eqEditOv').addEventListener('click', (e) => { if (e.target === $('eqEditOv')) hideEqEdit(); });
+
+  // QR scan modal: Enter on manual input runs the lookup; clicking the
+  // backdrop cancels (which also stops the camera).
+  const scanInput = $('scanManualInput');
+  if (scanInput) scanInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') scanLookupManual(); });
+  $('scanOv').addEventListener('click', (e) => { if (e.target === $('scanOv')) closeScanModal(); });
+  $('confirmOv').addEventListener('click', (e) => { if (e.target === $('confirmOv')) closeConfirmModal(); });
+
+  // Stop the camera if the user navigates away or hides the tab.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && !$('scanOv').classList.contains('hidden')) {
+      stopScanner();
+      setScanStatus('Camera paused — close and re-open to resume.', '');
+    }
+  });
+  window.addEventListener('beforeunload', () => { stopScanner(); });
 
   try {
     const me = await api('/api/auth/me');

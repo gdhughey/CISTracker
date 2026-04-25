@@ -38,7 +38,16 @@
     </div>
 
     <div class="card">
+      <div class="ctitle">📷 Scan to Check Out</div>
+      <div class="note">Point your camera at the QR label on the asset. We'll show item details for confirmation before checkout.</div>
+      <div class="brow">
+        <button class="btn bp bfull" onclick="startCheckoutScan()">📷 Scan QR Code</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="ctitle">📦 Equipment Entry</div>
+      <div class="note">Add a new item or use AI/Manual entry as a fallback when there's no QR label.</div>
       <div class="mtog" role="group" aria-label="Entry mode">
         <button class="mt on" onclick="swMode('scan')" id="mt-scan" aria-pressed="true">📷 AI Scan</button>
         <button class="mt" onclick="swMode('manual')" id="mt-manual" aria-pressed="false">✏️ Manual</button>
@@ -107,6 +116,14 @@
 
   <!-- ═══════ CHECK IN ═══════ -->
   <div class="page" id="pg-checkin">
+    <div class="card">
+      <div class="ctitle">📷 Scan to Check In</div>
+      <div class="note">Point your camera at the QR label on the asset. We'll show item details for confirmation before check-in.</div>
+      <div class="brow">
+        <button class="btn bp bfull" onclick="startCheckinScan()">📷 Scan QR Code</button>
+      </div>
+    </div>
+
     <div class="card">
       <div class="ctitle">
         <span>📥 Currently Checked Out</span>
@@ -363,6 +380,43 @@
   </div>
 </div>
 
+<!-- ═══════ QR SCAN MODAL ═══════ -->
+<div id="scanOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="scanTitle">
+  <div class="ov-card scan-modal">
+    <div class="ov-title" id="scanTitle">📷 Scan QR Code</div>
+    <div class="ov-sub" id="scanSub">Point the camera at the asset label.</div>
+    <div class="scan-stage">
+      <video id="scanVideo" playsinline muted></video>
+      <div class="scan-reticle" aria-hidden="true"></div>
+    </div>
+    <div id="scanStatus" class="scan-status" role="status" aria-live="polite"></div>
+    <div class="fg" style="text-align:left;margin-top:10px;">
+      <label class="fl" for="scanManualInput">Or enter asset ID manually</label>
+      <input id="scanManualInput" class="fi mono" type="text" placeholder="CIS-000001" autocomplete="off">
+    </div>
+    <div class="brow">
+      <button class="btn bp" id="scanManualBtn" onclick="scanLookupManual()">🔎 Look Up</button>
+      <button class="btn bo bsm" onclick="closeScanModal()">Cancel</button>
+    </div>
+    <div id="scanErr" class="ov-err" role="alert"></div>
+  </div>
+</div>
+
+<!-- ═══════ CONFIRM CHECKOUT/CHECKIN MODAL ═══════ -->
+<div id="confirmOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="ov-card">
+    <div class="ov-title" id="confirmTitle">Confirm</div>
+    <div class="ov-sub" id="confirmSub"></div>
+    <div id="confirmDetails" class="confirm-details"></div>
+    <div class="brow">
+      <button class="btn bg" id="confirmYesBtn" onclick="doConfirmAction()">Confirm</button>
+      <button class="btn bo bsm" onclick="closeConfirmModal()">Cancel</button>
+    </div>
+    <div id="confirmErr" class="ov-err" role="alert"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

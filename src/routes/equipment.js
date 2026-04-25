@@ -53,6 +53,17 @@ router.get('/next-asset-id', requireRole('admin'), (req, res) => {
   res.json({ asset_id: equipmentService.nextAssetId() });
 });
 
+// Look up an equipment row by its asset ID / barcode (or serial number).
+// Used by the QR scan flow on Check Out / Check In so the client can show
+// a confirmation card before mutating status.
+router.get('/lookup', (req, res) => {
+  const code = String(req.query.code || '').trim();
+  if (!code) return res.status(400).json({ error: 'code is required' });
+  const item = equipmentService.findByIdentifier({ barcode: code, serial_number: code });
+  if (!item) return res.status(404).json({ error: 'No equipment matches that code' });
+  res.json({ item });
+});
+
 // Render a printable QR label for an existing equipment row. The QR
 // encodes the barcode/asset ID only — never a URL.
 router.get('/:id(\\d+)/label', async (req, res, next) => {
