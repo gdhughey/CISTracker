@@ -100,6 +100,7 @@ clone_or_update_repo() {
 
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Existing repository found. Pulling latest main"
+    git config --global --add safe.directory "${APP_DIR}" || true
     git -C "${APP_DIR}" fetch origin
     git -C "${APP_DIR}" checkout main
     git -C "${APP_DIR}" pull --ff-only origin main
