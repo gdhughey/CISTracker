@@ -564,9 +564,96 @@ function hideLabel() {
 window.hideLabel = hideLabel;
 
 function doPrintLabel() {
-  // The print stylesheet hides everything except .qr-label, so just call
-  // the browser's print dialog. Works the same for reprints.
-  window.print();
+  // Build an isolated 2in x 1in print document in a new window so the
+  // browser's "Save as PDF" / printer driver only sees the label, not the
+  // surrounding modal/page. This avoids issues where the visibility-hidden
+  // approach produced a mostly blank page in some browsers.
+  const qrSrc = $('labelQr').getAttribute('src') || '';
+  const name = $('labelName').textContent || '';
+  const assetId = $('labelAssetId').textContent || '';
+  if (!qrSrc) {
+    $('labelErr').textContent = 'Label is still loading. Please wait a moment and try again.';
+    return;
+  }
+
+  // No inline script: the parent (this window) drives the print to avoid
+  // running afoul of the page's CSP, which does not allow inline scripts.
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Label ${esc(assetId)}</title>
+<style>
+  @page { size: 2in 1in; margin: 0; }
+  html, body {
+    margin: 0; padding: 0; background: #fff; color: #000;
+    width: 2in; height: 1in; overflow: hidden;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .lbl {
+    width: 2in; height: 1in; box-sizing: border-box;
+    display: flex; align-items: center; gap: 0.08in;
+    padding: 0.05in; background: #fff; color: #000;
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    overflow: hidden;
+  }
+  .lbl-img { width: 0.9in; height: 0.9in; flex: 0 0 auto; }
+  .lbl-img img { width: 100%; height: 100%; display: block; }
+  .lbl-text {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 0.04in; overflow: hidden;
+  }
+  .lbl-name {
+    font-size: 9pt; font-weight: 700; line-height: 1.1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: "Sora", system-ui, sans-serif;
+  }
+  .lbl-id {
+    font-size: 10pt; font-weight: 700; letter-spacing: 0.02em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+</style></head>
+<body>
+  <div class="lbl">
+    <div class="lbl-img"><img id="qr" alt="QR" src="${esc(qrSrc)}"></div>
+    <div class="lbl-text">
+      <div class="lbl-name">${esc(name)}</div>
+      <div class="lbl-id">${esc(assetId)}</div>
+    </div>
+  </div>
+</body></html>`;
+
+  const w = window.open('', '_blank', 'width=420,height=260');
+  if (!w) {
+    $('labelErr').textContent = 'Popup blocked. Allow popups for this site to print labels.';
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+
+  // Drive print/close from the opener so we don't need inline script in the
+  // popup (which would be blocked by the page CSP).
+  function triggerPrint() {
+    let closed = false;
+    function closeSoon() {
+      if (closed) return;
+      closed = true;
+      try { w.close(); } catch (e) { /* ignore */ }
+    }
+    try { w.addEventListener('afterprint', closeSoon); } catch (e) { /* ignore */ }
+    try { w.focus(); } catch (e) { /* ignore */ }
+    try { w.print(); } catch (e) { /* ignore */ }
+    setTimeout(closeSoon, 1500);
+  }
+
+  const img = w.document.getElementById('qr');
+  if (img && !img.complete) {
+    img.addEventListener('load', triggerPrint, { once: true });
+    img.addEventListener('error', triggerPrint, { once: true });
+    // Safety net in case load events never fire (e.g. data-URL edge cases).
+    setTimeout(triggerPrint, 1500);
+  } else {
+    setTimeout(triggerPrint, 50);
+  }
 }
 window.doPrintLabel = doPrintLabel;
 
