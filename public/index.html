@@ -35,6 +35,14 @@
     <div class="card">
       <div class="ctitle">👤 Checking Out As</div>
       <div class="note">Signed in as <span id="curUser" class="accent bold"></span> — checkouts are recorded under this account.</div>
+      <div id="kioskBox" class="hidden" style="margin-top:10px">
+        <div class="ov-warn accent" style="margin-bottom:6px">🏫 Kiosk Mode (Admin)</div>
+        <div class="note">Pick the student receiving this equipment. They don't need to log in.</div>
+        <div class="fg" style="margin-top:6px">
+          <label class="fl" for="kioskUser">Checking out for</label>
+          <select id="kioskUser" class="fi"></select>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -47,34 +55,9 @@
 
     <div class="card">
       <div class="ctitle">📦 Equipment Entry</div>
-      <div class="note">Add a new item or use AI/Manual entry as a fallback when there's no QR label.</div>
-      <div class="mtog" role="group" aria-label="Entry mode">
-        <button class="mt on" onclick="swMode('scan')" id="mt-scan" aria-pressed="true">📷 AI Scan</button>
-        <button class="mt" onclick="swMode('manual')" id="mt-manual" aria-pressed="false">✏️ Manual</button>
-      </div>
+      <div class="note">For items without a QR label — enter the details by hand and check out.</div>
 
-      <div id="scanMode">
-        <div class="note">Snap 1-4 photos (front, back, label, barcode) — more angles = better results.</div>
-        <div class="dz" id="dz">
-          <input type="file" accept="image/*" multiple onchange="handleFiles(event)">
-          <div class="dzi">📸</div>
-          <div class="dzt">Take photos or choose from library</div>
-          <div class="dzs">Up to 4 images · JPG / PNG · 10 MB each</div>
-        </div>
-        <div id="imgPrev" class="hidden">
-          <div id="imgGrid" class="img-grid"></div>
-          <div class="brow">
-            <button class="btn bo bsm" id="addMoreBtn" aria-label="Add more images" onclick="addMore()">＋ Add More</button>
-            <button class="btn bp" id="scanbtn" aria-label="Scan selected images with AI" onclick="doScan()">🤖 Scan with AI</button>
-            <button class="btn bo bsm" aria-label="Clear all images" onclick="clearImg()">✕ Clear All</button>
-          </div>
-        </div>
-        <div id="scanSpin" class="hidden">
-          <div class="sw"><div class="sp" aria-hidden="true"></div><span id="scanMsg" role="status" aria-live="polite">Analyzing...</span></div>
-        </div>
-      </div>
-
-      <div id="manualMode" class="hidden">
+      <div id="manualMode">
         <div class="note">For cables, adapters &amp; small items without barcodes.</div>
         <div class="fr">
           <div class="fg"><label class="fl">Name *</label><input type="text" class="fi" id="m_name" placeholder="e.g. Cat6 Cable"></div>
@@ -98,10 +81,6 @@
         <div class="vr"><span class="vk">Serial #</span><input class="vi" id="v_serial" type="text"></div>
         <div class="vr"><span class="vk">Barcode</span><input class="vi" id="v_barcode" type="text"></div>
         <div class="vr"><span class="vk">Notes</span><input class="vi" id="v_notes" type="text"></div>
-        <div id="confW" class="hidden">
-          <div class="cbar"><div class="cfill" id="cfill"></div></div>
-          <div class="clbl" id="clbl"></div>
-        </div>
       </div>
       <div class="vmeta">
         <span class="accent bold" id="v_user"></span> ·
@@ -408,6 +387,12 @@
     <div class="ov-title" id="confirmTitle">Confirm</div>
     <div class="ov-sub" id="confirmSub"></div>
     <div id="confirmDetails" class="confirm-details"></div>
+    <div id="confirmKiosk" class="hidden" style="margin-top:10px;text-align:left">
+      <div class="fg">
+        <label class="fl" for="confirmUser">🏫 Checking out for</label>
+        <select id="confirmUser" class="fi"></select>
+      </div>
+    </div>
     <div class="brow">
       <button class="btn bg" id="confirmYesBtn" onclick="doConfirmAction()">Confirm</button>
       <button class="btn bo bsm" onclick="closeConfirmModal()">Cancel</button>

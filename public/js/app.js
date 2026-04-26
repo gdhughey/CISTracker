@@ -8,13 +8,12 @@
 
 let ME = null;          // current signed-in user
 let usr = '';           // selected checkout user (name string)
-let imageFiles = [];    // Files chosen for scan (up to 4)
-let aiSource = false;   // whether current verify card came from AI
 let cacheLog = [];      // last fetched activity log
 let cacheUsers = [];    // last fetched admin user list (for search filter)
 let cacheCI = [];       // last fetched check-in list (for search filter)
 let cacheInv = [];      // last fetched inventory list
 let invStatus = 'all';  // current inventory status filter
+let kioskUsers = [];    // admin-only: list of users available as kiosk borrower
 let _lastFocusedBeforeOverlay = null; // for restoring focus after closing overlays
 
 const $ = (id) => document.getElementById(id);
@@ -86,156 +85,6 @@ window.swPage = swPage;
 
 window.addEventListener('popstate', (e) => swPage((e.state && e.state.page) || 'checkout', true));
 
-// ── Checkout: entry mode ──────────────────────────────────────
-function swMode(m) {
-  $('scanMode').classList.toggle('hidden', m !== 'scan');
-  $('manualMode').classList.toggle('hidden', m !== 'manual');
-  const mtScan = $('mt-scan');
-  const mtManual = $('mt-manual');
-  mtScan.classList.toggle('on', m === 'scan');
-  mtManual.classList.toggle('on', m === 'manual');
-  mtScan.setAttribute('aria-pressed', m === 'scan' ? 'true' : 'false');
-  mtManual.setAttribute('aria-pressed', m === 'manual' ? 'true' : 'false');
-  $('vcard').classList.add('hidden');
-}
-window.swMode = swMode;
-
-// ── Image picking + compression ───────────────────────────────
-const MAX_IMAGES = 4;
-
-function compressImage(file, cb) {
-  const r = new FileReader();
-  r.onload = (ev) => {
-    const img = new Image();
-    img.onload = () => {
-      const MAX = 1200;
-      let w = img.width, h = img.height;
-      if (w > MAX || h > MAX) {
-        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-        else { w = Math.round(w * MAX / h); h = MAX; }
-      }
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      c.getContext('2d').drawImage(img, 0, 0, w, h);
-      c.toBlob((blob) => cb(blob, c.toDataURL('image/jpeg', 0.75)), 'image/jpeg', 0.75);
-    };
-    img.src = ev.target.result;
-  };
-  r.readAsDataURL(file);
-}
-
-function renderImageGrid() {
-  const grid = $('imgGrid');
-  grid.innerHTML = '';
-  imageFiles.forEach((entry, idx) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'img-thumb';
-    const img = document.createElement('img');
-    img.src = entry.dataUrl;
-    img.alt = `Selected image ${idx + 1}`;
-    const rm = document.createElement('button');
-    rm.className = 'img-rm';
-    rm.type = 'button';
-    rm.setAttribute('aria-label', `Remove image ${idx + 1}`);
-    rm.textContent = '✕';
-    rm.addEventListener('click', (e) => {
-      e.stopPropagation();
-      imageFiles.splice(idx, 1);
-      if (!imageFiles.length) { clearImg(); return; }
-      renderImageGrid();
-    });
-    wrap.appendChild(img);
-    wrap.appendChild(rm);
-    grid.appendChild(wrap);
-  });
-  const addBtn = $('addMoreBtn');
-  if (addBtn) addBtn.style.display = imageFiles.length >= MAX_IMAGES ? 'none' : '';
-}
-
-function addFiles(files) {
-  const remaining = MAX_IMAGES - imageFiles.length;
-  const toAdd = Array.from(files).slice(0, remaining);
-  if (!toAdd.length) { toast(`Max ${MAX_IMAGES} images`, 'yellow'); return; }
-  let processed = 0;
-  toAdd.forEach((file) => {
-    compressImage(file, (blob, dataUrl) => {
-      imageFiles.push({
-        file: new File([blob], `scan${imageFiles.length}.jpg`, { type: 'image/jpeg' }),
-        dataUrl,
-      });
-      processed++;
-      if (processed === toAdd.length) {
-        renderImageGrid();
-        $('imgPrev').classList.remove('hidden');
-        $('dz').classList.add('hidden');
-        $('vcard').classList.add('hidden');
-      }
-    });
-  });
-}
-
-function handleFiles(e) {
-  const files = e.target.files;
-  if (!files || !files.length) return;
-  addFiles(files);
-}
-window.handleFiles = handleFiles;
-
-function addMore() {
-  if (imageFiles.length >= MAX_IMAGES) { toast(`Max ${MAX_IMAGES} images`, 'yellow'); return; }
-  const inp = document.createElement('input');
-  inp.type = 'file';
-  inp.accept = 'image/*';
-  inp.multiple = true;
-  inp.addEventListener('change', (e) => addFiles(e.target.files));
-  inp.click();
-}
-window.addMore = addMore;
-
-function clearImg() {
-  imageFiles = [];
-  $('imgGrid').innerHTML = '';
-  $('imgPrev').classList.add('hidden');
-  $('dz').classList.remove('hidden');
-  $('vcard').classList.add('hidden');
-  $('scanSpin').classList.add('hidden');
-  $('scanbtn').disabled = false;
-}
-window.clearImg = clearImg;
-
-// ── AI scan ───────────────────────────────────────────────────
-let _scanning = false;
-async function doScan() {
-  if (_scanning) { toast('Scan already in progress — please wait', 'yellow'); return; }
-  if (!imageFiles.length) { toast('No images selected!', 'yellow'); return; }
-  _scanning = true;
-  $('scanSpin').classList.remove('hidden');
-  $('scanbtn').disabled = true;
-  const n = imageFiles.length;
-  $('scanMsg').textContent = `Analyzing ${n} image${n > 1 ? 's' : ''} (local AI — can take 30-120s on CPU)...`;
-  try {
-    const fd = new FormData();
-    imageFiles.forEach((entry) => fd.append('images', entry.file));
-    const res = await api('/api/scan', { method: 'POST', body: fd });
-    const r = res.result || {};
-    popV({
-      name: r.name || '',
-      type: r.type || '',
-      serial: r.serial || '',
-      barcode: r.barcode || '',
-      notes: '',
-      confidence: typeof r.confidence === 'number' ? Math.round(r.confidence * 100) : null,
-    }, true);
-  } catch (err) {
-    toast('Scan failed: ' + err.message, 'red');
-  } finally {
-    _scanning = false;
-    $('scanSpin').classList.add('hidden');
-    $('scanbtn').disabled = false;
-  }
-}
-window.doScan = doScan;
-
 // ── Manual entry ──────────────────────────────────────────────
 function prepManual() {
   const n = $('m_name').value.trim();
@@ -246,39 +95,21 @@ function prepManual() {
     serial: $('m_serial').value.trim(),
     barcode: $('m_barcode').value.trim(),
     notes: $('m_notes').value.trim(),
-    confidence: null,
-  }, false);
+  });
 }
 window.prepManual = prepManual;
 
 // ── Verify card ───────────────────────────────────────────────
-function popV(d, fromAI) {
+function popV(d) {
   $('v_name').value = d.name || '';
   $('v_type').value = d.type || '';
   $('v_serial').value = d.serial || '';
   $('v_barcode').value = d.barcode || '';
   $('v_notes').value = d.notes || '';
-  $('v_user').textContent = usr;
+  // For admin kiosk mode show the *target* student; otherwise the signed-in user.
+  const target = (ME && ME.role === 'admin') ? selectedKioskUsername() : usr;
+  $('v_user').textContent = target || usr;
   $('v_dt').textContent = new Date().toLocaleString();
-  const cw = $('confW');
-  const cfill = $('cfill');
-  const clbl = $('clbl');
-  cfill.classList.remove('high', 'mid', 'low');
-  clbl.classList.remove('high', 'mid', 'low');
-  if (fromAI && d.confidence != null) {
-    cw.classList.remove('hidden');
-    cfill.style.width = d.confidence + '%';
-    let bucket, label;
-    if (d.confidence >= 80) { bucket = 'high'; label = 'High confidence'; }
-    else if (d.confidence >= 50) { bucket = 'mid'; label = 'Medium — double check'; }
-    else { bucket = 'low'; label = 'Low — verify carefully'; }
-    cfill.classList.add(bucket);
-    clbl.classList.add(bucket);
-    clbl.textContent = `${d.confidence}% — ${label}`;
-  } else {
-    cw.classList.add('hidden');
-  }
-  aiSource = fromAI;
   const vc = $('vcard');
   vc.classList.remove('hidden');
   setTimeout(() => vc.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
@@ -341,13 +172,15 @@ async function confirmCO() {
       });
       item = created.item;
     }
+    const checkoutBody = { notes: payload.notes, source: 'Manual' };
+    const forUserId = selectedKioskUserId();
+    if (forUserId) checkoutBody.for_user_id = forUserId;
     await api(`/api/equipment/${item.id}/checkout`, {
       method: 'POST',
-      body: JSON.stringify({ notes: payload.notes, source: aiSource ? 'Scan' : 'Manual' }),
+      body: JSON.stringify(checkoutBody),
     });
     toast('Checked out!', 'green');
     $('vcard').classList.add('hidden');
-    clearImg();
     ['m_name', 'm_type', 'm_serial', 'm_barcode', 'm_notes'].forEach((id) => ($(id).value = ''));
     // Refresh tabs that may now be stale.
     if ($('pg-checkin').classList.contains('on')) loadCI();
@@ -360,6 +193,64 @@ async function confirmCO() {
   }
 }
 window.confirmCO = confirmCO;
+
+// ── Admin kiosk user-selector ─────────────────────────────────
+// Returns the currently selected borrower's user id, or null when not in
+// admin kiosk mode (or when "self" is selected).
+function selectedKioskUserId() {
+  if (!ME || ME.role !== 'admin') return null;
+  const sel = $('kioskUser');
+  if (!sel) return null;
+  const v = parseInt(sel.value, 10);
+  if (!Number.isFinite(v) || v === ME.id) return null;
+  return v;
+}
+
+function selectedConfirmUsername() {
+  const sel = $('confirmUser');
+  if (!sel) return '';
+  const opt = sel.options[sel.selectedIndex];
+  return (opt && opt.dataset && opt.dataset.username) || '';
+}
+
+function selectedKioskUsername() {
+  if (!ME || ME.role !== 'admin') return ME ? ME.username : '';
+  const sel = $('kioskUser');
+  if (!sel) return ME.username;
+  const opt = sel.options[sel.selectedIndex];
+  return (opt && opt.dataset && opt.dataset.username) || ME.username;
+}
+
+async function loadKioskUsers() {
+  if (!ME || ME.role !== 'admin') return;
+  try {
+    const { users } = await api('/api/admin/users');
+    kioskUsers = (users || []).slice().sort((a, b) =>
+      (a.username || '').localeCompare(b.username || ''));
+    populateKioskSelect($('kioskUser'));
+  } catch {
+    // non-fatal — admin can still check out as themselves
+  }
+}
+
+function populateKioskSelect(sel) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  // First option is the admin themselves.
+  const selfOpt = document.createElement('option');
+  selfOpt.value = String(ME.id);
+  selfOpt.dataset.username = ME.username;
+  selfOpt.textContent = `${ME.username} (myself)`;
+  sel.appendChild(selfOpt);
+  kioskUsers.forEach((u) => {
+    if (u.id === ME.id) return;
+    const o = document.createElement('option');
+    o.value = String(u.id);
+    o.dataset.username = u.username;
+    o.textContent = u.username + (u.role === 'admin' ? ' · admin' : '');
+    sel.appendChild(o);
+  });
+}
 
 // ── Check-in list ─────────────────────────────────────────────
 async function loadCI() {
@@ -1013,6 +904,11 @@ async function onAuthed() {
     invBtn.classList.toggle('hidden', !isAdmin);
     invBtn.style.display = isAdmin ? '' : 'none';
   }
+  // Kiosk mode: admins get a "Checking out for" student picker on the
+  // Check Out page so they can hand gear to students who don't have phones.
+  const kioskBox = $('kioskBox');
+  if (kioskBox) kioskBox.classList.toggle('hidden', !isAdmin);
+  if (isAdmin) loadKioskUsers();
   if (!isAdmin && ($('pg-log').classList.contains('on') || $('pg-inventory').classList.contains('on'))) {
     swPage('checkout');
   }
@@ -1744,6 +1640,23 @@ function openConfirmModal(item, mode) {
   if (isOut && item.checked_out_username) row('Checked out by', item.checked_out_username);
   if (isOut && item.checked_out_at) row('Checked out at', new Date(item.checked_out_at).toLocaleString());
 
+  // Show the kiosk borrower-picker only when an admin is checking out an
+  // available item. Default it to whatever they have selected on the
+  // Check Out page so the choice carries over.
+  const kioskWrap = $('confirmKiosk');
+  const kioskSel = $('confirmUser');
+  const isAdmin = ME && ME.role === 'admin';
+  if (kioskWrap && kioskSel) {
+    if (isAdmin && isCheckout && isAvail) {
+      populateKioskSelect(kioskSel);
+      const pageSel = $('kioskUser');
+      if (pageSel && pageSel.value) kioskSel.value = pageSel.value;
+      kioskWrap.classList.remove('hidden');
+    } else {
+      kioskWrap.classList.add('hidden');
+    }
+  }
+
   // Decide button + sub-text based on (mode, status) combinations.
   const sub = $('confirmSub');
   const yesBtn = $('confirmYesBtn');
@@ -1799,11 +1712,22 @@ async function doConfirmAction() {
   yesBtn.textContent = 'Working...';
   try {
     if (mode === 'checkout') {
+      const body = { source: 'Barcode' };
+      // Admin kiosk: pass the selected borrower id (omitted when the admin
+      // is checking out for themselves, so the server records it as a
+      // normal self-checkout).
+      if (ME && ME.role === 'admin') {
+        const sel = $('confirmUser');
+        const v = sel ? parseInt(sel.value, 10) : NaN;
+        if (Number.isFinite(v) && v !== ME.id) body.for_user_id = v;
+      }
       await api(`/api/equipment/${item.id}/checkout`, {
         method: 'POST',
-        body: JSON.stringify({ source: 'Barcode' }),
+        body: JSON.stringify(body),
       });
-      toast(`Checked out: ${item.name}`, 'green');
+      const who = (ME && ME.role === 'admin' && body.for_user_id)
+        ? ` (for ${selectedConfirmUsername()})` : '';
+      toast(`Checked out: ${item.name}${who}`, 'green');
     } else {
       await api(`/api/equipment/${item.id}/checkin`, {
         method: 'POST',

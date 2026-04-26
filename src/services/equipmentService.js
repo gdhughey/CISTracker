@@ -105,7 +105,12 @@ function remove(id) {
 }
 
 // Atomic checkout — only succeeds if status is currently 'available'.
-function checkout(equipmentId, userId, username, notes = '', source = 'Manual') {
+// userId/username identify the *borrower* (the student getting the gear).
+// performedById identifies the actor (admin in kiosk mode, otherwise same as
+// borrower). The checkout_log keeps both: performed_by = actor, checkout_user
+// = borrower username, so audits show who actually scanned/clicked.
+function checkout(equipmentId, userId, username, notes = '', source = 'Manual', performedById = null) {
+  const actorId = performedById || userId;
   const tx = db.transaction(() => {
     const eq = db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
     if (!eq) throw Object.assign(new Error('Equipment not found'), { status: 404 });
@@ -121,7 +126,7 @@ function checkout(equipmentId, userId, username, notes = '', source = 'Manual') 
     db.prepare(`
       INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
       VALUES (?, 'checkout', ?, ?, ?, ?)
-    `).run(equipmentId, userId, username, notes, source);
+    `).run(equipmentId, actorId, username, notes, source);
   });
   tx();
   return getById(equipmentId);

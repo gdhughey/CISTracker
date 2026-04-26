@@ -13,7 +13,9 @@ const { notFound, errorHandler } = require('./src/middleware/error');
 const authRoutes = require('./src/routes/auth');
 const equipmentRoutes = require('./src/routes/equipment');
 const adminRoutes = require('./src/routes/admin');
-const scanRoutes = require('./src/routes/scan');
+// AI/Ollama scan route is intentionally not mounted — the UI now uses
+// barcode/QR + manual entry only. The route file is kept on disk so the
+// vision config + service can be re-enabled later without a code change.
 
 const { runMigrations } = require('./src/db/migrate');
 runMigrations();
@@ -50,7 +52,6 @@ app.use('/api', apiLimiter, verifyToken);
 app.use('/api/auth', authRoutes);
 app.use('/api/equipment', equipmentRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/scan', scanRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

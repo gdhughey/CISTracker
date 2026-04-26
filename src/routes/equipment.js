@@ -23,6 +23,10 @@ const updateSchema = createSchema.partial();
 const checkoutSchema = z.object({
   notes: z.string().max(500).optional().transform(v => stripHtml(v || '')),
   source: z.enum(['Manual', 'Scan', 'Barcode']).optional(),
+  // Admin kiosk: when an admin performs checkout on behalf of a student,
+  // they pass the target user's id here. Non-admins must omit this — the
+  // server enforces that below and falls back to the acting user.
+  for_user_id: z.number().int().positive().optional(),
 });
 
 router.use(requireAuth);
@@ -112,8 +116,27 @@ router.delete('/:id(\\d+)', requireRole('admin'), (req, res) => {
 router.post('/:id(\\d+)/checkout', validate(checkoutSchema), (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const item = equipmentService.checkout(id, req.user.id, req.user.username, req.body.notes, req.body.source);
-    req.audit('checkout', String(id));
+    // Resolve who the equipment is being checked out *to*. Admins can pass
+    // for_user_id to check out on behalf of a student (kiosk flow). Anyone
+    // else attempting to pass a different user id is rejected.
+    let borrower = { id: req.user.id, username: req.user.username };
+    if (req.body.for_user_id && req.body.for_user_id !== req.user.id) {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Only admins can check out on behalf of another user' });
+      }
+      const target = require('../services/userService').getById(req.body.for_user_id);
+      if (!target) return res.status(404).json({ error: 'Selected user not found' });
+      borrower = { id: target.id, username: target.username };
+    }
+    const item = equipmentService.checkout(
+      id,
+      borrower.id,
+      borrower.username,
+      req.body.notes,
+      req.body.source,
+      req.user.id,
+    );
+    req.audit('checkout', String(id), borrower.id !== req.user.id ? { for_user: borrower.username } : undefined);
     res.json({ item });
   } catch (err) { next(err); }
 });
