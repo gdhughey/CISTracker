@@ -59,6 +59,9 @@ app.use(errorHandler);
 const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`CIS Tracker listening on http://0.0.0.0:${config.port} (env=${config.env})`);
+  if (config.appUrl && config.appUrl !== 'http://localhost:3000') {
+    console.log(`  → ${config.appUrl}`);
+  }
   // Start overdue-reminder cron job
   require('./src/services/reminderService').start();
 });
