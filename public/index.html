@@ -58,16 +58,23 @@
       <div class="note">For items without a QR label — enter the details by hand and check out.</div>
 
       <div id="manualMode">
-        <div class="note">For cables, adapters &amp; small items without barcodes.</div>
+        <div class="note">For cables, adapters &amp; small items without barcodes. Tip: scanning or typing an existing CIS-XXXXXX asset ID and pressing Enter will auto-fill the rest from inventory.</div>
         <div class="fr">
           <div class="fg"><label class="fl">Name *</label><input type="text" class="fi" id="m_name" placeholder="e.g. Cat6 Cable"></div>
           <div class="fg"><label class="fl">Type</label><input type="text" class="fi" id="m_type" placeholder="e.g. Cable"></div>
         </div>
         <div class="fr">
           <div class="fg"><label class="fl">Serial #</label><input type="text" class="fi" id="m_serial" placeholder="If available"></div>
-          <div class="fg"><label class="fl">Barcode</label><input type="text" class="fi" id="m_barcode" placeholder="If available"></div>
+          <div class="fg">
+            <label class="fl" for="m_barcode">Barcode / Asset ID</label>
+            <div class="manual-barcode-row">
+              <input type="text" class="fi mono" id="m_barcode" placeholder="CIS-000001" autocomplete="off">
+              <button type="button" class="btn bo bsm" onclick="manualBarcodeLookup()" aria-label="Look up by barcode">🔎 Look Up</button>
+            </div>
+          </div>
         </div>
         <div class="fg"><label class="fl">Notes</label><input type="text" class="fi" id="m_notes" placeholder="Condition, color, qty..."></div>
+        <div id="m_lookup_status" class="manual-lookup-status" aria-live="polite"></div>
         <button class="btn bp bfull" onclick="prepManual()">Next → Review</button>
       </div>
     </div>
@@ -139,6 +146,14 @@
         <button class="btn bo bsm" onclick="suggestAssetId()">↻ New ID</button>
       </div>
       <div id="ai_err" class="ov-err" role="alert"></div>
+    </div>
+
+    <div class="card">
+      <div class="ctitle">📷 Scan / Look Up Label</div>
+      <div class="note">Scan an existing QR label (or type the asset ID) to pull the item's details from the database and open it for editing.</div>
+      <div class="brow">
+        <button class="btn bp bfull" onclick="startInventoryScan()">📷 Scan QR / Look Up</button>
+      </div>
     </div>
 
     <div class="card">
@@ -376,6 +391,15 @@
     <div class="brow">
       <button class="btn bp" id="scanManualBtn" onclick="scanLookupManual()">🔎 Look Up</button>
       <button class="btn bo bsm" onclick="closeScanModal()">Cancel</button>
+    </div>
+    <div id="scanNotFound" class="hidden scan-notfound" role="region" aria-live="polite">
+      <div class="snf-title">⚠ <span id="snfCode" class="mono accent"></span> not found in inventory</div>
+      <div class="snf-sub">No equipment matches that asset ID. Choose how to proceed:</div>
+      <div class="brow snf-actions">
+        <button class="btn bp" id="snfCreateBtn" onclick="scanCreateFromMissing()">＋ Create New Item</button>
+        <button class="btn bo bsm" onclick="scanRetry()">↻ Try Again</button>
+        <button class="btn bo bsm" onclick="closeScanModal()">Manual Entry</button>
+      </div>
     </div>
     <div id="scanErr" class="ov-err" role="alert"></div>
   </div>

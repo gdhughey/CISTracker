@@ -99,6 +99,41 @@ function prepManual() {
 }
 window.prepManual = prepManual;
 
+// Pressing Enter (or clicking 🔎 Look Up) on the Check Out manual entry
+// barcode field calls /lookup just like the camera scanner. If a row
+// matches, jump straight into the populated Confirm Check Out modal —
+// no re-typing the name/type/serial. If it doesn't, we leave the form
+// alone so the user can keep filling in a new manual item.
+async function manualBarcodeLookup() {
+  const code = ($('m_barcode').value || '').trim();
+  const status = $('m_lookup_status');
+  if (status) { status.textContent = ''; status.classList.remove('err', 'ok'); }
+  if (!code) {
+    if (status) { status.textContent = 'Enter or scan an asset ID first.'; status.classList.add('err'); }
+    $('m_barcode').focus();
+    return;
+  }
+  if (status) status.textContent = `Looking up ${code}...`;
+  try {
+    const { item } = await api('/api/equipment/lookup?code=' + encodeURIComponent(code));
+    if (status) { status.textContent = `Found ${item.name} — confirm to check out.`; status.classList.add('ok'); }
+    openConfirmModal(item, 'checkout');
+  } catch (err) {
+    if (err && err.status === 404) {
+      if (status) {
+        status.textContent = `No inventory item matches ${code}. Fill in the rest of the form to create a new item.`;
+        status.classList.add('err');
+      }
+      // Focus the name field so the admin can finish creating a new item.
+      const nameEl = $('m_name');
+      if (nameEl && !nameEl.value.trim()) nameEl.focus();
+    } else {
+      if (status) { status.textContent = err.message || 'Lookup failed'; status.classList.add('err'); }
+    }
+  }
+}
+window.manualBarcodeLookup = manualBarcodeLookup;
+
 // ── Verify card ───────────────────────────────────────────────
 function popV(d) {
   $('v_name').value = d.name || '';
@@ -1489,21 +1524,84 @@ window.startCheckoutScan = startCheckoutScan;
 function startCheckinScan() { openScanModal('checkin'); }
 window.startCheckinScan = startCheckinScan;
 
+function startInventoryScan() {
+  if (!ME || ME.role !== 'admin') return;
+  openScanModal('inventory');
+}
+window.startInventoryScan = startInventoryScan;
+
 async function openScanModal(mode) {
   _scanMode = mode;
   _scanBusy = false;
   _lastFocusedBeforeOverlay = document.activeElement;
-  $('scanTitle').textContent = mode === 'checkout' ? '📷 Scan to Check Out' : '📷 Scan to Check In';
-  $('scanSub').textContent = mode === 'checkout'
-    ? 'Point the camera at the QR label of the item to check out.'
-    : 'Point the camera at the QR label of the item to check in.';
+  const titles = {
+    checkout: '📷 Scan to Check Out',
+    checkin: '📷 Scan to Check In',
+    inventory: '📷 Scan to Look Up Item',
+  };
+  const subs = {
+    checkout: 'Point the camera at the QR label of the item to check out.',
+    checkin: 'Point the camera at the QR label of the item to check in.',
+    inventory: 'Scan or enter an asset ID to load its details from inventory.',
+  };
+  $('scanTitle').textContent = titles[mode] || titles.checkout;
+  $('scanSub').textContent = subs[mode] || subs.checkout;
   $('scanErr').textContent = '';
   $('scanManualInput').value = '';
+  hideScanNotFound();
   setScanStatus('Starting camera...', '');
   $('scanOv').classList.remove('hidden');
   await startScanner();
   setTimeout(() => $('scanManualInput').focus({ preventScroll: true }), 30);
 }
+
+function hideScanNotFound() {
+  const nf = $('scanNotFound');
+  if (nf) nf.classList.add('hidden');
+}
+
+function showScanNotFound(code) {
+  const nf = $('scanNotFound');
+  if (!nf) return;
+  $('snfCode').textContent = code;
+  // The "Create New Item" path is admin-only — hide the button otherwise.
+  const createBtn = $('snfCreateBtn');
+  const isAdmin = ME && ME.role === 'admin';
+  if (createBtn) createBtn.style.display = isAdmin ? '' : 'none';
+  nf.classList.remove('hidden');
+}
+
+async function scanRetry() {
+  hideScanNotFound();
+  $('scanErr').textContent = '';
+  const input = $('scanManualInput');
+  if (input) { input.value = ''; input.focus(); }
+  _scanBusy = false;
+  setScanStatus('Restarting camera...', '');
+  // Stop any leftover stream first, then re-arm. Safe to call when already
+  // stopped — startScanner handles the missing-camera path itself.
+  stopScanner();
+  await startScanner();
+}
+window.scanRetry = scanRetry;
+
+// Admin-only: when a scan didn't match anything, pre-fill the Inventory
+// "Add Item" form with the scanned asset ID and bounce there.
+function scanCreateFromMissing() {
+  if (!ME || ME.role !== 'admin') return;
+  const code = ($('snfCode').textContent || '').trim();
+  closeScanModal();
+  swPage('inventory');
+  // Defer until the inventory page has rendered + loaded the next-id default.
+  setTimeout(() => {
+    const aid = $('ai_assetid');
+    const name = $('ai_name');
+    if (aid) aid.value = code;
+    if (name) { name.focus(); }
+    toast(`Asset ID ${code} ready — fill in the name and create.`, 'green');
+  }, 80);
+}
+window.scanCreateFromMissing = scanCreateFromMissing;
 
 async function startScanner() {
   // Prefer ZXing if it loaded; fall back to a clear manual-only message.
@@ -1582,6 +1680,7 @@ window.scanLookupManual = scanLookupManual;
 async function handleScannedCode(rawCode) {
   const code = (rawCode || '').trim();
   if (!code) { _scanBusy = false; return; }
+  hideScanNotFound();
   setScanStatus(`Looking up "${code}"...`, '');
   try {
     const { item } = await api('/api/equipment/lookup?code=' + encodeURIComponent(code));
@@ -1589,12 +1688,22 @@ async function handleScannedCode(rawCode) {
     // Quickly stop the camera once we have a match — keep modal up briefly
     // so the user sees the "Found" status before the confirm modal opens.
     stopScanner();
+    const mode = _scanMode || 'checkout';
     closeScanModal();
-    openConfirmModal(item, _scanMode || 'checkout');
+    if (mode === 'inventory') {
+      // Inventory path: open the existing edit modal, populated entirely
+      // from the DB row the asset ID resolved to.
+      showEqEdit(item);
+      toast(`Loaded ${item.name} from inventory`, 'green');
+    } else {
+      openConfirmModal(item, mode);
+    }
   } catch (err) {
     const status = err && err.status;
     if (status === 404) {
-      setScanStatus(`No item matches "${code}". Check the label or enter the asset ID manually.`, 'err');
+      setScanStatus(`No item matches "${code}".`, 'err');
+      showScanNotFound(code);
+      stopScanner();
     } else {
       setScanStatus(err.message || 'Lookup failed', 'err');
     }
@@ -1635,10 +1744,18 @@ function openConfirmModal(item, mode) {
   }
   row('Asset ID', item.barcode);
   row('Type', item.type);
+  row('Category', item.category);
   row('Serial #', item.serial_number);
   row('Notes', item.notes);
   if (isOut && item.checked_out_username) row('Checked out by', item.checked_out_username);
   if (isOut && item.checked_out_at) row('Checked out at', new Date(item.checked_out_at).toLocaleString());
+  if (item.created_at) row('Added', new Date(item.created_at).toLocaleDateString());
+  // Footer hint that this data came straight from the DB by asset-ID lookup,
+  // not typed in by the user.
+  const src = document.createElement('div');
+  src.className = 'cd-source';
+  src.textContent = '🔗 Loaded from inventory by asset ID';
+  det.appendChild(src);
 
   // Show the kiosk borrower-picker only when an admin is checking out an
   // available item. Default it to whatever they have selected on the
@@ -1769,6 +1886,15 @@ window.doConfirmAction = doConfirmAction;
   if (scanInput) scanInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') scanLookupManual(); });
   $('scanOv').addEventListener('click', (e) => { if (e.target === $('scanOv')) closeScanModal(); });
   $('confirmOv').addEventListener('click', (e) => { if (e.target === $('confirmOv')) closeConfirmModal(); });
+
+  // Check Out → manual entry: pressing Enter in the barcode/asset-ID field
+  // (or in any of the related inputs) triggers the lookup, so a USB/HID
+  // barcode scanner that ends the scan with Enter populates the confirm
+  // modal directly without any extra clicks.
+  const mBarcode = $('m_barcode');
+  if (mBarcode) mBarcode.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); manualBarcodeLookup(); }
+  });
 
   // Stop the camera if the user navigates away or hides the tab.
   document.addEventListener('visibilitychange', () => {

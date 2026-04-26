@@ -556,6 +556,31 @@ td{padding:9px 8px;border-bottom:1px solid rgba(26,45,74,.45);vertical-align:top
 }
 .confirm-details .cd-status.avail{background:rgba(58,222,160,.15);color:var(--green);}
 .confirm-details .cd-status.out{background:rgba(255,140,80,.15);color:var(--yellow);}
+.confirm-details .cd-source{
+  margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);
+  font-family:"Sora",sans-serif;font-size:.72rem;color:var(--muted);
+  letter-spacing:.04em;text-transform:uppercase;
+}
+
+/* Scan modal: not-found rescue panel */
+.scan-notfound{
+  margin-top:10px;padding:12px;border-radius:8px;
+  background:rgba(255,140,80,.08);border:1px solid var(--border);
+  text-align:left;
+}
+.scan-notfound.hidden{display:none;}
+.scan-notfound .snf-title{font-weight:700;margin-bottom:4px;}
+.scan-notfound .snf-sub{font-size:.82rem;color:var(--muted-strong);margin-bottom:8px;}
+.scan-notfound .snf-actions{margin-top:6px;flex-wrap:wrap;}
+
+/* Check Out manual entry: barcode field + inline Look Up button */
+.manual-barcode-row{display:flex;gap:6px;align-items:stretch;}
+.manual-barcode-row .fi{flex:1;min-width:0;}
+.manual-lookup-status{
+  font-size:.82rem;color:var(--muted-strong);min-height:1.05em;margin:4px 0 8px;
+}
+.manual-lookup-status.err{color:var(--red);}
+.manual-lookup-status.ok{color:var(--green);}
 
 /* High-contrast preference */
 @media (prefers-contrast: more){
