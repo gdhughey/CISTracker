@@ -143,6 +143,92 @@ async function manualBarcodeLookup() {
 }
 window.manualBarcodeLookup = manualBarcodeLookup;
 
+// ── Browse inventory (checkout tab) ─────────────────────────
+let cacheBrowse = [];
+
+async function loadBrowseInventory() {
+  const el = $('browseList');
+  el.innerHTML = '<div class="sw"><div class="sp" aria-hidden="true"></div><span>Loading...</span></div>';
+  try {
+    const { items } = await api('/api/equipment');
+    cacheBrowse = (items || []).filter(i => i.status === 'available');
+    // Populate category dropdown
+    const cats = [...new Set(cacheBrowse.map(i => i.category).filter(Boolean))].sort();
+    const sel = $('browseCat');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All Categories</option>';
+    cats.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      sel.appendChild(o);
+    });
+    if (cur) sel.value = cur;
+    filterBrowseInventory();
+  } catch (err) {
+    el.innerHTML = '<div class="es"><div class="ei">⚠️</div><div class="et">' + esc(err.message) + '</div></div>';
+  }
+}
+window.loadBrowseInventory = loadBrowseInventory;
+
+function filterBrowseInventory() {
+  const q = ($('browseSearch').value || '').trim().toLowerCase();
+  const cat = ($('browseCat').value || '');
+  const el = $('browseList');
+  let filtered = cacheBrowse;
+  if (cat) filtered = filtered.filter(i => i.category === cat);
+  if (q) {
+    filtered = filtered.filter(i =>
+      (i.name || '').toLowerCase().includes(q) ||
+      (i.serial_number || '').toLowerCase().includes(q) ||
+      (i.barcode || '').toLowerCase().includes(q) ||
+      (i.category || '').toLowerCase().includes(q) ||
+      (i.type || '').toLowerCase().includes(q)
+    );
+  }
+  if (!filtered.length) {
+    el.innerHTML = '<div class="es"><div class="ei">🔍</div><div class="et">No available items match</div></div>';
+    return;
+  }
+  // Show max 50 items at a time
+  const shown = filtered.slice(0, 50);
+  el.innerHTML = '';
+  shown.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'ci-row';
+    row.style.cursor = 'pointer';
+    row.onclick = () => openConfirmModal(item, 'checkout');
+
+    const left = document.createElement('div');
+    left.className = 'ci-left';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'cname';
+    nameEl.textContent = item.name;
+    const meta = document.createElement('div');
+    meta.className = 'cmeta';
+    const parts = [item.barcode, item.category, item.serial_number].filter(Boolean);
+    meta.textContent = parts.join(' · ');
+    left.appendChild(nameEl);
+    left.appendChild(meta);
+
+    const btn = document.createElement('button');
+    btn.className = 'btn bg bsm';
+    btn.textContent = '📤 Out';
+    btn.setAttribute('aria-label', 'Check out ' + item.name);
+    btn.onclick = (e) => { e.stopPropagation(); openConfirmModal(item, 'checkout'); };
+
+    row.appendChild(left);
+    row.appendChild(btn);
+    el.appendChild(row);
+  });
+  if (filtered.length > 50) {
+    const more = document.createElement('div');
+    more.className = 'es';
+    more.innerHTML = '<div class="et">Showing 50 of ' + filtered.length + ' — narrow your search</div>';
+    el.appendChild(more);
+  }
+}
+window.filterBrowseInventory = filterBrowseInventory;
+
 // ── Verify card ───────────────────────────────────────────────
 function popV(d) {
   $('v_name').value = d.name || '';

@@ -79,6 +79,25 @@
       </div>
     </div>
 
+    <div class="card">
+      <div class="ctitle">
+        <span>📋 Browse Inventory</span>
+        <button class="btn bo bsm" aria-label="Refresh inventory list" onclick="loadBrowseInventory()">🔄 Refresh</button>
+      </div>
+      <div class="note">For small items without QR labels — search and check out directly.</div>
+      <div class="fg">
+        <label class="fl" for="browseSearch">Search</label>
+        <input id="browseSearch" class="fi" type="search" placeholder="🔎 Search by name, serial, category, or asset ID..." oninput="filterBrowseInventory()" autocomplete="off">
+      </div>
+      <div class="fg" style="margin-top:6px">
+        <label class="fl" for="browseCat">Category</label>
+        <select id="browseCat" class="fi" onchange="filterBrowseInventory()">
+          <option value="">All Categories</option>
+        </select>
+      </div>
+      <div id="browseList" aria-live="polite"><div class="es"><div class="ei" aria-hidden="true">📦</div><div class="et">Press Refresh to load inventory</div></div></div>
+    </div>
+
     <div class="card hidden" id="vcard">
       <div class="ctitle">✅ Verify Before Saving</div>
       <div class="vbox">
