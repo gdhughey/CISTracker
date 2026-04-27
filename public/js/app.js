@@ -20,6 +20,15 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// SQLite datetime('now') stores UTC without a timezone suffix.
+// Append 'Z' so the browser converts to the user's local timezone.
+function utc(d) {
+  if (!d) return new Date(NaN);
+  const s = String(d).trim();
+  if (/[Zz+\-]\d{2}:?\d{2}$/.test(s) || s.endsWith('Z')) return new Date(s);
+  return new Date(s.replace(' ', 'T') + 'Z');
+}
+
 // ── HTTP helpers ──────────────────────────────────────────────
 function getCookie(name) {
   const m = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -344,7 +353,7 @@ function renderCI(items) {
     if (e.type) bits.push(e.type);
     if (e.serial_number) bits.push('S/N: ' + e.serial_number);
     if (e.barcode) bits.push('BC: ' + e.barcode);
-    if (e.checked_out_at) bits.push(new Date(e.checked_out_at).toLocaleString());
+    if (e.checked_out_at) bits.push(utc(e.checked_out_at).toLocaleString());
     meta.textContent = bits.join(' · ');
     if (e.checked_out_username) {
       const userTag = document.createElement('span');
@@ -788,7 +797,7 @@ async function loadLog() {
         <td><strong>${esc(e.equipment_name || '')}</strong></td>
         <td class="mono small">${sn}</td>
         <td class="accent bold">${esc(e.checkout_user || '')}</td>
-        <td class="mono small" style="color:var(--muted-strong)">${esc(new Date(e.created_at).toLocaleString())}</td>
+        <td class="mono small" style="color:var(--muted-strong)">${esc(utc(e.created_at).toLocaleString())}</td>
       </tr>`;
     });
     html += '</tbody></table></div>';
@@ -1170,7 +1179,7 @@ function renderAdminUsers(users) {
       b.textContent = 'MFA';
       meta.appendChild(b);
     }
-    if (u.locked_until && new Date(u.locked_until) > new Date()) {
+    if (u.locked_until && utc(u.locked_until) > new Date()) {
       const b = document.createElement('span');
       b.className = 'user-badge locked';
       b.textContent = 'LOCKED';
@@ -1295,7 +1304,7 @@ async function showUserDetail(id) {
         row.style.alignItems = 'center';
         row.style.gap = '8px';
         const days = e.checked_out_at
-          ? Math.floor((Date.now() - new Date(e.checked_out_at).getTime()) / 86400000)
+          ? Math.floor((Date.now() - utc(e.checked_out_at).getTime()) / 86400000)
           : 0;
         if (days >= 5) row.classList.add('alert');
         else if (days >= 3) row.classList.add('warn');
@@ -1306,7 +1315,7 @@ async function showUserDetail(id) {
         nm.textContent = e.name;
         const meta = document.createElement('div');
         meta.className = 'overdue-days';
-        meta.textContent = `${days} day${days === 1 ? '' : 's'} · ${new Date(e.checked_out_at).toLocaleDateString()}`;
+        meta.textContent = `${days} day${days === 1 ? '' : 's'} · ${utc(e.checked_out_at).toLocaleDateString()}`;
         info.appendChild(nm);
         info.appendChild(meta);
         row.appendChild(info);
@@ -1349,7 +1358,7 @@ async function showUserDetail(id) {
         left.innerHTML = `<strong>${esc(h.action)}</strong> — ${esc(h.equipment_name || '')}`;
         const right = document.createElement('div');
         right.className = 'audit-when';
-        right.textContent = new Date(h.created_at).toLocaleString();
+        right.textContent = utc(h.created_at).toLocaleString();
         row.appendChild(left);
         row.appendChild(right);
         body.appendChild(row);
@@ -1431,7 +1440,7 @@ async function loadOverdue() {
     el.innerHTML = '';
     items.forEach((i) => {
       const days = i.checked_out_at
-        ? Math.floor((Date.now() - new Date(i.checked_out_at).getTime()) / 86400000)
+        ? Math.floor((Date.now() - utc(i.checked_out_at).getTime()) / 86400000)
         : 0;
       const row = document.createElement('div');
       row.className = 'overdue-row';
@@ -1442,7 +1451,7 @@ async function loadOverdue() {
       name.textContent = i.name;
       const meta = document.createElement('div');
       meta.className = 'overdue-days';
-      meta.textContent = `${days} days · ${i.checked_out_username || ''} · ${new Date(i.checked_out_at).toLocaleDateString()}`;
+      meta.textContent = `${days} days · ${i.checked_out_username || ''} · ${utc(i.checked_out_at).toLocaleDateString()}`;
       row.appendChild(name);
       row.appendChild(meta);
       el.appendChild(row);
@@ -1484,7 +1493,7 @@ async function loadAudit() {
       const [label, cls] = badgeMap[e.action] || [esc(e.action), 'bwarn'];
       const user = esc(e.username || '');
       const target = esc(e.target || '—');
-      const when = esc(new Date(e.created_at).toLocaleString());
+      const when = esc(utc(e.created_at).toLocaleString());
       html += `<tr>
         <td><span class="badge ${cls}">${label}</span></td>
         <td class="accent bold">${user}</td>
@@ -1748,8 +1757,8 @@ function openConfirmModal(item, mode) {
   row('Serial #', item.serial_number);
   row('Notes', item.notes);
   if (isOut && item.checked_out_username) row('Checked out by', item.checked_out_username);
-  if (isOut && item.checked_out_at) row('Checked out at', new Date(item.checked_out_at).toLocaleString());
-  if (item.created_at) row('Added', new Date(item.created_at).toLocaleDateString());
+  if (isOut && item.checked_out_at) row('Checked out at', utc(item.checked_out_at).toLocaleString());
+  if (item.created_at) row('Added', utc(item.created_at).toLocaleDateString());
   // Footer hint that this data came straight from the DB by asset-ID lookup,
   // not typed in by the user.
   const src = document.createElement('div');
