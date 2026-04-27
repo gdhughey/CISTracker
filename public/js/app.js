@@ -619,7 +619,7 @@ async function submitAddItem() {
         </div>
         <div class="form-actions">
           <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
-          <button class="btn-primary" onclick="window.print()">🖨 Print Label</button>
+          <button class="btn-primary" onclick="doPrintLabel(${JSON.stringify(label)},${JSON.stringify(item.name)},${JSON.stringify(item.category||'')},${JSON.stringify(item.serial_number||'')})">🖨 Print Label</button>
         </div>
       `;
     } catch (labelErr) {
@@ -690,32 +690,41 @@ async function deleteItem(id) {
   }
 }
 
+// Shared label printer — 40mm × 30mm thermal stock.
+// Pass the label API response object plus item metadata.
+function doPrintLabel(label, name, category, serial) {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:40mm;height:30mm;border:none;';
+  document.body.appendChild(frame);
+  const doc = frame.contentDocument;
+  doc.write(`<html><head><style>
+    @page{size:40mm 30mm;margin:0;}
+    *{box-sizing:border-box;}
+    body{margin:0;padding:2mm;font-family:Arial,sans-serif;display:flex;gap:2mm;align-items:center;width:40mm;height:30mm;overflow:hidden;}
+    .qr{width:24mm;height:24mm;flex-shrink:0;}
+    .info{flex:1;overflow:hidden;}
+    .lab{font-size:5pt;color:#888;text-transform:uppercase;letter-spacing:.3px;}
+    .name{font-size:6.5pt;font-weight:700;line-height:1.2;margin:1px 0;word-break:break-word;}
+    .id{font-family:monospace;font-size:9pt;font-weight:700;letter-spacing:.5px;}
+    .sub{font-size:5pt;color:#666;margin-top:1px;}
+  </style></head><body>
+    <img class="qr" src="${label.qr_data_url}">
+    <div class="info">
+      <div class="lab">CIS CyberLab</div>
+      <div class="name">${esc(name)}</div>
+      <div class="id">${esc(label.asset_id)}</div>
+      <div class="sub">${esc(category || '')}${serial ? ' · ' + serial : ''}</div>
+    </div>
+  </body></html>`);
+  doc.close();
+  setTimeout(() => { frame.contentWindow.print(); setTimeout(() => frame.remove(), 2000); }, 250);
+}
+
 async function printLabel(id) {
   try {
     const label = await api(`/api/equipment/${id}/label`);
     const item = ITEMS.find(i => i.id === id);
-    // Create print frame
-    const frame = document.createElement('iframe');
-    frame.style.cssText = 'position:fixed;top:0;left:0;width:3.5in;height:1.75in;border:none;z-index:9999;';
-    document.body.appendChild(frame);
-    const doc = frame.contentDocument;
-    doc.write(`<html><head><style>
-      @page{size:3.5in 1.75in;margin:0;}
-      body{margin:0;padding:8px;font-family:sans-serif;display:flex;gap:8px;align-items:center;}
-      .qr{width:80px;height:80px;}
-      .info{flex:1;font-size:9px;}
-      .id{font-family:monospace;font-size:14px;font-weight:700;}
-    </style></head><body>
-      <img class="qr" src="${label.qr_data_url}">
-      <div class="info">
-        <div style="text-transform:uppercase;color:#888;font-size:8px">CIS CyberLab</div>
-        <div style="font-weight:600;font-size:10px;margin:2px 0">${esc(item?.name || '')}</div>
-        <div class="id">${esc(label.asset_id)}</div>
-        <div style="color:#666">${esc(item?.category || '')} ${item?.serial_number ? '· ' + item.serial_number : ''}</div>
-      </div>
-    </body></html>`);
-    doc.close();
-    setTimeout(() => { frame.contentWindow.print(); setTimeout(() => frame.remove(), 1000); }, 200);
+    doPrintLabel(label, item?.name || '', item?.category || '', item?.serial_number || '');
   } catch (err) {
     toast(err.error || 'Failed to load label', 'error');
   }
