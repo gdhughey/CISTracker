@@ -558,6 +558,7 @@ async function openAddItemModal() {
       <div class="modal-title">Add New Item</div>
       <span style="font-family:var(--mono);font-size:12px;color:var(--accent);background:var(--accent-soft);padding:4px 10px;border-radius:6px">${esc(nextId)}</span>
     </div>
+    <input type="hidden" id="addBarcode" value="${esc(nextId)}">
     <div class="modal-body" id="addStep1">
       <div class="form-group"><label>Item Name *</label><input id="addName" required></div>
       <div class="form-group"><label>Category</label>
@@ -590,6 +591,7 @@ async function submitAddItem() {
   try {
     const body = {
       name,
+      barcode: document.getElementById('addBarcode').value.trim(),
       category: document.getElementById('addCat').value,
       location: document.getElementById('addLoc').value.trim(),
       serial_number: document.getElementById('addSerial').value.trim(),
@@ -620,7 +622,8 @@ async function submitAddItem() {
           <button class="btn-primary" onclick="window.print()">🖨 Print Label</button>
         </div>
       `;
-    } catch {
+    } catch (labelErr) {
+      toast('Item created but label failed to load', 'info');
       closeModal();
     }
     loadItems();
