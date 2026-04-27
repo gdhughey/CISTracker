@@ -180,7 +180,7 @@ function switchView(view) {
     el.classList.toggle('active', el.dataset.view === view);
   });
   // Close mobile sidebar
-  document.getElementById('sidebar').classList.remove('mobile-open');
+  closeMobileSidebar();
   // Load view data
   if (view === 'inventory') loadItems();
   if (view === 'checkinout') loadCheckinout();
@@ -191,7 +191,12 @@ function switchView(view) {
 }
 
 function toggleMobileSidebar() {
-  document.getElementById('sidebar').classList.toggle('mobile-open');
+  const open = document.getElementById('sidebar').classList.toggle('mobile-open');
+  document.getElementById('sidebarBackdrop').classList.toggle('visible', open);
+}
+function closeMobileSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('sidebarBackdrop').classList.remove('visible');
 }
 
 // ═══════════════════════════════════════════════════════════════════════

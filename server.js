@@ -40,7 +40,7 @@ app.use(issueToken);
 // Other static assets (css, fonts, images) fall through to defaults.
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders(res, filePath) {
-    if (/\.(html|js)$/.test(filePath)) {
+    if (/\.(html|js|css)$/.test(filePath)) {
       res.setHeader('Cache-Control', 'no-store');
     }
   },

@@ -58,10 +58,13 @@
 
   <!-- Mobile header -->
   <div class="mobile-header">
-    <button class="hamburger" onclick="toggleMobileSidebar()">���</button>
-    <div class="logo-icon" style="width:24px;height:24px;font-size:11px">🛡</div>
+    <button class="hamburger" onclick="toggleMobileSidebar()">&#9776;</button>
+    <div class="logo-icon" style="width:24px;height:24px;font-size:11px">&#128737;</div>
     <span style="font-size:14px;font-weight:600">CISTracker</span>
   </div>
+
+  <!-- Backdrop (mobile sidebar overlay) -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
 
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">

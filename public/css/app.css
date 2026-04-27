@@ -548,21 +548,85 @@ td { padding:10px 14px; vertical-align:middle; }
 
 /* ── Responsive: collapse sidebar on small screens ── */
 @media (max-width: 768px) {
-  .sidebar { display:none; }
-  .sidebar.mobile-open { display:flex; position:fixed; z-index:999; inset:0; width:100%; }
+  /* Use dynamic viewport height so mobile browser chrome doesn't cut off content */
+  html, body { height:100%; }
+  .app-layout { height:100dvh; min-height:-webkit-fill-available; flex-direction:column; }
+
+  /* Sidebar hidden off-screen; slides in as a drawer */
+  .sidebar {
+    display:none;
+    position:fixed; z-index:300;
+    top:0; left:0; bottom:0;
+    width:260px;
+    box-shadow:4px 0 24px rgba(0,0,0,0.5);
+  }
+  .sidebar.mobile-open { display:flex; }
+
+  /* Dim overlay behind open sidebar */
+  .sidebar-backdrop {
+    display:none; position:fixed; inset:0; z-index:299;
+    background:rgba(0,0,0,0.55);
+  }
+  .sidebar-backdrop.visible { display:block; }
+
+  /* Mobile top bar */
   .mobile-header {
-    display:flex !important; padding:12px 16px; border-bottom:1px solid var(--border);
+    display:flex !important; flex-shrink:0;
+    padding:12px 16px; border-bottom:1px solid var(--border);
     align-items:center; gap:12px; background:var(--bg-sidebar);
   }
   .mobile-header .hamburger {
-    background:none; border:none; color:var(--text); font-size:20px; cursor:pointer;
+    background:none; border:none; color:var(--text); font-size:22px;
+    cursor:pointer; padding:2px 6px; line-height:1;
   }
-  .detail-panel { width:100%; }
-  .stats-bar { flex-wrap:wrap; }
-  .stat-card { min-width:calc(50% - 8px); }
+
+  /* Main content takes full width */
+  .main-content { width:100%; min-width:0; }
+
+  /* Top bar: wrap search + chips on separate rows */
+  .top-bar {
+    flex-wrap:wrap; padding:10px 14px; gap:8px;
+  }
+  .search-box { max-width:100%; order:-1; }
+  .status-chips { margin-left:0; overflow-x:auto; flex-wrap:nowrap; -webkit-overflow-scrolling:touch; }
+  .status-chips::-webkit-scrollbar { display:none; }
+  #addItemBtn { margin-left:auto; }
+
+  /* Stats bar */
+  .stats-bar { padding:10px 14px; gap:8px; flex-wrap:wrap; }
+  .stat-card { min-width:calc(50% - 4px); flex:1; padding:10px 14px; }
+  .stat-num { font-size:18px; }
+
+  /* Category chips */
+  .cat-chips { padding:8px 14px; }
+
+  /* Table: hide Category and Location columns on narrow screens */
+  .table-wrap { padding:0 0 16px; }
+  table th:nth-child(3), table td:nth-child(3),
+  table th:nth-child(4), table td:nth-child(4) { display:none; }
+  thead th { padding:8px 10px; font-size:10px; }
+  tbody tr { height:52px; }
+  tbody td { padding:10px; font-size:12px; }
+  .cell-id { font-size:10px; }
+  .btn-sm { padding:5px 8px; font-size:10px; }
+
+  /* Detail panel full-width */
+  .detail-panel { width:100%; border-radius:0; }
+
+  /* Modal full-width */
+  .modal { width:calc(100% - 24px); max-width:100%; margin:12px; }
+
+  /* Admin / tickets views */
+  .admin-view, .tickets-view { padding:14px; }
+  .ticket-detail { padding:14px; }
+
+  /* Table footer */
+  .table-footer { padding:10px 14px; }
 }
+
 @media (min-width: 769px) {
   .mobile-header { display:none !important; }
+  .sidebar-backdrop { display:none !important; }
 }
 
 /* ── Label print CSS ── */
