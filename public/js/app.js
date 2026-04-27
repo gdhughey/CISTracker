@@ -46,7 +46,7 @@ async function api(url, opts = {}) {
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('json') ? await res.json() : await res.text();
   // Grab CSRF from response cookie
-  const csrfCookie = document.cookie.split(';').find(c => c.trim().startsWith('_csrf='));
+  const csrfCookie = document.cookie.split(';').find(c => c.trim().startsWith('csrf_token='));
   if (csrfCookie) CSRF = csrfCookie.split('=')[1];
   if (!res.ok) throw { status: res.status, ...(typeof data === 'object' ? data : { error: data }) };
   return data;
