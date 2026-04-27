@@ -15,6 +15,7 @@ const createSchema = z.object({
   serial_number: z.string().max(100).optional().transform(v => stripHtml(v || '')),
   barcode: z.string().max(100).optional().transform(v => stripHtml(v || '')),
   category: z.string().max(100).optional().transform(v => stripHtml(v || '')),
+  location: z.string().max(200).optional().transform(v => stripHtml(v || '')),
   notes: z.string().max(2000).optional().transform(v => stripHtml(v || '')),
 });
 
@@ -33,10 +34,16 @@ router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const status = req.query.status;
-  // Non-admins only see items they themselves checked out.
-  // Admins see everything.
-  const onlyUserId = req.user.role === 'admin' ? undefined : req.user.id;
-  res.json({ items: equipmentService.listAll({ status, checkedOutBy: onlyUserId }) });
+  // Admins see everything; users see all items (needed for browse).
+  const items = equipmentService.listAll({ status });
+  // Attach queue counts
+  try {
+    const queueService = require('../services/queueService');
+    for (const item of items) {
+      item.queue_length = queueService.queueLength(item.id);
+    }
+  } catch { /* queue table may not exist yet */ }
+  res.json({ items });
 });
 
 // Full activity log is admin-only.
@@ -144,9 +151,12 @@ router.post('/:id(\\d+)/checkout', validate(checkoutSchema), (req, res, next) =>
 router.post('/:id(\\d+)/checkin', validate(checkoutSchema), (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const item = equipmentService.checkin(id, req.user, req.body.notes, req.body.source);
+    const result = equipmentService.checkin(id, req.user, req.body.notes, req.body.source);
     req.audit('checkin', String(id));
-    res.json({ item });
+    res.json({
+      item: result.item,
+      nextInQueue: result.nextInQueue ? { username: result.nextInQueue.username } : null,
+    });
   } catch (err) { next(err); }
 });
 

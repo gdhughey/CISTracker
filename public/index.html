@@ -1,450 +1,251 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#08111f">
-<title>CIS Tracker</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Sora:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/app.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CISTracker — CyberLab</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <meta name="theme-color" content="#0f1117">
 </head>
 <body>
 
-<div class="navbar">
-  <button id="backBtn" class="back-btn" aria-label="Back to Check Out" onclick="swPage('checkout')">&#8592;</button>
-  <div class="logo"><div class="ndot" aria-hidden="true"></div>CIS TRACKER</div>
-  <div class="nav-right">
-    <div id="gearWrap">
-      <button id="gearBtn" aria-label="Settings menu" aria-haspopup="true" aria-expanded="false" onclick="toggleGear()">&#9881;</button>
-      <div id="gearDrop" role="menu">
-        <div id="miAdmin" class="gear-item gear-admin" role="menuitem" tabindex="0" onclick="showAdmin()">👥 Admin Panel</div>
-        <div class="gear-item" role="menuitem" tabindex="0" onclick="showChp()">🔑 Change Password</div>
-        <div class="gear-item" role="menuitem" tabindex="0" onclick="showMfa()">📱 Setup MFA</div>
-        <div class="gear-item gear-danger" role="menuitem" tabindex="0" onclick="doLogout()">🚪 Sign Out</div>
+<!-- ═══ Login Page ═��═ -->
+<div id="loginPage" class="login-page hidden">
+  <div class="login-card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+      <div class="logo-icon">🛡</div>
+      <div>
+        <h1>CISTracker</h1>
+        <div class="subtitle">CyberLab Equipment Tracker</div>
       </div>
     </div>
+    <div id="loginError" style="display:none;color:var(--red);font-size:12px;margin-bottom:12px;padding:8px 12px;background:var(--red-soft);border-radius:8px;"></div>
+    <form id="loginForm" autocomplete="on">
+      <div class="form-group">
+        <label>Username</label>
+        <input id="loginUser" type="text" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input id="loginPass" type="password" autocomplete="current-password" required>
+      </div>
+      <div id="mfaGroup" class="form-group hidden">
+        <label>MFA Code</label>
+        <input id="loginMfa" type="text" maxlength="6" inputmode="numeric" placeholder="6-digit code" class="mono" autocomplete="one-time-code">
+      </div>
+      <button type="submit" class="btn-primary">Sign In</button>
+    </form>
   </div>
 </div>
 
-<div class="scroll" id="scr">
+<!-- ═══ Change Password ═══ -->
+<div id="changePwPage" class="login-page hidden">
+  <div class="login-card">
+    <h1>Change Password</h1>
+    <div class="subtitle">You must set a new password before continuing.</div>
+    <div id="changePwError" style="display:none;color:var(--red);font-size:12px;margin-bottom:12px;padding:8px 12px;background:var(--red-soft);border-radius:8px;"></div>
+    <form id="changePwForm">
+      <div class="form-group"><label>Current Password</label><input id="cpCurrent" type="password" required></div>
+      <div class="form-group"><label>New Password</label><input id="cpNew" type="password" required></div>
+      <div class="form-group"><label>Confirm New Password</label><input id="cpConfirm" type="password" required></div>
+      <button type="submit" class="btn-primary">Set Password</button>
+    </form>
+  </div>
+</div>
 
-  <!-- ═══════ CHECK OUT ═══════ -->
-  <div class="page on" id="pg-checkout">
-    <div class="card">
-      <div class="ctitle">👤 Checking Out As</div>
-      <div class="note">Signed in as <span id="curUser" class="accent bold"></span> — checkouts are recorded under this account.</div>
-      <div id="kioskBox" class="hidden" style="margin-top:10px">
-        <div class="ov-warn accent" style="margin-bottom:6px">🏫 Kiosk Mode (Admin)</div>
-        <div class="note">Pick the student receiving this equipment. They don't need to log in.</div>
-        <div class="fg" style="margin-top:6px">
-          <label class="fl" for="kioskUser">Checking out for</label>
-          <select id="kioskUser" class="fi"></select>
+<!-- ═══ App Layout ═══ -->
+<div id="appLayout" class="app-layout hidden">
+
+  <!-- Mobile header -->
+  <div class="mobile-header">
+    <button class="hamburger" onclick="toggleMobileSidebar()">���</button>
+    <div class="logo-icon" style="width:24px;height:24px;font-size:11px">🛡</div>
+    <span style="font-size:14px;font-weight:600">CISTracker</span>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">🛡</div>
+      <div class="logo-text">CISTracker</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-label">Inventory</div>
+        <div class="nav-item active" data-view="inventory" onclick="switchView('inventory')">
+          📦 All Items
         </div>
+        <div class="nav-item" data-view="checkinout" onclick="switchView('checkinout')">
+          �� Check In / Out
+        </div>
+        <div class="nav-item" data-view="overdue" onclick="switchView('overdue')">
+          ⏰ Overdue <span id="overdueBadge" class="badge hidden">0</span>
+        </div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">Support</div>
+        <div class="nav-item" data-view="tickets" onclick="switchView('tickets')">
+          🎫 Tickets <span id="ticketBadge" class="badge badge-purple hidden">0</span>
+        </div>
+      </div>
+      <div class="nav-section" id="adminNav" style="display:none">
+        <div class="nav-label">Admin</div>
+        <div class="nav-item" data-view="users" onclick="switchView('users')">
+          👥 Users
+        </div>
+        <div class="nav-item" data-view="audit" onclick="switchView('audit')">
+          📋 Audit Log
+        </div>
+      </div>
+    </nav>
+    <div class="sidebar-user">
+      <div class="avatar" id="userAvatar">?</div>
+      <div class="user-info">
+        <div class="user-name" id="userName">—</div>
+        <div class="user-role" id="userRole">—</div>
+      </div>
+      <button class="logout-btn" onclick="doLogout()" title="Logout">⏻</button>
+    </div>
+  </aside>
+
+  <!-- Main content area -->
+  <div class="main-content">
+
+    <!-- ═══ INVENTORY VIEW ═══ -->
+    <div id="view-inventory">
+      <div class="top-bar">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input id="searchInput" type="search" placeholder="Search items, IDs, serials…" oninput="filterItems()">
+        </div>
+        <div class="status-chips" id="statusChips">
+          <div class="chip active" data-status="all" onclick="setStatusFilter('all')">All</div>
+          <div class="chip" data-status="available" onclick="setStatusFilter('available')">Available</div>
+          <div class="chip" data-status="checked_out" onclick="setStatusFilter('checked_out')">Out</div>
+          <div class="chip" data-status="overdue" onclick="setStatusFilter('overdue')">Overdue</div>
+        </div>
+        <button class="btn-primary ml-auto" id="addItemBtn" style="display:none" onclick="openAddItemModal()">+ Add Item</button>
+      </div>
+      <div class="stats-bar">
+        <div class="stat-card"><div class="stat-num c-text" id="statTotal">0</div><div class="stat-label">Total Items</div></div>
+        <div class="stat-card"><div class="stat-num c-green" id="statAvailable">0</div><div class="stat-label">Available</div></div>
+        <div class="stat-card"><div class="stat-num c-amber" id="statOut">0</div><div class="stat-label">Checked Out</div></div>
+        <div class="stat-card"><div class="stat-num c-red" id="statOverdue">0</div><div class="stat-label">Overdue</div></div>
+      </div>
+      <div class="cat-chips" id="catChips"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:110px">ID</th>
+              <th>Item</th>
+              <th>Category</th>
+              <th>Location</th>
+              <th style="width:130px">Status</th>
+              <th style="width:120px">Action</th>
+            </tr>
+          </thead>
+          <tbody id="itemsBody"></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <span id="itemCount">0 items</span>
+        <span class="version">CISTracker v2 · CyberLab</span>
       </div>
     </div>
 
-    <div class="card">
-      <div class="ctitle">📷 Scan to Check Out</div>
-      <div class="note">Point your camera at the QR label on the asset. We'll show item details for confirmation before checkout.</div>
-      <div class="brow">
-        <button class="btn bp bfull" onclick="startCheckoutScan()">📷 Scan QR Code</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="ctitle">📦 Equipment Entry</div>
-      <div class="note">For items without a QR label — enter the details by hand and check out.</div>
-
-      <div id="manualMode">
-        <div class="note">For cables, adapters &amp; small items without barcodes. Tip: scanning or typing an existing CIS-XXXXXX asset ID and pressing Enter will auto-fill the rest from inventory.</div>
-        <div class="fr">
-          <div class="fg"><label class="fl">Name *</label><input type="text" class="fi" id="m_name" placeholder="e.g. Cat6 Cable"></div>
-          <div class="fg"><label class="fl">Type</label><input type="text" class="fi" id="m_type" placeholder="e.g. Cable"></div>
+    <!-- ═══ CHECK IN/OUT VIEW ═══ -->
+    <div id="view-checkinout" class="hidden">
+      <div class="checkinout-view">
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px">Check In / Out</h2>
+        <div class="mode-toggle">
+          <button class="mode-btn active" data-mode="scan" onclick="setCioMode('scan')">📷 QR Scan</button>
+          <button class="mode-btn" data-mode="manual" onclick="setCioMode('manual')">✏️ Manual</button>
         </div>
-        <div class="fr">
-          <div class="fg"><label class="fl">Serial #</label><input type="text" class="fi" id="m_serial" placeholder="If available"></div>
-          <div class="fg">
-            <label class="fl" for="m_barcode">Barcode / Asset ID</label>
-            <div class="manual-barcode-row">
-              <input type="text" class="fi mono" id="m_barcode" placeholder="CIS-000001" autocomplete="off">
-              <button type="button" class="btn bo bsm" onclick="manualBarcodeLookup()" aria-label="Look up by barcode">🔎 Look Up</button>
-            </div>
+        <div id="scanMode">
+          <div class="scanner-area" id="scannerArea">
+            <div class="scan-icon">📷</div>
+            <div>Point camera at QR label</div>
+            <button class="btn-primary" id="startScanBtn" onclick="startScan()">Start Scan</button>
           </div>
+          <div id="scanResult" class="hidden"></div>
         </div>
-        <div class="fg"><label class="fl">Notes</label><input type="text" class="fi" id="m_notes" placeholder="Condition, color, qty..."></div>
-        <div id="m_lookup_status" class="manual-lookup-status" aria-live="polite"></div>
-        <button class="btn bp bfull" onclick="prepManual()">Next → Review</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="ctitle">
-        <span>📋 Browse Inventory</span>
-        <button class="btn bo bsm" aria-label="Refresh inventory list" onclick="loadBrowseInventory()">🔄 Refresh</button>
-      </div>
-      <div class="note">For small items without QR labels — search and check out directly.</div>
-      <div class="fg">
-        <label class="fl" for="browseSearch">Search</label>
-        <input id="browseSearch" class="fi" type="search" placeholder="🔎 Search by name, serial, category, or asset ID..." oninput="filterBrowseInventory()" autocomplete="off">
-      </div>
-      <div class="fg" style="margin-top:6px">
-        <label class="fl" for="browseCat">Category</label>
-        <select id="browseCat" class="fi" onchange="filterBrowseInventory()">
-          <option value="">All Categories</option>
-        </select>
-      </div>
-      <div id="browseList" aria-live="polite"><div class="es"><div class="ei" aria-hidden="true">📦</div><div class="et">Press Refresh to load inventory</div></div></div>
-    </div>
-
-    <div class="card hidden" id="vcard">
-      <div class="ctitle">✅ Verify Before Saving</div>
-      <div class="vbox">
-        <div class="vbt">⚠️ Edit anything that looks wrong</div>
-        <div class="vr"><span class="vk">Equipment</span><input class="vi" id="v_name" type="text"></div>
-        <div class="vr"><span class="vk">Type</span><input class="vi" id="v_type" type="text"></div>
-        <div class="vr"><span class="vk">Serial #</span><input class="vi" id="v_serial" type="text"></div>
-        <div class="vr"><span class="vk">Barcode</span><input class="vi" id="v_barcode" type="text"></div>
-        <div class="vr"><span class="vk">Notes</span><input class="vi" id="v_notes" type="text"></div>
-      </div>
-      <div class="vmeta">
-        <span class="accent bold" id="v_user"></span> ·
-        <span id="v_dt" class="mono small"></span>
-      </div>
-      <div class="brow">
-        <button class="btn bg" id="confbtn" aria-label="Save checkout" onclick="confirmCO()">✔ Save Checkout</button>
-        <button class="btn bo bsm" aria-label="Cancel checkout" onclick="cancelV()">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══════ CHECK IN ═══════ -->
-  <div class="page" id="pg-checkin">
-    <div class="card">
-      <div class="ctitle">📷 Scan to Check In</div>
-      <div class="note">Point your camera at the QR label on the asset. We'll show item details for confirmation before check-in.</div>
-      <div class="brow">
-        <button class="btn bp bfull" onclick="startCheckinScan()">📷 Scan QR Code</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="ctitle">
-        <span>📥 Currently Checked Out</span>
-        <button class="btn bo bsm" aria-label="Refresh checked-out list" onclick="loadCI()">🔄 Refresh</button>
-      </div>
-      <div class="fg">
-        <label class="fl" for="ciSearch">Search</label>
-        <input id="ciSearch" class="fi" type="search" placeholder="🔎 Search by name, serial, or barcode..." oninput="filterCI()" autocomplete="off">
-      </div>
-      <div id="ciList" aria-live="polite"><div class="es"><div class="ei" aria-hidden="true">📥</div><div class="et">Loading...</div></div></div>
-    </div>
-  </div>
-
-  <!-- ═══════ INVENTORY (admin) ═══════ -->
-  <div class="page" id="pg-inventory">
-    <div class="card">
-      <div class="ctitle">➕ Add Item</div>
-      <div class="note">Create a new equipment row and print its QR label. Asset ID is auto-generated and used as the barcode.</div>
-      <div class="fr">
-        <div class="fg"><label class="fl" for="ai_name">Name *</label><input id="ai_name" class="fi" type="text" placeholder="e.g. Cisco Catalyst 2960"></div>
-        <div class="fg"><label class="fl" for="ai_type">Type</label><input id="ai_type" class="fi" type="text" placeholder="e.g. Switch"></div>
-      </div>
-      <div class="fr">
-        <div class="fg"><label class="fl" for="ai_serial">Serial #</label><input id="ai_serial" class="fi" type="text" placeholder="If available"></div>
-        <div class="fg">
-          <label class="fl" for="ai_assetid">Asset ID / Barcode</label>
-          <input id="ai_assetid" class="fi mono" type="text" placeholder="CIS-000001">
-        </div>
-      </div>
-      <div class="fg"><label class="fl" for="ai_notes">Notes</label><input id="ai_notes" class="fi" type="text" placeholder="Condition, location..."></div>
-      <div class="brow">
-        <button class="btn bp" onclick="addInventoryItem()">＋ Create &amp; Print Label</button>
-        <button class="btn bo bsm" onclick="addInventoryItem(true)">Create only</button>
-        <button class="btn bo bsm" onclick="suggestAssetId()">↻ New ID</button>
-      </div>
-      <div id="ai_err" class="ov-err" role="alert"></div>
-    </div>
-
-    <div class="card">
-      <div class="ctitle">📷 Scan / Look Up Label</div>
-      <div class="note">Scan an existing QR label (or type the asset ID) to pull the item's details from the database and open it for editing.</div>
-      <div class="brow">
-        <button class="btn bp bfull" onclick="startInventoryScan()">📷 Scan QR / Look Up</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="ctitle">
-        <span>📦 Inventory</span>
-        <button class="btn bo bsm" aria-label="Refresh inventory" onclick="loadInventory()">🔄 Refresh</button>
-      </div>
-      <div class="fg">
-        <label class="fl" for="invSearch">Search</label>
-        <input id="invSearch" class="fi" type="search" placeholder="🔎 Search by name, serial, or barcode..." oninput="filterInventory()" autocomplete="off">
-      </div>
-      <div class="chips" role="tablist" aria-label="Status filter">
-        <button class="chip on" data-inv-status="all" role="tab" aria-selected="true" onclick="setInvStatus('all')">All</button>
-        <button class="chip" data-inv-status="available" role="tab" aria-selected="false" onclick="setInvStatus('available')">Available</button>
-        <button class="chip" data-inv-status="checked_out" role="tab" aria-selected="false" onclick="setInvStatus('checked_out')">Checked Out</button>
-      </div>
-      <div id="invList" aria-live="polite"><div class="es"><div class="et">Loading...</div></div></div>
-    </div>
-  </div>
-
-  <!-- ═══════ LOG ═══════ -->
-  <div class="page" id="pg-log">
-    <div class="card">
-      <div class="ctitle">
-        <span>📋 Activity Log</span>
-        <div style="display:flex;gap:8px;">
-          <button class="btn bo bsm" aria-label="Refresh activity log" onclick="loadLog()">🔄 Refresh</button>
-          <button class="btn bsm br" id="clearLogBtn" style="display:none" onclick="clearLog()">🗑 Clear</button>
-        </div>
-      </div>
-      <div id="logW" aria-live="polite"><div class="es"><div class="ei" aria-hidden="true">📋</div><div class="et">Loading...</div></div></div>
-    </div>
-  </div>
-
-</div>
-
-<div class="btabs" role="tablist" aria-label="Main navigation">
-  <button class="bt on" role="tab" aria-selected="true" aria-controls="pg-checkout" onclick="swPage('checkout')" id="bt-checkout"><span class="i" aria-hidden="true">📤</span>Check Out</button>
-  <button class="bt" role="tab" aria-selected="false" aria-controls="pg-checkin" onclick="swPage('checkin')" id="bt-checkin"><span class="i" aria-hidden="true">📥</span>Check In</button>
-  <button class="bt hidden" role="tab" aria-selected="false" aria-controls="pg-inventory" style="display:none" onclick="swPage('inventory')" id="bt-inventory"><span class="i" aria-hidden="true">📦</span>Inventory</button>
-  <button class="bt hidden" role="tab" aria-selected="false" aria-controls="pg-log" style="display:none" onclick="swPage('log')" id="bt-log"><span class="i" aria-hidden="true">📋</span>Log</button>
-</div>
-
-<div id="toast"></div>
-
-<!-- ═══════ LOGIN OVERLAY ═══════ -->
-<div id="lo" class="ov">
-  <div class="ov-card">
-    <div class="ov-title">🔒 CIS TRACKER</div>
-    <div class="ov-sub">Authorized Personnel Only</div>
-
-    <div id="lf">
-      <input id="lu" placeholder="Username" autocomplete="username" class="ov-input">
-      <input id="lp" type="password" placeholder="Password" autocomplete="current-password" class="ov-input">
-      <button onclick="doLogin()" class="ov-btn">Sign In</button>
-      <div class="ov-link" onclick="showForgot()">Forgot password?</div>
-      <div id="le" class="ov-err" role="alert"></div>
-    </div>
-
-    <div id="cf" class="hidden">
-      <div class="ov-warn">First login — set your new password</div>
-      <input id="cpCur" type="password" placeholder="Current password" autocomplete="current-password" class="ov-input">
-      <input id="np1" type="password" placeholder="New password" autocomplete="new-password" class="ov-input">
-      <input id="np2" type="password" placeholder="Confirm password" autocomplete="new-password" class="ov-input">
-      <div class="ov-hint">Min 10 chars, upper, lower, digit, special</div>
-      <button onclick="doForceChg()" class="ov-btn">Set Password</button>
-      <div id="ce" class="ov-err" role="alert"></div>
-    </div>
-
-    <div id="vf" class="hidden">
-      <div class="ov-icon">📱</div>
-      <div class="ov-warn accent">Two-Factor Authentication</div>
-      <div class="ov-sub">Enter the 6-digit code from your authenticator app</div>
-      <input id="mc2" placeholder="000000" type="tel" maxlength="6" autocomplete="one-time-code" class="ov-input center mono">
-      <button onclick="doMfaLoginVerify()" class="ov-btn">Verify</button>
-      <div id="me2" class="ov-err" role="alert"></div>
-    </div>
-
-    <div id="fp" class="hidden">
-      <div class="ov-warn">Reset Password</div>
-      <div class="ov-sub">Enter your email — we'll send a reset link.</div>
-      <input id="fpEmail" type="email" placeholder="you@example.com" class="ov-input">
-      <button onclick="doForgot()" class="ov-btn">Send Reset Link</button>
-      <div class="ov-link" onclick="showLoginForm()">← Back to login</div>
-      <div id="fpMsg" class="ov-err" role="alert"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════ ADMIN PANEL ═══════ -->
-<div id="adminOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
-  <div class="admin-wrap">
-    <div class="admin-head">
-      <div class="admin-title" id="adminTitle">👥 Admin Panel</div>
-      <button class="btn bo bsm" aria-label="Close admin panel" onclick="hideAdmin()">✕ Close</button>
-    </div>
-
-    <div class="admin-tabs">
-      <button class="admin-tab on" data-tab="users" onclick="swAdmin('users')">Users</button>
-      <button class="admin-tab" data-tab="overdue" onclick="swAdmin('overdue')">Overdue</button>
-      <button class="admin-tab" data-tab="audit" onclick="swAdmin('audit')">Audit</button>
-    </div>
-
-    <div id="adm-users" class="admin-pane on">
-      <div class="card">
-        <div class="ctitle">➕ Create User</div>
-        <div class="fr">
-          <div class="fg"><label class="fl">Username</label><input id="nuName" class="fi" placeholder="alice"></div>
-          <div class="fg"><label class="fl">Email</label><input id="nuEmail" type="email" class="fi" placeholder="alice@example.com"></div>
-        </div>
-        <div class="fr">
-          <div class="fg"><label class="fl">Role</label>
-            <select id="nuRole" class="fi">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
+        <div id="manualMode" class="hidden">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">For small items, cables, dongles — search and check out directly.</p>
+          <div class="search-box" style="max-width:100%;margin-bottom:16px">
+            <span class="search-icon">🔍</span>
+            <input id="manualSearch" type="search" placeholder="Search by name, barcode, serial…" oninput="manualSearchItems()">
           </div>
+          <div id="manualResults"></div>
         </div>
-        <button class="btn bp bfull" onclick="adminCreateUser()">Create User</button>
-        <div id="nuErr" class="ov-err"></div>
-        <div id="nuTempPw" class="hidden" style="margin-top:10px;padding:10px;background:var(--panel2);border:1px solid var(--accent);border-radius:7px;text-align:center;">
-          <div style="font-size:.7rem;color:var(--muted);margin-bottom:4px">TEMP PASSWORD (also emailed)</div>
-          <div id="nuTempPwVal" class="mono accent bold selectable" style="font-size:1.3rem;letter-spacing:.15em"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="ctitle">Users</div>
-        <div class="fg" style="margin-bottom:10px;">
-          <input id="userSearch" class="fi" placeholder="🔎 Search by username or email..." oninput="filterUsers()" autocomplete="off">
-        </div>
-        <div id="adminUL"><div class="es"><div class="et">Loading...</div></div></div>
-      </div>
-
-      <div class="card hidden" id="userDetail">
-        <div class="ctitle"><span id="udName">User</span> <button class="btn bo bsm" onclick="hideUserDetail()">Back</button></div>
-        <div id="udBody"></div>
-      </div>
-    </div>
-
-    <div id="adm-overdue" class="admin-pane">
-      <div class="card">
-        <div class="ctitle">⏰ Overdue Items</div>
-        <div id="overdueList"><div class="es"><div class="et">Loading...</div></div></div>
-      </div>
-    </div>
-
-    <div id="adm-audit" class="admin-pane">
-      <div class="card">
-        <div class="ctitle">📜 Audit Log</div>
-        <div id="auditList"><div class="es"><div class="et">Loading...</div></div></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════ CHANGE PASSWORD MODAL ═══════ -->
-<div id="chpOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="chpTitle">
-  <div class="ov-card">
-    <div class="ov-title" id="chpTitle">🔑 Change Password</div>
-    <input id="cpOld" type="password" placeholder="Current password" autocomplete="current-password" class="ov-input">
-    <input id="cpN1" type="password" placeholder="New password" class="ov-input">
-    <input id="cpN2" type="password" placeholder="Confirm new password" class="ov-input">
-    <div class="ov-hint">Min 10 chars, upper, lower, digit, special</div>
-    <button onclick="doChgPass()" class="ov-btn">Change Password</button>
-    <button onclick="hideChp()" class="ov-btn-ghost">Cancel</button>
-    <div id="cpErr" class="ov-err"></div>
-  </div>
-</div>
-
-<!-- ═══════ MFA SETUP MODAL ═══════ -->
-<div id="mfaOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="mfaTitle">
-  <div class="ov-card">
-    <div class="ov-title" id="mfaTitle">📱 Setup MFA</div>
-    <div class="ov-sub">Scan the QR code with Google Authenticator, Authy, or 1Password.</div>
-    <img id="mfaQr" class="mfa-qr" alt="">
-    <div class="ov-hint">Or enter this key manually:<br><span id="mfaSecret" class="mono accent selectable"></span></div>
-    <input id="mfaCode" placeholder="Enter 6-digit code" type="tel" maxlength="6" autocomplete="one-time-code" class="ov-input center mono">
-    <button onclick="doMfaEnable()" class="ov-btn">Verify &amp; Enable</button>
-    <button onclick="hideMfa()" class="ov-btn-ghost">Cancel</button>
-    <div id="mfaErr" class="ov-err"></div>
-  </div>
-</div>
-
-<!-- ═══════ EDIT EQUIPMENT MODAL ═══════ -->
-<div id="eqEditOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="eqEditTitle">
-  <div class="ov-card">
-    <div class="ov-title" id="eqEditTitle">✏️ Edit Equipment</div>
-    <input id="eqEditId" type="hidden">
-    <div class="fg" style="text-align:left"><label class="fl" for="eqEditName">Name *</label><input id="eqEditName" class="fi" placeholder="Name"></div>
-    <div class="fg" style="text-align:left"><label class="fl" for="eqEditType">Type</label><input id="eqEditType" class="fi" placeholder="Type"></div>
-    <div class="fg" style="text-align:left"><label class="fl" for="eqEditSerial">Serial #</label><input id="eqEditSerial" class="fi" placeholder="Serial number"></div>
-    <div class="fg" style="text-align:left"><label class="fl" for="eqEditBarcode">Barcode</label><input id="eqEditBarcode" class="fi" placeholder="Barcode"></div>
-    <div class="fg" style="text-align:left"><label class="fl" for="eqEditNotes">Notes</label><input id="eqEditNotes" class="fi" placeholder="Notes"></div>
-    <button onclick="saveEqEdit()" class="ov-btn">Save Changes</button>
-    <button onclick="hideEqEdit()" class="ov-btn-ghost">Cancel</button>
-    <div id="eqEditErr" class="ov-err" role="alert"></div>
-  </div>
-</div>
-
-<!-- ═══════ PRINT LABEL MODAL ═══════ -->
-<div id="labelOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="labelTitle">
-  <div class="ov-card label-modal">
-    <div class="ov-title" id="labelTitle">🏷 Print Label</div>
-    <div class="ov-sub">40 mm × 30 mm. Use your browser's print dialog and set scale to 100%.</div>
-    <div id="labelStage" class="label-stage">
-      <div id="labelSheet" class="qr-label" aria-label="Equipment label preview">
-        <div class="qr-label-img"><img id="labelQr" alt=""></div>
-        <div class="qr-label-text">
-          <div id="labelName" class="qr-label-name"></div>
-          <div id="labelAssetId" class="qr-label-id"></div>
+        <div class="currently-out mt-12">
+          <h3>Currently Checked Out</h3>
+          <div id="currentlyOutList"></div>
         </div>
       </div>
     </div>
-    <button onclick="doPrintLabel()" class="ov-btn">🖨 Print</button>
-    <button onclick="hideLabel()" class="ov-btn-ghost">Close</button>
-    <div id="labelErr" class="ov-err" role="alert"></div>
-  </div>
-</div>
 
-<!-- ═══════ QR SCAN MODAL ═══════ -->
-<div id="scanOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="scanTitle">
-  <div class="ov-card scan-modal">
-    <div class="ov-title" id="scanTitle">📷 Scan QR Code</div>
-    <div class="ov-sub" id="scanSub">Point the camera at the asset label.</div>
-    <div class="scan-stage">
-      <video id="scanVideo" playsinline muted></video>
-      <div class="scan-reticle" aria-hidden="true"></div>
-    </div>
-    <div id="scanStatus" class="scan-status" role="status" aria-live="polite"></div>
-    <div class="fg" style="text-align:left;margin-top:10px;">
-      <label class="fl" for="scanManualInput">Or enter asset ID manually</label>
-      <input id="scanManualInput" class="fi mono" type="text" placeholder="CIS-000001" autocomplete="off">
-    </div>
-    <div class="brow">
-      <button class="btn bp" id="scanManualBtn" onclick="scanLookupManual()">🔎 Look Up</button>
-      <button class="btn bo bsm" onclick="closeScanModal()">Cancel</button>
-    </div>
-    <div id="scanNotFound" class="hidden scan-notfound" role="region" aria-live="polite">
-      <div class="snf-title">⚠ <span id="snfCode" class="mono accent"></span> not found in inventory</div>
-      <div class="snf-sub">No equipment matches that asset ID. Choose how to proceed:</div>
-      <div class="brow snf-actions">
-        <button class="btn bp" id="snfCreateBtn" onclick="scanCreateFromMissing()">＋ Create New Item</button>
-        <button class="btn bo bsm" onclick="scanRetry()">↻ Try Again</button>
-        <button class="btn bo bsm" onclick="closeScanModal()">Manual Entry</button>
+    <!-- ═══ OVERDUE VIEW ═══ -->
+    <div id="view-overdue" class="hidden">
+      <div style="padding:24px">
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px">⏰ Overdue Items</h2>
+        <div id="overdueList"></div>
       </div>
     </div>
-    <div id="scanErr" class="ov-err" role="alert"></div>
-  </div>
-</div>
 
-<!-- ═══════ CONFIRM CHECKOUT/CHECKIN MODAL ═══════ -->
-<div id="confirmOv" class="ov hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
-  <div class="ov-card">
-    <div class="ov-title" id="confirmTitle">Confirm</div>
-    <div class="ov-sub" id="confirmSub"></div>
-    <div id="confirmDetails" class="confirm-details"></div>
-    <div id="confirmKiosk" class="hidden" style="margin-top:10px;text-align:left">
-      <div class="fg">
-        <label class="fl" for="confirmUser">🏫 Checking out for</label>
-        <select id="confirmUser" class="fi"></select>
+    <!-- ���══ TICKETS VIEW ═══ -->
+    <div id="view-tickets" class="hidden">
+      <div class="tickets-view" id="ticketsContainer">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 style="font-size:18px;font-weight:600">��� Support Tickets</h2>
+          <button class="btn-primary" onclick="openNewTicketModal()">+ New Ticket</button>
+        </div>
+        <div class="status-chips" style="margin-bottom:16px" id="ticketStatusChips">
+          <div class="chip active" data-tstatus="all" onclick="setTicketFilter('all')">All</div>
+          <div class="chip" data-tstatus="open" onclick="setTicketFilter('open')">Open</div>
+          <div class="chip" data-tstatus="in_progress" onclick="setTicketFilter('in_progress')">In Progress</div>
+          <div class="chip" data-tstatus="resolved" onclick="setTicketFilter('resolved')">Resolved</div>
+        </div>
+        <div class="ticket-list" id="ticketList"></div>
+      </div>
+      <div class="ticket-detail hidden" id="ticketDetail"></div>
+    </div>
+
+    <!-- ═══ USERS VIEW (admin) ═══ -->
+    <div id="view-users" class="hidden">
+      <div class="admin-view">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 style="font-size:18px;font-weight:600">👥 Users</h2>
+          <button class="btn-primary" onclick="openCreateUserModal()">+ Add User</button>
+        </div>
+        <div id="usersList"></div>
       </div>
     </div>
-    <div class="brow">
-      <button class="btn bg" id="confirmYesBtn" onclick="doConfirmAction()">Confirm</button>
-      <button class="btn bo bsm" onclick="closeConfirmModal()">Cancel</button>
+
+    <!-- ═══ AUDIT VIEW (admin) ═══ -->
+    <div id="view-audit" class="hidden">
+      <div class="admin-view">
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px">📋 Audit Log</h2>
+        <div id="auditList"></div>
+      </div>
     </div>
-    <div id="confirmErr" class="ov-err" role="alert"></div>
-  </div>
+
+  </div><!-- /main-content -->
+</div><!-- /app-layout -->
+
+<!-- ═══ Detail Panel ═══ -->
+<div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-panel" id="detailPanel"></div>
 </div>
 
-<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
+<!-- ═══ Modal (shared) ═══ -->
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<!-- ═��═ Toast ═══ -->
+<div class="toast" id="toast"></div>
+
 <script src="/js/app.js"></script>
 </body>
 </html>

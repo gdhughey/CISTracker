@@ -67,7 +67,7 @@ function findByIdentifier({ barcode, serial_number }) {
   `).get(...params) || null;
 }
 
-function create({ name, type, serial_number, barcode, category, image_path, notes }) {
+function create({ name, type, serial_number, barcode, category, location, image_path, notes }) {
   // Server-side dedupe: if a barcode or serial number is supplied and an
   // equipment row already exists with that identifier, return that row
   // instead of creating a duplicate. This prevents the checkout flow from
@@ -77,14 +77,14 @@ function create({ name, type, serial_number, barcode, category, image_path, note
   const existing = findByIdentifier({ barcode, serial_number });
   if (existing) return existing;
   const info = db.prepare(`
-    INSERT INTO equipment (name, type, serial_number, barcode, category, image_path, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(name, type || '', serial_number || '', barcode || '', category || '', image_path || null, notes || '');
+    INSERT INTO equipment (name, type, serial_number, barcode, category, location, image_path, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, type || '', serial_number || '', barcode || '', category || '', location || '', image_path || null, notes || '');
   return getById(info.lastInsertRowid);
 }
 
 function update(id, fields) {
-  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'notes', 'image_path'];
+  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'location', 'notes', 'image_path'];
   const sets = [];
   const params = [];
   for (const key of allowed) {
@@ -133,7 +133,10 @@ function checkout(equipmentId, userId, username, notes = '', source = 'Manual', 
 }
 
 // Atomic checkin — IDOR-safe: enforces ownership unless the caller is admin.
+// Returns { item, nextInQueue } — nextInQueue is populated if someone was
+// waiting in the queue and has been notified.
 function checkin(equipmentId, actingUser, notes = '', source = 'Manual') {
+  let nextInQueue = null;
   const tx = db.transaction(() => {
     const eq = db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
     if (!eq) throw Object.assign(new Error('Equipment not found'), { status: 404 });
@@ -153,9 +156,22 @@ function checkin(equipmentId, actingUser, notes = '', source = 'Manual') {
       INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
       VALUES (?, 'checkin', ?, ?, ?, ?)
     `).run(equipmentId, actingUser.id, actingUser.username, notes, source);
+    // Pop next person from the waitlist (if any)
+    try {
+      const queueService = require('./queueService');
+      nextInQueue = queueService.popNext(equipmentId);
+    } catch { /* queue table may not exist yet */ }
   });
   tx();
-  return getById(equipmentId);
+  // Send queue notification outside the transaction (async, fire-and-forget)
+  if (nextInQueue) {
+    const emailService = require('./emailService');
+    const item = getById(equipmentId);
+    emailService.sendQueueNotification(
+      nextInQueue.email, nextInQueue.username, item?.name || 'Equipment'
+    ).catch(() => {});
+  }
+  return { item: getById(equipmentId), nextInQueue };
 }
 
 function getLog({ limit = 100, equipmentId, userId } = {}) {

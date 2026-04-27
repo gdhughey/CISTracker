@@ -69,6 +69,13 @@ const config = {
     from: process.env.SMTP_FROM || 'cyberlab@example.com',
   },
 
+  resend: {
+    apiKey: process.env.RESEND_API_KEY || '',
+    noReplyFrom: process.env.RESEND_NOREPLY_FROM || 'CISTracker <noreply@cistracker.net>',
+    supportFrom: process.env.RESEND_SUPPORT_FROM || 'CISTracker Support <support@cistracker.net>',
+    supportForwardTo: process.env.RESEND_SUPPORT_FORWARD || 'gdhughey0726@gmail.com',
+  },
+
   reminders: {
     reminderDays: int(process.env.REMINDER_DAYS, 3),
     alertDays: int(process.env.ALERT_DAYS, 5),
