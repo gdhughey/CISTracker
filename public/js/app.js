@@ -10,6 +10,7 @@ let currentView = 'inventory';
 let statusFilter = 'all';
 let catFilter = 'All';
 let ticketFilter = 'all';
+let _pendingPrint = null; // label queued for printing from add-item modal
 
 // ── UTC helper ─────────────────────────────────────────────────────────
 function utc(d) {
@@ -602,6 +603,7 @@ async function submitAddItem() {
     // Show label step
     try {
       const label = await api(`/api/equipment/${item.id}/label`);
+      _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
       document.getElementById('addStep1').classList.add('hidden');
       const step2 = document.getElementById('addStep2');
       step2.classList.remove('hidden');
@@ -619,7 +621,7 @@ async function submitAddItem() {
         </div>
         <div class="form-actions">
           <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
-          <button class="btn-primary" onclick="doPrintLabel(${JSON.stringify(label)},${JSON.stringify(item.name)},${JSON.stringify(item.category||'')},${JSON.stringify(item.serial_number||'')})">🖨 Print Label</button>
+          <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
         </div>
       `;
     } catch (labelErr) {
@@ -718,6 +720,12 @@ function doPrintLabel(label, name, category, serial) {
   </body></html>`);
   doc.close();
   setTimeout(() => { frame.contentWindow.print(); setTimeout(() => frame.remove(), 2000); }, 250);
+}
+
+function printPendingLabel() {
+  if (!_pendingPrint) return;
+  const { label, name, category, serial } = _pendingPrint;
+  doPrintLabel(label, name, category, serial);
 }
 
 async function printLabel(id) {
