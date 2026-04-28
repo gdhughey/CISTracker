@@ -926,17 +926,33 @@ async function startScan() {
 
   } catch (err) {
     resetScanArea();
+    const isHttps = location.protocol === 'https:';
+    const isDenied = err?.name === 'NotAllowedError';
+    let msg;
+    if (!isHttps) {
+      msg = '⚠️ Camera requires HTTPS. Use <strong>https://cistracker.net</strong>';
+    } else if (isDenied) {
+      msg = '⚠️ Camera permission denied. Allow camera access in your browser settings.';
+    } else {
+      msg = 'Camera not available — enter barcode manually';
+    }
     area.innerHTML = `
       <div style="text-align:center;padding:16px">
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Camera not available — enter barcode manually</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">${msg}</div>
         <input id="manualBarcode" type="text" inputmode="text" placeholder="Type or paste barcode…"
           style="padding:10px;border-radius:8px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:14px;font-family:var(--mono);width:240px;text-align:center">
         <button class="btn-primary" style="margin-top:8px;display:block;margin-inline:auto"
-          onclick="handleScannedCode(document.getElementById('manualBarcode').value)">Look Up</button>
+          onclick="lookUpManualBarcode()">Look Up</button>
       </div>
     `;
     document.getElementById('manualBarcode')?.focus();
   }
+}
+
+function lookUpManualBarcode() {
+  const val = (document.getElementById('manualBarcode')?.value || '').trim();
+  if (!val) { toast('Enter a barcode first', 'error'); return; }
+  handleScannedCode(val);
 }
 
 function stopScan() {
