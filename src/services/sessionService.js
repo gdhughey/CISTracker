@@ -40,6 +40,17 @@ function lookup(sid, req) {
     deleteStmt.run(sid);
     return null;
   }
+  // Absolute session timeout — even with constant activity, kill the session
+  // after `absoluteHours` from creation. Stops a stolen cookie from being
+  // useful indefinitely.
+  if (session.created_at) {
+    const createdMs = new Date(session.created_at + 'Z').getTime();
+    const ageMs = Date.now() - createdMs;
+    if (ageMs > config.session.absoluteHours * 3600_000) {
+      deleteStmt.run(sid);
+      return null;
+    }
+  }
   // Bind to IP/UA — if either changed dramatically, kill the session.
   // (UA can drift slightly across browser updates so we only compare IP strictly.)
   if (session.ip_address && session.ip_address !== req.ip) {

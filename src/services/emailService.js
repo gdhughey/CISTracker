@@ -54,6 +54,28 @@ async function sendPasswordReset(to, username, tempPassword) {
   });
 }
 
+// Self-service forgot-password flow — emails a one-time reset link (NOT a temp password).
+async function sendPasswordResetLink(to, username, resetUrl) {
+  return send({
+    from: config.resend.noReplyFrom,
+    to,
+    subject: 'CISTracker: Reset your password',
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#0f1117;color:#e8eaf0;padding:32px;border-radius:12px;">
+        <h2 style="color:#4f8ef7;margin-bottom:16px;">Reset Your Password</h2>
+        <p>Hi <strong>${username}</strong>,</p>
+        <p>We received a request to reset your CISTracker password. Click the button below to choose a new one. This link will expire in 1 hour.</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="${resetUrl}" style="display:inline-block;background:#4f8ef7;color:#fff;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Reset Password</a>
+        </p>
+        <p style="font-size:12px;color:#6b7280;margin-top:16px;">If you didn't request this, you can safely ignore this email — your password won't change.</p>
+        <p style="color:#6b7280;font-size:12px;margin-top:24px;">&mdash; CISTracker</p>
+      </div>
+    `,
+    text: `Hi ${username}, click this link to reset your CISTracker password (expires in 1 hour): ${resetUrl}\n\nIf you didn't request this, ignore this email.`,
+  });
+}
+
 async function sendNewAccount(to, username, tempPassword) {
   return send({
     from: config.resend.noReplyFrom,
@@ -176,6 +198,6 @@ function isConfigured() {
 
 module.exports = {
   send, isConfigured,
-  sendPasswordReset, sendNewAccount, sendOverdueReminder, sendAdminAlert,
+  sendPasswordReset, sendPasswordResetLink, sendNewAccount, sendOverdueReminder, sendAdminAlert,
   sendQueueNotification, sendSupportTicket,
 };

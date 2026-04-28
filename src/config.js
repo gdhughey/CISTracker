@@ -51,29 +51,13 @@ const config = {
     bcryptCost: int(process.env.BCRYPT_COST, 12),
   },
 
-  vision: {
-    // 100% local. Ollama only, no cloud fallback — CyberLab classrooms
-    // may not have outbound internet.
-    ollamaEnabled: bool(process.env.OLLAMA_ENABLED, true),
-    ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
-    ollamaModel: process.env.OLLAMA_MODEL || 'qwen2.5vl:7b',
-    ollamaTimeoutMs: int(process.env.OLLAMA_TIMEOUT_MS, 180000),
-  },
-
-  smtp: {
-    host: process.env.SMTP_HOST || '',
-    port: int(process.env.SMTP_PORT, 587),
-    secure: bool(process.env.SMTP_SECURE, false),
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || '',
-    from: process.env.SMTP_FROM || 'cyberlab@example.com',
-  },
-
   resend: {
     apiKey: process.env.RESEND_API_KEY || '',
     noReplyFrom: process.env.RESEND_NOREPLY_FROM || 'CISTracker <noreply@cistracker.net>',
     supportFrom: process.env.RESEND_SUPPORT_FROM || 'CISTracker Support <support@cistracker.net>',
-    supportForwardTo: process.env.RESEND_SUPPORT_FORWARD || 'gdhughey0726@gmail.com',
+    // Tickets get forwarded here. MUST be set in .env — no personal email
+    // hardcoded as a fallback.
+    supportForwardTo: process.env.RESEND_SUPPORT_FORWARD || '',
   },
 
   reminders: {
@@ -87,7 +71,11 @@ const config = {
   seed: {
     username: process.env.SEED_ADMIN_USERNAME || 'admin',
     email: process.env.SEED_ADMIN_EMAIL || 'admin@example.com',
-    password: process.env.SEED_ADMIN_PASSWORD || 'ChangeMe!2026',
+    // No fixed default — if SEED_ADMIN_PASSWORD is not set, scripts/seed.js
+    // generates a random one and prints it to stdout (it's seen exactly once
+    // by the operator running the install, then the admin must change it on
+    // first login because must_change_pw=1).
+    password: process.env.SEED_ADMIN_PASSWORD || '',
   },
 };
 

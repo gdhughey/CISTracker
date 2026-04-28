@@ -15,9 +15,6 @@ const equipmentRoutes = require('./src/routes/equipment');
 const adminRoutes = require('./src/routes/admin');
 const queueRoutes = require('./src/routes/queue');
 const ticketRoutes = require('./src/routes/tickets');
-// AI/Ollama scan route is intentionally not mounted — the UI now uses
-// barcode/QR + manual entry only. The route file is kept on disk so the
-// vision config + service can be re-enabled later without a code change.
 
 const { runMigrations } = require('./src/db/migrate');
 runMigrations();

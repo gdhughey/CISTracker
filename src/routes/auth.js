@@ -197,7 +197,7 @@ router.post('/forgot-password', loginLimiter, validate(forgotSchema), async (req
     userService.setRecoveryToken(user.id, hashToken(token), expires);
     const url = `${config.appUrl}/reset?token=${token}`;
     try {
-      await emailService.sendPasswordReset(user.email, url);
+      await emailService.sendPasswordResetLink(user.email, user.username, url);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[auth] failed to send reset email:', err.message);
