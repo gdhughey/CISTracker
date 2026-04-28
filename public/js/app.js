@@ -170,6 +170,8 @@ async function showApp() {
 
 // ── View switching ─────────────────────────────────────────────────────
 function switchView(view) {
+  // Stop any active QR scan when leaving the checkinout view
+  if (view !== 'checkinout' && window._stopScan) { window._stopScan(); window._stopScan = null; }
   currentView = view;
   // Hide all views
   document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
@@ -666,7 +668,7 @@ async function submitAddItem() {
         <div class="label-preview">
           <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
           <div class="label-info">
-            <div style="font-size:9px;color:#888;text-transform:uppercase">CIS CyberLab</div>
+            <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
             <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
             <div class="label-id">${esc(label.asset_id)}</div>
             <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
@@ -857,38 +859,102 @@ function manualSearchItems() {
 }
 
 async function startScan() {
-  // Try to use camera for QR scanning
   const area = document.getElementById('scannerArea');
+  // Stop any previous scan stream
+  if (window._stopScan) { window._stopScan(); window._stopScan = null; }
+
   try {
-    // Dynamically load html5-qrcode if not present
-    if (!window.Html5Qrcode) {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-      document.head.appendChild(script);
-      await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; });
-    }
-    area.innerHTML = '<div id="qr-reader" style="width:100%;height:100%"></div>';
-    const scanner = new Html5Qrcode('qr-reader');
-    await scanner.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 180, height: 180 } },
-      async (code) => {
-        await scanner.stop();
-        handleScannedCode(code);
-      },
-      () => {}
-    );
-  } catch (err) {
-    // Fallback to manual entry
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+
+    area.style.height = '300px';
+    area.style.padding = '0';
+    area.style.border = 'none';
     area.innerHTML = `
-      <div style="text-align:center">
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Camera not available</div>
-        <input id="manualBarcode" type="text" placeholder="Type or scan barcode…" style="padding:10px;border-radius:8px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:14px;font-family:var(--mono);width:240px;text-align:center">
-        <button class="btn-primary" style="margin-top:8px" onclick="handleScannedCode(document.getElementById('manualBarcode').value)">Look Up</button>
+      <div style="position:relative;width:100%;height:100%;overflow:hidden;border-radius:12px;background:#000">
+        <video id="scanVideo" playsinline autoplay muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
+        <canvas id="scanCanvas" style="display:none"></canvas>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+          <div style="width:62%;aspect-ratio:1;border:2px solid rgba(255,255,255,0.85);border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,0.38)"></div>
+        </div>
+        <button onclick="stopScan()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer">✕ Cancel</button>
+      </div>
+    `;
+
+    const video = document.getElementById('scanVideo');
+    video.srcObject = stream;
+    await video.play();
+
+    // Load jsQR (lightweight, reliable QR decoder)
+    if (!window.jsQR) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    const canvas = document.getElementById('scanCanvas');
+    const ctx = canvas.getContext('2d');
+    let scanning = true;
+
+    window._stopScan = () => {
+      scanning = false;
+      try { stream.getTracks().forEach(t => t.stop()); } catch {}
+    };
+
+    const tick = () => {
+      if (!scanning) return;
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const result = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+        if (result && result.data) {
+          window._stopScan(); window._stopScan = null;
+          resetScanArea();
+          handleScannedCode(result.data);
+          return;
+        }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+
+  } catch (err) {
+    resetScanArea();
+    area.innerHTML = `
+      <div style="text-align:center;padding:16px">
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Camera not available — enter barcode manually</div>
+        <input id="manualBarcode" type="text" inputmode="text" placeholder="Type or paste barcode…"
+          style="padding:10px;border-radius:8px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:14px;font-family:var(--mono);width:240px;text-align:center">
+        <button class="btn-primary" style="margin-top:8px;display:block;margin-inline:auto"
+          onclick="handleScannedCode(document.getElementById('manualBarcode').value)">Look Up</button>
       </div>
     `;
     document.getElementById('manualBarcode')?.focus();
   }
+}
+
+function stopScan() {
+  if (window._stopScan) { window._stopScan(); window._stopScan = null; }
+  resetScanArea();
+}
+
+function resetScanArea() {
+  const area = document.getElementById('scannerArea');
+  if (!area) return;
+  area.style.height = '';
+  area.style.padding = '';
+  area.style.border = '';
+  area.innerHTML = `
+    <div class="scan-icon">📷</div>
+    <div>Point camera at QR label</div>
+    <button class="btn-primary" id="startScanBtn" onclick="startScan()">Start Scan</button>
+  `;
 }
 
 async function handleScannedCode(code) {
