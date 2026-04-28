@@ -109,8 +109,12 @@ function remove(id) {
 // performedById identifies the actor (admin in kiosk mode, otherwise same as
 // borrower). The checkout_log keeps both: performed_by = actor, checkout_user
 // = borrower username, so audits show who actually scanned/clicked.
-function checkout(equipmentId, userId, username, notes = '', source = 'Manual', performedById = null) {
+function checkout(equipmentId, userId, username, notes = '', source = 'Manual', performedById = null, durationDays = 7) {
   const actorId = performedById || userId;
+  // Calculate due date: today + durationDays (stored as YYYY-MM-DD UTC)
+  const due = new Date();
+  due.setUTCDate(due.getUTCDate() + Math.max(1, Math.min(30, durationDays || 7)));
+  const dueDate = due.toISOString().slice(0, 10);
   const tx = db.transaction(() => {
     const eq = db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
     if (!eq) throw Object.assign(new Error('Equipment not found'), { status: 404 });
@@ -120,9 +124,9 @@ function checkout(equipmentId, userId, username, notes = '', source = 'Manual', 
     db.prepare(`
       UPDATE equipment
       SET status = 'checked_out', checked_out_by = ?, checked_out_at = datetime('now'),
-          updated_at = datetime('now')
+          due_date = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(userId, equipmentId);
+    `).run(userId, dueDate, equipmentId);
     db.prepare(`
       INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
       VALUES (?, 'checkout', ?, ?, ?, ?)
@@ -149,7 +153,7 @@ function checkin(equipmentId, actingUser, notes = '', source = 'Manual') {
     db.prepare(`
       UPDATE equipment
       SET status = 'available', checked_out_by = NULL, checked_out_at = NULL,
-          updated_at = datetime('now')
+          due_date = NULL, updated_at = datetime('now')
       WHERE id = ?
     `).run(equipmentId);
     db.prepare(`

@@ -28,6 +28,8 @@ const checkoutSchema = z.object({
   // they pass the target user's id here. Non-admins must omit this — the
   // server enforces that below and falls back to the acting user.
   for_user_id: z.number().int().positive().optional(),
+  // Checkout duration in days (1–30). Server calculates due_date from this.
+  duration_days: z.number().int().min(1).max(30).optional().default(7),
 });
 
 router.use(requireAuth);
@@ -142,6 +144,7 @@ router.post('/:id(\\d+)/checkout', validate(checkoutSchema), (req, res, next) =>
       req.body.notes,
       req.body.source,
       req.user.id,
+      req.body.duration_days,
     );
     req.audit('checkout', String(id), borrower.id !== req.user.id ? { for_user: borrower.username } : undefined);
     res.json({ item });

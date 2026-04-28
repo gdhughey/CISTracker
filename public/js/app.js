@@ -246,8 +246,22 @@ function buildCatChips() {
 
 function getItemStatus(item) {
   if (item.status === 'available') return 'available';
-  if (item.status === 'checked_out' && item.checked_out_at && daysAgo(item.checked_out_at) >= 3) return 'overdue';
-  return 'checked_out';
+  if (item.status === 'checked_out') {
+    if (item.due_date) {
+      // due_date is YYYY-MM-DD UTC — treat end of that day as deadline
+      const due = new Date(item.due_date + 'T23:59:59Z');
+      if (Date.now() > due.getTime()) return 'overdue';
+    } else if (daysAgo(item.checked_out_at) >= 3) {
+      return 'overdue';
+    }
+  }
+  return item.status === 'checked_out' ? 'checked_out' : item.status;
+}
+
+function fmtDue(due_date) {
+  if (!due_date) return '';
+  const d = new Date(due_date + 'T12:00:00Z');
+  return 'due ' + d.toLocaleDateString('en-US', { month:'short', day:'numeric' });
 }
 
 function setStatusFilter(s) {
@@ -282,7 +296,8 @@ function renderItems() {
     const statusLabel = st === 'available' ? 'Available' : st === 'checked_out' ? 'Checked Out' : 'Overdue';
     let subLine = '';
     if (st !== 'available' && item.checked_out_username) {
-      subLine = `<div class="cell-sub">${esc(item.checked_out_username)} · ${fmtDate(item.checked_out_at)}</div>`;
+      const due = item.due_date ? fmtDue(item.due_date) : fmtDate(item.checked_out_at);
+      subLine = `<div class="cell-sub">— ${esc(item.checked_out_username)} · <span style="color:${st==='overdue'?'var(--red)':'var(--text-muted)'}">${due}</span></div>`;
     }
     let queueLine = '';
     if (item.queue_length > 0) {
@@ -384,6 +399,7 @@ async function openDetail(id) {
       ${st !== 'available' ? `
         <div class="meta-row"><span class="label">Borrower</span><span class="value" style="color:${st === 'overdue' ? 'var(--red)' : 'var(--amber)'}">${esc(item.checked_out_username || '—')}</span></div>
         <div class="meta-row"><span class="label">Checked Out</span><span class="value">${fmtDate(item.checked_out_at)}</span></div>
+        <div class="meta-row"><span class="label">Due</span><span class="value" style="color:${st==='overdue'?'var(--red)':'var(--text)'}">${item.due_date ? fmtDue(item.due_date) : '—'}</span></div>
       ` : ''}
     </div>
     <div class="detail-action">
@@ -438,26 +454,41 @@ function openCheckoutModal(id) {
   if (!item) return;
   const modal = document.getElementById('modalContent');
   const isAdmin = ME.role === 'admin';
+  // Default due date label
+  const defaultDays = 7;
+  const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
+  const defaultDueStr = defaultDue.toLocaleDateString('en-US', { month:'short', day:'numeric' });
   modal.innerHTML = `
-    <div class="modal-title">Check Out</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+      <span style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase">Checkout</span>
+      <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1" onclick="closeModal()">×</button>
+    </div>
     <div class="modal-name">${esc(item.name)}</div>
-    <div class="modal-id">${esc(item.barcode || 'ID-' + item.id)}</div>
+    <div class="modal-id" style="margin-bottom:16px">${esc(item.barcode || 'ID-' + item.id)}</div>
     <div class="modal-body" id="coStep1">
-      ${isAdmin ? `
-        <div class="form-group">
-          <label>Borrower</label>
+      <div class="form-group">
+        <label>Borrower Name</label>
+        ${isAdmin ? `
           <select id="coBorrower" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
             <option value="">Loading users...</option>
           </select>
-        </div>
-      ` : `<div class="info-strip">Checking out to: <strong>${esc(ME.username)}</strong></div>`}
+        ` : `
+          <input type="text" value="${esc(ME.username)}" disabled style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-surface);border:1px solid var(--border-input);color:var(--text-sec);font-size:13px">
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">You can only check out items to your own account.</div>
+        `}
+      </div>
       <div class="form-group">
-        <label>Notes (optional)</label>
-        <input id="coNotes" type="text" placeholder="e.g. For lab exercise">
+        <label id="durationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
+        <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}"
+          style="width:100%;accent-color:var(--accent);cursor:pointer;margin:6px 0"
+          oninput="updateDurationLabel(this.value)">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:2px">
+          <span>1d</span><span>7d</span><span>14d</span><span>30d</span>
+        </div>
       </div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" onclick="confirmCheckout(${id})">Confirm Checkout</button>
+        <button class="btn-primary" onclick="confirmCheckout(${id})">Continue →</button>
       </div>
     </div>
     <div id="coSuccess" class="hidden" style="text-align:center;padding:24px 0">
@@ -467,8 +498,16 @@ function openCheckoutModal(id) {
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
-  // Load users for admin
   if (isAdmin) loadUserSelect();
+}
+
+function updateDurationLabel(days) {
+  days = parseInt(days, 10);
+  const due = new Date();
+  due.setDate(due.getDate() + days);
+  const dueStr = due.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  const el = document.getElementById('durationLabel');
+  if (el) el.textContent = `Duration — ${days} day${days !== 1 ? 's' : ''} (due ${dueStr})`;
 }
 
 async function loadUserSelect() {
@@ -490,10 +529,11 @@ async function loadUserSelect() {
 
 async function confirmCheckout(id) {
   try {
-    const body = { notes: document.getElementById('coNotes')?.value || '', source: 'Manual' };
+    const days = parseInt(document.getElementById('coDuration')?.value || '7', 10);
+    const body = { source: 'Manual', duration_days: days };
     if (ME.role === 'admin') {
       const sel = document.getElementById('coBorrower');
-      if (sel) body.for_user_id = parseInt(sel.value, 10);
+      if (sel && sel.value) body.for_user_id = parseInt(sel.value, 10);
     }
     await api(`/api/equipment/${id}/checkout`, { method: 'POST', body });
     document.getElementById('coStep1').classList.add('hidden');
