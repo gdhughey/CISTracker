@@ -476,8 +476,16 @@ async function loadUserSelect() {
     const { users } = await api('/api/admin/users');
     const sel = document.getElementById('coBorrower');
     if (!sel) return;
+    if (!users || users.length === 0) {
+      sel.innerHTML = '<option value="">No users found</option>';
+      return;
+    }
     sel.innerHTML = users.map(u => `<option value="${u.id}">${esc(u.username)} (${u.role})</option>`).join('');
-  } catch {}
+  } catch (err) {
+    const sel = document.getElementById('coBorrower');
+    if (sel) sel.innerHTML = '<option value="">Failed to load users</option>';
+    toast('Could not load user list: ' + (err.error || err.message || 'unknown error'), 'error');
+  }
 }
 
 async function confirmCheckout(id) {
