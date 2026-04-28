@@ -755,17 +755,17 @@ function doPrintLabel(label, name, category, serial) {
   doc.write(`<html><head><style>
     @page{size:40mm 30mm;margin:0;}
     *{box-sizing:border-box;}
-    body{margin:0;padding:2mm;font-family:Arial,sans-serif;display:flex;gap:2mm;align-items:center;width:40mm;height:30mm;overflow:hidden;}
-    .qr{width:24mm;height:24mm;flex-shrink:0;}
-    .info{flex:1;overflow:hidden;}
-    .lab{font-size:5pt;color:#888;text-transform:uppercase;letter-spacing:.3px;}
-    .name{font-size:6.5pt;font-weight:700;line-height:1.2;margin:1px 0;word-break:break-word;}
-    .id{font-family:monospace;font-size:9pt;font-weight:700;letter-spacing:.5px;}
-    .sub{font-size:5pt;color:#666;margin-top:1px;}
+    body{margin:0;padding:1.5mm;font-family:Arial,sans-serif;display:flex;gap:1.5mm;align-items:center;width:40mm;height:30mm;overflow:hidden;}
+    .qr{width:21mm;height:21mm;flex-shrink:0;}
+    .info{flex:1;overflow:hidden;display:flex;flex-direction:column;gap:1px;}
+    .lab{font-size:5pt;color:#555;font-weight:600;letter-spacing:.2px;}
+    .name{font-size:6pt;font-weight:700;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;}
+    .id{font-family:monospace;font-size:7pt;font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;}
+    .sub{font-size:5pt;color:#555;white-space:nowrap;overflow:hidden;}
   </style></head><body>
     <img class="qr" src="${label.qr_data_url}">
     <div class="info">
-      <div class="lab">CIS CyberLab</div>
+      <div class="lab">CISTracker</div>
       <div class="name">${esc(name)}</div>
       <div class="id">${esc(label.asset_id)}</div>
       <div class="sub">${esc(category || '')}${serial ? ' · ' + serial : ''}</div>
