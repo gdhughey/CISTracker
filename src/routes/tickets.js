@@ -65,7 +65,9 @@ router.post('/', validate(createSchema), (req, res) => {
   });
   req.audit('ticket_create', String(ticket.id));
   // Forward to support email
-  emailService.sendSupportTicket(ticket, req.user.username).catch(() => {});
+  emailService.sendSupportTicket(ticket, req.user.username).catch(err => {
+    console.error('[email] sendSupportTicket failed:', err?.message || err);
+  });
   res.status(201).json({ ticket });
 });
 
