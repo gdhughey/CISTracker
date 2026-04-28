@@ -83,8 +83,22 @@ router.put('/:id(\\d+)', validate(updateSchema), (req, res) => {
     const updated = ticketService.update(id, { subject, description });
     return res.json({ ticket: updated });
   }
+  // Detect assignment changes for a more useful audit entry
+  const becameAssignee   = req.body.assigned_to !== undefined && req.body.assigned_to === req.user.id && ticket.assigned_to !== req.user.id;
+  const droppedAssignment = req.body.assigned_to === null && ticket.assigned_to === req.user.id;
+  const reassignedToOther = req.body.assigned_to !== undefined && req.body.assigned_to !== null && req.body.assigned_to !== ticket.assigned_to;
+
   const updated = ticketService.update(id, req.body);
-  req.audit('ticket_update', String(id));
+
+  if (becameAssignee) {
+    req.audit('ticket_self_assign', String(id), { previous: ticket.assigned_to });
+  } else if (droppedAssignment) {
+    req.audit('ticket_unassign', String(id));
+  } else if (reassignedToOther) {
+    req.audit('ticket_assign', String(id), { from: ticket.assigned_to, to: req.body.assigned_to });
+  } else {
+    req.audit('ticket_update', String(id));
+  }
   res.json({ ticket: updated });
 });
 

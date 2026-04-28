@@ -1270,6 +1270,7 @@ async function loadTickets() {
           <span class="ticket-status ${t.status}">${t.status.replace('_', ' ')}</span>
           <span>${esc(t.reporter_username)}</span>
           <span>${fmtDate(t.created_at)}</span>
+          ${t.assigned_username ? `<span style="color:${t.assigned_to === ME.id ? 'var(--green)' : 'var(--purple)'}">👤 ${esc(t.assigned_username)}</span>` : '<span style="color:var(--text-muted)">unassigned</span>'}
           ${t.comment_count > 0 ? `<span>💬 ${t.comment_count}</span>` : ''}
         </div>
       </div>
@@ -1294,6 +1295,22 @@ async function openTicket(id) {
   try {
     const { ticket, comments } = await api(`/api/tickets/${id}`);
     const isAdmin = ME.role === 'admin';
+    const assignedToMe = ticket.assigned_to === ME.id;
+    const isAssigned = !!ticket.assigned_to;
+    // Assign-to-me / take-over / drop buttons (admins only)
+    let assignBtns = '';
+    if (isAdmin) {
+      if (!isAssigned) {
+        assignBtns = `<button class="btn-outline btn-sm btn-green" onclick="assignTicketToMe(${id})">✋ Assign to me</button>`;
+      } else if (assignedToMe) {
+        assignBtns = `<button class="btn-outline btn-sm" onclick="unassignTicket(${id})">Drop assignment</button>`;
+      } else {
+        assignBtns = `<button class="btn-outline btn-sm btn-purple" onclick="assignTicketToMe(${id})">Take over</button>`;
+      }
+    }
+    const assigneeLine = isAssigned
+      ? `Assigned to <strong style="color:${assignedToMe ? 'var(--green)' : 'var(--purple)'}">${esc(ticket.assigned_username)}${assignedToMe ? ' (you)' : ''}</strong>`
+      : `<span style="color:var(--text-muted)">Unassigned</span>`;
     detail.innerHTML = `
       <div class="back-link" onclick="loadTickets()">← Back to tickets</div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
@@ -1302,9 +1319,13 @@ async function openTicket(id) {
         <div class="priority-dot priority-${ticket.priority}" title="${ticket.priority}"></div>
       </div>
       <h2>${esc(ticket.subject)}</h2>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
         by ${esc(ticket.reporter_username)} · ${fmtDateTime(ticket.created_at)}
         ${ticket.equipment_name ? ` · Equipment: ${esc(ticket.equipment_name)}` : ''}
+      </div>
+      <div style="font-size:12px;color:var(--text-sec);margin-bottom:16px;padding:8px 12px;background:var(--bg-surface);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span>👤 ${assigneeLine}</span>
+        ${assignBtns}
       </div>
       <div style="font-size:13px;line-height:1.7;padding:16px;background:var(--bg-surface);border-radius:10px;border:1px solid var(--border)">
         ${esc(ticket.description || 'No description').replace(/\n/g, '<br>')}
@@ -1358,6 +1379,26 @@ async function updateTicketStatus(ticketId) {
   try {
     await api(`/api/tickets/${ticketId}`, { method: 'PUT', body: { status } });
     toast('Status updated', 'success');
+  } catch (err) {
+    toast(err.error || 'Failed', 'error');
+  }
+}
+
+async function assignTicketToMe(ticketId) {
+  try {
+    await api(`/api/tickets/${ticketId}`, { method: 'PUT', body: { assigned_to: ME.id } });
+    toast('Assigned to you', 'success');
+    openTicket(ticketId); // refresh detail
+  } catch (err) {
+    toast(err.error || 'Failed to assign', 'error');
+  }
+}
+
+async function unassignTicket(ticketId) {
+  try {
+    await api(`/api/tickets/${ticketId}`, { method: 'PUT', body: { assigned_to: null } });
+    toast('Assignment cleared', 'info');
+    openTicket(ticketId);
   } catch (err) {
     toast(err.error || 'Failed', 'error');
   }
