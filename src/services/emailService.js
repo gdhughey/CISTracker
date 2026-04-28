@@ -54,6 +54,29 @@ async function sendPasswordReset(to, username, tempPassword) {
   });
 }
 
+// Notify a user that an admin updated the email on their account.
+// Sent to the NEW address only (confirms the change reached the right inbox).
+async function sendEmailChangedNotice(to, username) {
+  return send({
+    from: config.resend.noReplyFrom,
+    to,
+    subject: 'CISTracker: Email address updated',
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#0f1117;color:#e8eaf0;padding:32px;border-radius:12px;">
+        <h2 style="color:#4f8ef7;margin-bottom:16px;">Email Updated</h2>
+        <p>Hi <strong>${username}</strong>,</p>
+        <p>An admin has updated the email address on your CISTracker account. This address (<strong>${to}</strong>) is now where account notifications, password resets, and overdue reminders will be delivered.</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://cistracker.net" style="display:inline-block;background:#4f8ef7;color:#fff;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Log in to CISTracker</a>
+        </p>
+        <p style="color:#6b7280;font-size:12px;margin-top:24px;">If you weren't expecting this change, contact the CyberLab admin.</p>
+        <p style="color:#6b7280;font-size:12px;margin-top:8px;">&mdash; CISTracker</p>
+      </div>
+    `,
+    text: `Hi ${username}, your CISTracker account email was updated to ${to} by an admin. Log in: https://cistracker.net — If you weren't expecting this, contact the CyberLab admin.`,
+  });
+}
+
 // Self-service forgot-password flow — emails a one-time reset link (NOT a temp password).
 async function sendPasswordResetLink(to, username, resetUrl) {
   return send({
@@ -199,5 +222,5 @@ function isConfigured() {
 module.exports = {
   send, isConfigured,
   sendPasswordReset, sendPasswordResetLink, sendNewAccount, sendOverdueReminder, sendAdminAlert,
-  sendQueueNotification, sendSupportTicket,
+  sendQueueNotification, sendSupportTicket, sendEmailChangedNotice,
 };

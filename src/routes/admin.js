@@ -82,6 +82,8 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     }
     userService.updateEmail(id, req.body.email);
     req.audit('admin_change_email', user.username, { oldEmail: user.email, newEmail: req.body.email });
+    // Notify the user at their NEW address that the change took effect
+    emailService.sendEmailChangedNotice(req.body.email, user.username).catch(() => {});
   }
   if (req.body.reset_password) {
     const resetPw = genTempPassword(7);
