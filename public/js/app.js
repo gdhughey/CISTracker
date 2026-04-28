@@ -9,6 +9,7 @@ let CSRF = '';           // CSRF token
 let currentView = 'inventory';
 let statusFilter = 'all';
 let catFilter = 'All';
+let locFilter = 'All';
 let ticketFilter = 'all';
 let _pendingPrint = null; // label queued for printing from add-item modal
 
@@ -211,6 +212,7 @@ async function loadItems() {
     ITEMS = data.items || [];
     computeStats();
     buildCatChips();
+    buildLocChips();
     renderItems();
   } catch (err) {
     console.error('Failed to load items', err);
@@ -242,6 +244,21 @@ function buildCatChips() {
     chip.className = 'chip' + (c === catFilter ? ' active' : '');
     chip.textContent = c;
     chip.onclick = () => { catFilter = c; buildCatChips(); renderItems(); };
+    container.appendChild(chip);
+  }
+}
+
+function buildLocChips() {
+  const locs = new Set(['All']);
+  for (const item of ITEMS) if (item.location) locs.add(item.location);
+  const container = document.getElementById('locChips');
+  container.innerHTML = '';
+  if (locs.size <= 1) return; // no locations set, hide the row
+  for (const l of locs) {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (l === locFilter ? ' active' : '');
+    chip.textContent = l;
+    chip.onclick = () => { locFilter = l; buildLocChips(); renderItems(); };
     container.appendChild(chip);
   }
 }
@@ -287,9 +304,11 @@ function renderItems() {
     if (statusFilter !== 'all' && st !== statusFilter) continue;
     // Category filter
     if (catFilter !== 'All' && item.category !== catFilter) continue;
+    // Location filter
+    if (locFilter !== 'All' && item.location !== locFilter) continue;
     // Search
     if (q) {
-      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type}`.toLowerCase();
+      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location}`.toLowerCase();
       if (!hay.includes(q)) continue;
     }
     count++;
