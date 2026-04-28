@@ -653,3 +653,58 @@ td { padding:10px 14px; vertical-align:middle; }
 .gap-8 { gap:8px; }
 .mt-12 { margin-top:12px; }
 .mb-16 { margin-bottom:16px; }
+
+/* ── First-time tour ── */
+.tour-overlay {
+  position:fixed; inset:0; z-index:9000;
+  background:rgba(8,10,16,0.72);
+  backdrop-filter:blur(2px);
+  animation:tourFade 0.18s ease-out;
+}
+@keyframes tourFade { from { opacity:0; } to { opacity:1; } }
+.tour-bubble {
+  position:fixed; z-index:9100;
+  max-width:340px; min-width:260px;
+  background:var(--bg-elevated);
+  border:1px solid var(--accent);
+  border-radius:12px;
+  padding:18px 20px;
+  box-shadow:0 12px 40px rgba(0,0,0,0.6), 0 0 0 4px var(--accent-soft);
+  color:var(--text);
+  font-size:13px; line-height:1.55;
+  animation:tourPop 0.22s cubic-bezier(.2,.9,.3,1.2);
+}
+@keyframes tourPop {
+  from { opacity:0; transform:translate(var(--tx,-50%), var(--ty,-50%)) scale(0.92); }
+  to   { opacity:1; }
+}
+.tour-step {
+  font-size:10px; color:var(--text-muted);
+  text-transform:uppercase; letter-spacing:0.1em; font-weight:600;
+  margin-bottom:6px;
+}
+.tour-title { font-size:15px; font-weight:600; margin-bottom:8px; color:var(--text); }
+.tour-body { color:var(--text-sec); margin-bottom:14px; }
+.tour-body strong { color:var(--accent); font-weight:600; }
+.tour-actions {
+  display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;
+}
+/* Make whichever sidebar item the bubble is anchored to glow.
+   isolation+z-index lifts it above the fixed .tour-overlay backdrop. */
+.tour-highlight {
+  position:relative !important;
+  isolation:isolate;
+  z-index:9050 !important;
+  background:var(--accent-soft) !important;
+  color:var(--accent) !important;
+  box-shadow:0 0 0 2px var(--accent), 0 0 24px rgba(79,142,247,0.5);
+  border-radius:8px;
+  animation:tourPulse 1.6s ease-in-out infinite;
+}
+@keyframes tourPulse {
+  0%, 100% { box-shadow:0 0 0 2px var(--accent), 0 0 18px rgba(79,142,247,0.4); }
+  50%      { box-shadow:0 0 0 2px var(--accent), 0 0 28px rgba(79,142,247,0.7); }
+}
+@media (max-width: 700px) {
+  .tour-bubble { max-width:88vw; min-width:0; }
+}

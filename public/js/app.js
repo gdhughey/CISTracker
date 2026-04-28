@@ -167,7 +167,152 @@ async function showApp() {
   // Load data
   await Promise.all([loadItems(), loadOverdueCount(), loadTicketCounts()]);
   switchView('inventory');
+  // First-time onboarding tour — only fires once per user/browser
+  maybeStartTour();
 }
+
+// ── First-time onboarding tour ─────────────────────────────────────────
+// Walks a brand-new user through the 5 main sections of the app with
+// step-by-step bubbles. Storage key is per-user so each account sees the
+// tour exactly once on each browser they log in from.
+function tourKey() { return ME ? `cistracker_tour_seen_v1_${ME.id}` : null; }
+
+function maybeStartTour() {
+  const key = tourKey();
+  if (!key) return;
+  try { if (localStorage.getItem(key) === '1') return; } catch { return; }
+  // Slight delay so the inventory view is painted before we anchor bubbles
+  setTimeout(() => startTour(), 400);
+}
+
+function startTour() {
+  const isAdmin = ME && ME.role === 'admin';
+  const steps = [
+    {
+      title: 'Welcome to CISTracker 👋',
+      body: `Hi <strong>${esc(ME.username)}</strong>! This 60-second tour shows you the basics. You can hit "Skip" any time.`,
+      target: null, // centered welcome
+    },
+    {
+      title: '📦 All Items',
+      body: 'Every piece of CyberLab equipment lives here. Use the <strong>search bar</strong>, the <strong>status chips</strong> (Available / Out / Overdue), the <strong>category</strong> row, or the <strong>📍 location</strong> row to narrow things down.',
+      target: '[data-view="inventory"]',
+    },
+    {
+      title: '⇄ Check In / Out',
+      body: 'Borrow or return equipment. Either <strong>📷 scan</strong> the QR sticker on the item, or use <strong>✏️ Manual</strong> to search by name. Items checked out to you appear at the bottom for one-tap return.',
+      target: '[data-view="checkinout"]',
+    },
+    {
+      title: '⏰ Overdue',
+      body: 'Anything you forgot to return shows up here. The badge next to it tells you how many items are past their due date.',
+      target: '[data-view="overdue"]',
+    },
+    {
+      title: '🎫 Tickets',
+      body: 'Need help, broke something, or have a request? File a ticket here and the lab admin gets notified by email.',
+      target: '[data-view="tickets"]',
+    },
+  ];
+  if (isAdmin) {
+    steps.push({
+      title: '👥 Users (admin)',
+      body: 'Add new students, reset passwords, change emails, promote/demote, or remove accounts. Every action is recorded in the audit log.',
+      target: '[data-view="users"]',
+    });
+    steps.push({
+      title: '📋 Audit Log (admin)',
+      body: 'Full forensic trail of every login, checkout, role change, and email update. Useful when something goes sideways.',
+      target: '[data-view="audit"]',
+    });
+  }
+  steps.push({
+    title: 'You\'re all set! 🎉',
+    body: 'That\'s it — you know the whole app. Reach out to the lab admin if you ever get stuck.',
+    target: null,
+  });
+  showTour(steps, 0);
+}
+
+function showTour(steps, idx) {
+  // Clear any prior tour overlay
+  const old = document.getElementById('tourOverlay');
+  if (old) old.remove();
+
+  const step = steps[idx];
+  const total = steps.length;
+  const isLast = idx === total - 1;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'tourOverlay';
+  overlay.className = 'tour-overlay';
+  overlay.innerHTML = `
+    <div class="tour-bubble" id="tourBubble">
+      <div class="tour-step">${idx + 1} / ${total}</div>
+      <div class="tour-title">${esc(step.title)}</div>
+      <div class="tour-body">${step.body}</div>
+      <div class="tour-actions">
+        <button class="btn-outline btn-sm" id="tourSkip">${isLast ? 'Done' : 'Skip'}</button>
+        ${idx > 0 ? '<button class="btn-outline btn-sm" id="tourBack">Back</button>' : ''}
+        ${!isLast ? '<button class="btn-primary btn-sm" id="tourNext">Next</button>' : '<button class="btn-primary btn-sm" id="tourFinish">Got it</button>'}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Position the bubble: anchor next to a sidebar nav item if `target` is set,
+  // otherwise center it on the screen for the welcome / closing steps.
+  const bubble = document.getElementById('tourBubble');
+  if (step.target) {
+    const anchor = document.querySelector(step.target);
+    if (anchor) {
+      anchor.classList.add('tour-highlight');
+      const rect = anchor.getBoundingClientRect();
+      const isMobile = window.innerWidth < 700;
+      if (isMobile) {
+        // On mobile the sidebar is hidden — just center the bubble in the viewport
+        bubble.style.top = '50%';
+        bubble.style.left = '50%';
+        bubble.style.transform = 'translate(-50%, -50%)';
+      } else {
+        bubble.style.top = (rect.top + rect.height / 2) + 'px';
+        bubble.style.left = (rect.right + 16) + 'px';
+        bubble.style.transform = 'translateY(-50%)';
+      }
+    }
+  } else {
+    bubble.style.top = '50%';
+    bubble.style.left = '50%';
+    bubble.style.transform = 'translate(-50%, -50%)';
+  }
+
+  // Wire buttons
+  const cleanup = () => {
+    document.querySelectorAll('.tour-highlight').forEach(el => el.classList.remove('tour-highlight'));
+    overlay.remove();
+  };
+  const finish = () => {
+    cleanup();
+    try { localStorage.setItem(tourKey(), '1'); } catch {}
+  };
+  document.getElementById('tourSkip').onclick = finish;
+  if (document.getElementById('tourBack')) {
+    document.getElementById('tourBack').onclick = () => { cleanup(); showTour(steps, idx - 1); };
+  }
+  if (document.getElementById('tourNext')) {
+    document.getElementById('tourNext').onclick = () => { cleanup(); showTour(steps, idx + 1); };
+  }
+  if (document.getElementById('tourFinish')) {
+    document.getElementById('tourFinish').onclick = finish;
+  }
+}
+
+// Admin/dev hook: expose a way to replay the tour from the browser console
+// (`replayTour()`) without having to clear localStorage by hand.
+window.replayTour = function () {
+  try { localStorage.removeItem(tourKey()); } catch {}
+  startTour();
+};
 
 // ── View switching ─────────────────────────────────────────────────────
 function switchView(view) {
@@ -188,7 +333,15 @@ function switchView(view) {
   if (view === 'inventory') loadItems();
   if (view === 'checkinout') loadCheckinout();
   if (view === 'overdue') loadOverdue();
-  if (view === 'tickets') loadTickets();
+  if (view === 'tickets') {
+    loadTickets();
+    // Hide the badge for this admin in this browser, and persist the
+    // current open-count to localStorage so it stays hidden on refresh
+    // (only this admin — other admins still see their badge).
+    const badge = document.getElementById('ticketBadge');
+    if (badge) badge.classList.add('hidden');
+    markTicketsSeen();
+  }
   if (view === 'users') loadUsers();
   if (view === 'audit') loadAudit();
 }
@@ -1064,6 +1217,8 @@ async function loadOverdue() {
 //  TICKETS
 // ═══════════════════════════════════════════════════════════════════════
 
+function ticketSeenKey() { return ME ? `cistracker_tickets_seen_${ME.id}` : null; }
+
 async function loadTicketCounts() {
   // Only admins see the open-ticket count badge
   if (!ME || ME.role !== 'admin') return;
@@ -1071,8 +1226,25 @@ async function loadTicketCounts() {
     const data = await api('/api/tickets/counts');
     const badge = document.getElementById('ticketBadge');
     const open = (data.open || 0) + (data.in_progress || 0);
-    if (open > 0) { badge.textContent = open; badge.classList.remove('hidden'); }
+    // Per-admin "last seen open count" — each admin tracks their own state
+    // in localStorage, so dismissing the badge for one admin doesn't clear
+    // it for the others.
+    let seen = 0;
+    try { seen = parseInt(localStorage.getItem(ticketSeenKey()) || '0', 10); } catch {}
+    const unseen = Math.max(0, open - seen);
+    if (unseen > 0) { badge.textContent = unseen; badge.classList.remove('hidden'); }
     else badge.classList.add('hidden');
+  } catch {}
+}
+
+// Mark all currently-open tickets as "seen" by this admin in this browser.
+// Called when the admin opens the Tickets view.
+async function markTicketsSeen() {
+  if (!ME || ME.role !== 'admin') return;
+  try {
+    const data = await api('/api/tickets/counts');
+    const open = (data.open || 0) + (data.in_progress || 0);
+    localStorage.setItem(ticketSeenKey(), String(open));
   } catch {}
 }
 
