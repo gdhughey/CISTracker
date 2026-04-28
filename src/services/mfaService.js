@@ -4,7 +4,7 @@ const QRCode = require('qrcode');
 
 function generateSecret(username) {
   return speakeasy.generateSecret({
-    name: `CyberLab (${username})`,
+    name: `CISTracker (${username})`,
     length: 20,
   });
 }

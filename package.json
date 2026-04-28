@@ -2,7 +2,7 @@
   "name": "cistracker",
   "version": "1.0.0",
   "private": true,
-  "description": "CISTracker — CyberLab equipment checkout & inventory tracker",
+  "description": "CISTracker — equipment checkout & inventory tracker",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

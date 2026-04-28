@@ -195,7 +195,7 @@ function startTour() {
     },
     {
       title: '📦 All Items',
-      body: 'Every piece of CyberLab equipment lives here. Use the <strong>search bar</strong>, the <strong>status chips</strong> (Available / Out / Overdue), the <strong>category</strong> row, or the <strong>📍 location</strong> row to narrow things down.',
+      body: 'Every piece of equipment lives here. Use the <strong>search bar</strong>, the <strong>status chips</strong> (Available / Out / Overdue), the <strong>category</strong> row, or the <strong>📍 location</strong> row to narrow things down.',
       target: '[data-view="inventory"]',
     },
     {

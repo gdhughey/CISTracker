@@ -69,11 +69,11 @@ async function sendEmailChangedNotice(to, username) {
         <p style="text-align:center;margin-top:24px;">
           <a href="https://cistracker.net" style="display:inline-block;background:#4f8ef7;color:#fff;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Log in to CISTracker</a>
         </p>
-        <p style="color:#6b7280;font-size:12px;margin-top:24px;">If you weren't expecting this change, contact the CyberLab admin.</p>
+        <p style="color:#6b7280;font-size:12px;margin-top:24px;">If you weren't expecting this change, contact the CISTracker admin.</p>
         <p style="color:#6b7280;font-size:12px;margin-top:8px;">&mdash; CISTracker</p>
       </div>
     `,
-    text: `Hi ${username}, your CISTracker account email was updated to ${to} by an admin. Log in: https://cistracker.net — If you weren't expecting this, contact the CyberLab admin.`,
+    text: `Hi ${username}, your CISTracker account email was updated to ${to} by an admin. Log in: https://cistracker.net — If you weren't expecting this, contact the CISTracker admin.`,
   });
 }
 

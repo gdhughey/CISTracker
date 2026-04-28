@@ -118,10 +118,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   flex:1; overflow-y:auto; display:flex; flex-direction:column;
 }
 
-/* ── Top bar ── */
+/* ── Top bar ──
+   Sticky on iOS so the search input never scrolls offscreen — otherwise
+   iOS Safari yanks the whole page back to the top whenever the user types
+   while scrolled down. */
 .top-bar {
   padding:16px 24px; display:flex; align-items:center; gap:12px;
   border-bottom:1px solid var(--border); flex-shrink:0;
+  position:sticky; top:0; z-index:20;
+  background:var(--bg-base);
 }
 .search-box {
   position:relative; max-width:380px; flex:1;
