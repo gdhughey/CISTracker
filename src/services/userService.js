@@ -112,14 +112,35 @@ function listAll() {
 
 function deleteUser(id) {
   const tx = db.transaction(() => {
-    // Clear foreign-key references before deleting the user row
+    // Find an admin to inherit checked-out equipment
+    const admin = db.prepare(
+      "SELECT id, username FROM users WHERE role = 'admin' AND id != ? ORDER BY id LIMIT 1"
+    ).get(id);
+
+    // Transfer any checked-out equipment to the admin rather than just returning it
+    if (admin) {
+      // Grab the items BEFORE reassigning so we only log the transferred ones
+      const items = db.prepare('SELECT id FROM equipment WHERE checked_out_by = ?').all(id);
+      db.prepare(`
+        UPDATE equipment SET checked_out_by = ?, updated_at = datetime('now')
+        WHERE checked_out_by = ?
+      `).run(admin.id, id);
+      for (const item of items) {
+        db.prepare(`INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
+          VALUES (?, 'checkout', ?, ?, 'Transferred from deleted user', 'Admin')
+        `).run(item.id, admin.id, admin.username);
+      }
+    } else {
+      // No other admin — just return the equipment
+      db.prepare(`UPDATE equipment SET checked_out_by = NULL, checked_out_at = NULL,
+        due_date = NULL, status = 'available' WHERE checked_out_by = ?`).run(id);
+    }
+
+    // Clear remaining FK references
     db.prepare('DELETE FROM equipment_queue WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM ticket_comments WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM tickets WHERE user_id = ? OR assigned_to = ?').run(id, id);
     db.prepare('DELETE FROM checkout_log WHERE performed_by = ?').run(id);
-    // Null out equipment still checked out by this user
-    db.prepare(`UPDATE equipment SET checked_out_by = NULL, checked_out_at = NULL,
-      due_date = NULL, status = 'available' WHERE checked_out_by = ?`).run(id);
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
   });
   tx();
