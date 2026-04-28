@@ -44,10 +44,13 @@ async function sendPasswordReset(to, username, tempPassword) {
         <p>Your temporary password is:</p>
         <p style="text-align:center;"><code style="font-size:18px;background:#171b26;color:#4f8ef7;padding:8px 16px;border-radius:8px;border:1px solid #252836;letter-spacing:0.05em">${tempPassword}</code></p>
         <p>You will be required to change this password on your next login.</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://cistracker.net" style="display:inline-block;background:#4f8ef7;color:#fff;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Log in to CISTracker</a>
+        </p>
         <p style="color:#6b7280;font-size:12px;margin-top:24px;">&mdash; CISTracker</p>
       </div>
     `,
-    text: `Hi ${username}, your CISTracker password has been reset. Temporary password: ${tempPassword} — You must change it on next login.`,
+    text: `Hi ${username}, your CISTracker password has been reset. Temporary password: ${tempPassword} — You must change it on next login. https://cistracker.net`,
   });
 }
 
@@ -64,10 +67,13 @@ async function sendNewAccount(to, username, tempPassword) {
         <p>Your temporary password is:</p>
         <p style="text-align:center;"><code style="font-size:18px;background:#171b26;color:#4f8ef7;padding:8px 16px;border-radius:8px;border:1px solid #252836;letter-spacing:0.05em">${tempPassword}</code></p>
         <p>You will be required to change this password on your first login.</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://cistracker.net" style="display:inline-block;background:#4f8ef7;color:#fff;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Log in to CISTracker</a>
+        </p>
         <p style="color:#6b7280;font-size:12px;margin-top:24px;">&mdash; CISTracker</p>
       </div>
     `,
-    text: `Hi ${username}, a CISTracker account was created for you. Temporary password: ${tempPassword} — You must change it on first login.`,
+    text: `Hi ${username}, a CISTracker account was created for you. Temporary password: ${tempPassword} — You must change it on first login. https://cistracker.net`,
   });
 }
 
@@ -86,10 +92,13 @@ async function sendOverdueReminder(to, username, items) {
         <p>The following equipment needs to be returned:</p>
         <ul style="padding-left:20px;">${itemList}</ul>
         <p>Please return these items as soon as possible.</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://cistracker.net" style="display:inline-block;background:#f87171;color:#fff;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Go to CISTracker</a>
+        </p>
         <p style="color:#6b7280;font-size:12px;margin-top:24px;">&mdash; CISTracker</p>
       </div>
     `,
-    text: `Hi ${username}, you have ${items.length} overdue item(s). Please return them.`,
+    text: `Hi ${username}, you have ${items.length} overdue item(s). Please return them. https://cistracker.net`,
   });
 }
 
@@ -129,10 +138,13 @@ async function sendQueueNotification(to, username, equipmentName) {
         <p>Hi <strong>${username}</strong>,</p>
         <p><strong>${equipmentName}</strong> has been returned and you're next in the queue!</p>
         <p>Head to CISTracker to check it out before someone else does.</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://cistracker.net" style="display:inline-block;background:#34d399;color:#0f1117;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Check Out Now</a>
+        </p>
         <p style="color:#6b7280;font-size:12px;margin-top:24px;">&mdash; CISTracker</p>
       </div>
     `,
-    text: `Hi ${username}, ${equipmentName} is now available and you're next in the queue! Check it out on CISTracker.`,
+    text: `Hi ${username}, ${equipmentName} is now available and you're next in the queue! Check it out on CISTracker: https://cistracker.net`,
   });
 }
 
