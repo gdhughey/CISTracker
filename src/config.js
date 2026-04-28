@@ -58,6 +58,11 @@ const config = {
     // Tickets get forwarded here. MUST be set in .env — no personal email
     // hardcoded as a fallback.
     supportForwardTo: process.env.RESEND_SUPPORT_FORWARD || '',
+    // When an admin drops a ticket assignment without resolving the ticket,
+    // the ticket gets forwarded here so a fallback owner is alerted.
+    // MUST be set in .env if you want this notification (e.g. a personal
+    // address that gets read even when nobody else is monitoring tickets).
+    droppedForwardTo: process.env.RESEND_DROPPED_FORWARD || '',
   },
 
   reminders: {

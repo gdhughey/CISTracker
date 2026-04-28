@@ -193,6 +193,33 @@ async function sendQueueNotification(to, username, equipmentName) {
   });
 }
 
+// Forwarded when an admin drops a ticket they had assigned to themselves
+// WITHOUT resolving it. Sent to config.resend.droppedForwardTo so a
+// fallback owner sees that the ticket is back in the unassigned pool.
+async function sendTicketDropped(ticket, droppedByUsername) {
+  if (!config.resend.droppedForwardTo) return { skipped: true };
+  return send({
+    from: config.resend.supportFrom,
+    to: config.resend.droppedForwardTo,
+    subject: `[CISTracker] Ticket #${ticket.id} dropped by ${droppedByUsername}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#0f1117;color:#e8eaf0;padding:32px;border-radius:12px;">
+        <h2 style="color:#fbbf24;margin-bottom:16px;">⚠️ Ticket dropped without resolution</h2>
+        <p><strong>${droppedByUsername}</strong> released ticket <strong>#${ticket.id}</strong> back to the unassigned pool.</p>
+        <p><strong>Subject:</strong> ${ticket.subject}</p>
+        <p><strong>Status:</strong> ${ticket.status} &middot; <strong>Priority:</strong> ${ticket.priority}</p>
+        <hr style="border:none;border-top:1px solid #252836;margin:16px 0;">
+        <p>${(ticket.description || '').replace(/\n/g, '<br>')}</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://cistracker.net" style="display:inline-block;background:#4f8ef7;color:#fff;text-decoration:none;padding:10px 28px;border-radius:8px;font-weight:600;font-size:15px;">Open Ticket #${ticket.id}</a>
+        </p>
+        <p style="color:#6b7280;font-size:12px;margin-top:24px;">&mdash; CISTracker</p>
+      </div>
+    `,
+    text: `Ticket #${ticket.id} ("${ticket.subject}") was dropped by ${droppedByUsername} without resolution. Status: ${ticket.status}. https://cistracker.net`,
+  });
+}
+
 // ── Support ticket forwarding ──────────────────────────────────────────────────
 
 async function sendSupportTicket(ticket, reporterUsername) {
@@ -222,5 +249,5 @@ function isConfigured() {
 module.exports = {
   send, isConfigured,
   sendPasswordReset, sendPasswordResetLink, sendNewAccount, sendOverdueReminder, sendAdminAlert,
-  sendQueueNotification, sendSupportTicket, sendEmailChangedNotice,
+  sendQueueNotification, sendSupportTicket, sendEmailChangedNotice, sendTicketDropped,
 };
