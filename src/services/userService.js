@@ -141,6 +141,8 @@ function deleteUser(id) {
     db.prepare('DELETE FROM ticket_comments WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM tickets WHERE user_id = ? OR assigned_to = ?').run(id, id);
     db.prepare('DELETE FROM checkout_log WHERE performed_by = ?').run(id);
+    // Preserve audit history but remove the FK reference
+    db.prepare('UPDATE audit_log SET user_id = NULL WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
   });
   tx();
