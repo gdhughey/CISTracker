@@ -961,6 +961,8 @@ async function loadOverdue() {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function loadTicketCounts() {
+  // Only admins see the open-ticket count badge
+  if (!ME || ME.role !== 'admin') return;
   try {
     const data = await api('/api/tickets/counts');
     const badge = document.getElementById('ticketBadge');
