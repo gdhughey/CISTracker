@@ -210,7 +210,6 @@ async function loadItems() {
   try {
     const data = await api('/api/equipment');
     ITEMS = data.items || [];
-    computeStats();
     buildCatChips();
     buildLocChips();
     renderItems();
@@ -219,16 +218,16 @@ async function loadItems() {
   }
 }
 
-function computeStats() {
+function computeStats(items) {
+  items = items || ITEMS;
   let available = 0, out = 0, overdue = 0;
-  for (const item of ITEMS) {
-    if (item.status === 'available') available++;
-    else if (item.status === 'checked_out') {
-      if (item.checked_out_at && daysAgo(item.checked_out_at) >= 3) overdue++;
-      else out++;
-    }
+  for (const item of items) {
+    const st = getItemStatus(item);
+    if (st === 'available') available++;
+    else if (st === 'overdue') overdue++;
+    else if (st === 'checked_out') out++;
   }
-  document.getElementById('statTotal').textContent = ITEMS.length;
+  document.getElementById('statTotal').textContent = items.length;
   document.getElementById('statAvailable').textContent = available;
   document.getElementById('statOut').textContent = out;
   document.getElementById('statOverdue').textContent = overdue;
@@ -298,6 +297,7 @@ function renderItems() {
   const tbody = document.getElementById('itemsBody');
   tbody.innerHTML = '';
   let count = 0;
+  const visible = [];
   for (const item of ITEMS) {
     const st = getItemStatus(item);
     // Status filter
@@ -311,6 +311,7 @@ function renderItems() {
       const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location}`.toLowerCase();
       if (!hay.includes(q)) continue;
     }
+    visible.push(item);
     count++;
     const tr = document.createElement('tr');
     tr.onclick = () => openDetail(item.id);
@@ -339,6 +340,7 @@ function renderItems() {
     tbody.appendChild(tr);
   }
   document.getElementById('itemCount').textContent = `${count} item${count !== 1 ? 's' : ''}`;
+  computeStats(visible);
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────
