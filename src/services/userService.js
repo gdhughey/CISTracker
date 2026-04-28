@@ -154,6 +154,12 @@ function updateRole(id, role) {
   `).run(role, id);
 }
 
+function updateEmail(id, email) {
+  db.prepare(`
+    UPDATE users SET email = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(email, id);
+}
+
 module.exports = {
   pickPublic,
   getById,
@@ -172,4 +178,5 @@ module.exports = {
   listAll,
   deleteUser,
   updateRole,
+  updateEmail,
 };

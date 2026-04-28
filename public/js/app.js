@@ -1291,6 +1291,7 @@ async function openUserDetail(id) {
           <button class="btn-outline btn-sm" onclick="toggleRole(${u.id},'${u.role === 'admin' ? 'user' : 'admin'}')">
             ${u.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
           </button>
+          <button class="btn-outline btn-sm" onclick="changeUserEmail(${u.id}, ${JSON.stringify(u.email || '').replace(/"/g, '&quot;')})">Change Email</button>
           <button class="btn-outline btn-sm" onclick="resetUserPw(${u.id})">Reset Password</button>
           <button class="btn-outline btn-sm btn-red" onclick="deleteUser(${u.id})">Delete User</button>
         </div>
@@ -1325,6 +1326,26 @@ async function resetUserPw(id) {
     const { tempPassword } = await api(`/api/admin/users/${id}`, { method: 'PUT', body: { reset_password: true } });
     toast(`Temporary password: ${tempPassword}`, 'info');
   } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+function changeUserEmail(id, currentEmail) {
+  const next = prompt('New email address for this user:', currentEmail || '');
+  if (next === null) return; // user hit Cancel
+  const trimmed = next.trim();
+  if (!trimmed) { toast('Email cannot be empty', 'error'); return; }
+  // Loose client-side check; the backend uses zod's email validator as the source of truth
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    toast('That doesn\'t look like a valid email', 'error');
+    return;
+  }
+  if (trimmed === currentEmail) return; // no change
+  api(`/api/admin/users/${id}`, { method: 'PUT', body: { email: trimmed } })
+    .then(() => {
+      toast('Email updated', 'success');
+      closeModal();
+      loadUsers();
+    })
+    .catch(err => toast(err.error || 'Failed to update email', 'error'));
 }
 
 async function deleteUser(id) {

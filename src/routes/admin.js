@@ -35,6 +35,7 @@ const updateUserSchema = z.object({
   role: z.enum(['admin', 'user']).optional(),
   reset_password: z.boolean().optional(), // true = auto-gen new temp password
   unlock: z.boolean().optional(),
+  email: z.string().email().max(254).optional(),
 });
 
 router.get('/users', (_req, res) => {
@@ -72,6 +73,15 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     req.audit('admin_change_role', user.username, { newRole: req.body.role });
     // Kill their sessions so the role change takes effect immediately
     sessionService.destroyAllForUser(id);
+  }
+  if (req.body.email && req.body.email !== user.email) {
+    // Reject if another account already owns this email
+    const taken = userService.getByEmail(req.body.email);
+    if (taken && taken.id !== id) {
+      return res.status(409).json({ error: 'That email is already in use' });
+    }
+    userService.updateEmail(id, req.body.email);
+    req.audit('admin_change_email', user.username, { oldEmail: user.email, newEmail: req.body.email });
   }
   if (req.body.reset_password) {
     const resetPw = genTempPassword(7);
