@@ -471,79 +471,49 @@ configure_firewall() {
   fi
 }
 
-# ────────────────────────────────────────────────────────────────────────────
-# Cloudflare Tunnel — exposes the app over HTTPS via Cloudflare's edge and
-# also lets you SSH into this box from anywhere without opening router ports.
-#
-# Setup flow on the Cloudflare side (one-time, in the dashboard):
-#   1. Go to Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel.
-#   2. Choose "Cloudflared", give it a name (e.g. "cistracker-school").
-#   3. Cloudflare shows you an install command containing a token starting
-#      with "eyJ...". Copy that token.
-#   4. Re-run this installer with the token, e.g.
-#        sudo CLOUDFLARED_TOKEN="eyJ..." bash install-cistracker.sh
-#   5. Back in the Cloudflare dashboard → Public Hostnames, add:
-#        - Subdomain: (blank)        Domain: cistracker.net
-#          Service:  HTTP            URL: localhost:80
-#        - Subdomain: ssh            Domain: cistracker.net
-#          Service:  SSH             URL: localhost:22
-#
-# To SSH into the box from your laptop later:
-#   1. Install cloudflared on your laptop (`brew install cloudflared` or grab
-#      the .msi/.pkg from Cloudflare).
-#   2. Add this to ~/.ssh/config:
-#        Host cistracker
-#          HostName ssh.cistracker.net
-#          ProxyCommand /usr/local/bin/cloudflared access ssh --hostname %h
-#          User cistracker-admin
-#   3. Run `ssh cistracker`.
-# ────────────────────────────────────────────────────────────────────────────
-install_cloudflared() {
-  if [[ "${SKIP_CLOUDFLARED}" == "1" ]]; then
-    log "Skipping Cloudflare Tunnel install (SKIP_CLOUDFLARED=1)"
+install_tailscale() {
+  if [[ "${SKIP_TAILSCALE}" == "1" ]]; then
+    log "Skipping Tailscale install (SKIP_TAILSCALE=1)"
     return
   fi
 
-  log "Installing cloudflared (Cloudflare Tunnel client)"
-
-  # Install cloudflared from Cloudflare's apt repo so it stays updated
-  if ! command -v cloudflared >/dev/null 2>&1; then
-    install -d -m 0755 /usr/share/keyrings
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-      | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs 2>/dev/null || echo bookworm) main" \
-      > /etc/apt/sources.list.d/cloudflared.list
-    apt-get update
-    apt-get install -y cloudflared
-  else
-    log "cloudflared already installed ($(cloudflared --version 2>/dev/null | head -1))"
-  fi
-
-  if [[ -z "${CLOUDFLARED_TOKEN}" ]]; then
-    warn "No CLOUDFLARED_TOKEN provided — cloudflared installed but not registered."
-    warn "Create a tunnel in Cloudflare Zero Trust → Tunnels, copy the token, then run:"
-    warn "  sudo cloudflared service install <YOUR_TOKEN>"
+  if command -v tailscale >/dev/null 2>&1; then
+    log "Tailscale already installed ($(tailscale version 2>/dev/null | head -1))"
     return
   fi
 
-  # If a previous tunnel service is registered, remove it before reinstalling
-  if systemctl list-unit-files cloudflared.service >/dev/null 2>&1; then
-    log "Reinstalling cloudflared tunnel service with the provided token"
-    systemctl stop cloudflared 2>/dev/null || true
-    cloudflared service uninstall 2>/dev/null || true
+  log "Installing Tailscale"
+  curl -fsSL https://tailscale.com/install.sh | sh
+  log "Tailscale installed — authenticate it after the installer finishes:"
+  log "  sudo tailscale up"
+  log "  tailscale ip -4   # note this IP for remote SSH"
+}
+
+configure_ssh_port() {
+  if [[ -z "${SSH_EXTRA_PORT}" ]]; then
+    return
   fi
 
-  cloudflared service install "${CLOUDFLARED_TOKEN}"
-  systemctl enable --now cloudflared
+  log "Adding SSH port ${SSH_EXTRA_PORT}"
 
-  if systemctl is-active --quiet cloudflared; then
-    log "cloudflared tunnel is active"
-    log "Now finish setup in Cloudflare Zero Trust → Tunnels → (your tunnel) → Public Hostnames:"
-    log "  - cistracker.net           → HTTP localhost:80"
-    log "  - ssh.cistracker.net       → SSH  localhost:22  (for remote maintenance)"
-  else
-    warn "cloudflared service did not start. Check: journalctl -u cloudflared -n 50"
+  local sshd_config="/etc/ssh/sshd_config"
+
+  # Ensure Port 22 is explicit (some Ubuntu cloud images omit it)
+  if ! grep -qE '^Port 22$' "${sshd_config}"; then
+    echo "Port 22" >> "${sshd_config}"
   fi
+
+  # Add extra port if not already present
+  if ! grep -qE "^Port ${SSH_EXTRA_PORT}$" "${sshd_config}"; then
+    sed -i "/^Port 22$/a Port ${SSH_EXTRA_PORT}" "${sshd_config}"
+  fi
+
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow "${SSH_EXTRA_PORT}/tcp" >/dev/null 2>&1 || true
+  fi
+
+  systemctl restart ssh
+  log "sshd listening on ports 22 and ${SSH_EXTRA_PORT}"
 }
 
 print_summary() {
@@ -577,26 +547,7 @@ print_summary() {
   echo "  ${url}"
   echo
 
-  # Cloudflare Tunnel status
-  if systemctl is-active --quiet cloudflared 2>/dev/null; then
-    echo "Cloudflare Tunnel: ACTIVE"
-    echo "  Public URL:  https://cistracker.net (after adding the public hostname in Cloudflare)"
-    echo "  Tunnel logs: sudo journalctl -u cloudflared -f"
-    echo
-    echo "  Remote SSH (from your laptop, requires cloudflared installed locally):"
-    echo "    ssh -o ProxyCommand='cloudflared access ssh --hostname ssh.cistracker.net' \\\\"
-    echo "        ${SUDO_USER:-$USER}@ssh.cistracker.net"
-  elif command -v cloudflared >/dev/null 2>&1; then
-    echo "Cloudflare Tunnel: installed but NOT registered"
-    echo "  1. Create a tunnel in Cloudflare Zero Trust → Tunnels"
-    echo "  2. Copy the token, then run:"
-    echo "       sudo cloudflared service install <YOUR_TOKEN>"
-    echo "  3. Add public hostnames in the tunnel dashboard:"
-    echo "       cistracker.net          → HTTP localhost:80"
-    echo "       ssh.cistracker.net      → SSH  localhost:22"
-  fi
-  echo
-  echo "If this is a cloud VM with no tunnel, allow inbound TCP port 80 in the cloud firewall."
+  echo "If this server is accessible over the internet, allow inbound TCP port 80 in the firewall."
 }
 
 main() {
@@ -612,7 +563,8 @@ main() {
   create_systemd_service
   configure_nginx
   configure_firewall
-  install_cloudflared
+  install_tailscale
+  configure_ssh_port
   print_summary
 }
 
