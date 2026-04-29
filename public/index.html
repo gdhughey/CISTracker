@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CISTracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/app.css">
   <meta name="theme-color" content="#0f1117">
   <link rel="icon" type="image/jpeg" href="/images/logo.jpg">
@@ -81,34 +84,34 @@
       <div class="nav-section">
         <div class="nav-label">Inventory</div>
         <div class="nav-item active" data-view="inventory" onclick="switchView('inventory')">
-          📦 All Items
+          All Items
         </div>
         <div class="nav-item" data-view="checkinout" onclick="switchView('checkinout')">
-          🔄 Check In / Out
+          Check In / Out
         </div>
         <div class="nav-item" data-view="overdue" onclick="switchView('overdue')">
-          ⏰ Overdue <span id="overdueBadge" class="badge hidden">0</span>
+          Overdue <span id="overdueBadge" class="badge hidden">0</span>
         </div>
       </div>
       <div class="nav-section">
         <div class="nav-label">Support</div>
         <div class="nav-item" data-view="tickets" onclick="switchView('tickets')">
-          🎫 Tickets <span id="ticketBadge" class="badge badge-purple hidden">0</span>
+          Tickets <span id="ticketBadge" class="badge badge-purple hidden">0</span>
         </div>
       </div>
       <div class="nav-section">
         <div class="nav-label">Account</div>
         <div class="nav-item" data-view="passkeys" onclick="switchView('passkeys')">
-          🔑 Passkeys
+          Passkeys
         </div>
       </div>
       <div class="nav-section" id="adminNav" style="display:none">
         <div class="nav-label">Admin</div>
         <div class="nav-item" data-view="users" onclick="switchView('users')">
-          👥 Users
+          Users
         </div>
         <div class="nav-item" data-view="audit" onclick="switchView('audit')">
-          📋 Audit Log
+          Audit Log
         </div>
       </div>
     </nav>
@@ -172,7 +175,7 @@
     <!-- ═══ CHECK IN/OUT VIEW ═══ -->
     <div id="view-checkinout" class="hidden">
       <div class="checkinout-view">
-        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px">Check In / Out</h2>
+        <h2 class="view-heading" style="margin-bottom:16px">Check In / Out</h2>
         <div class="mode-toggle">
           <button class="mode-btn active" data-mode="scan" onclick="setCioMode('scan')">📷 QR Scan</button>
           <button class="mode-btn" data-mode="manual" onclick="setCioMode('manual')">✏️ Manual</button>
@@ -203,7 +206,7 @@
     <!-- ═══ OVERDUE VIEW ═══ -->
     <div id="view-overdue" class="hidden">
       <div style="padding:24px">
-        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px">⏰ Overdue Items</h2>
+        <h2 class="view-heading">Overdue Items</h2>
         <div id="overdueList"></div>
       </div>
     </div>
@@ -212,7 +215,7 @@
     <div id="view-tickets" class="hidden">
       <div class="tickets-view" id="ticketsContainer">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 style="font-size:18px;font-weight:600">��� Support Tickets</h2>
+          <h2 class="view-heading">Support Tickets</h2>
           <button class="btn-primary" onclick="openNewTicketModal()">+ New Ticket</button>
         </div>
         <div class="status-chips" style="margin-bottom:16px" id="ticketStatusChips">
@@ -230,7 +233,7 @@
     <div id="view-users" class="hidden">
       <div class="admin-view">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 style="font-size:18px;font-weight:600">👥 Users</h2>
+          <h2 class="view-heading">Users</h2>
           <button class="btn-primary" onclick="openCreateUserModal()">+ Add User</button>
         </div>
         <div id="usersList"></div>
@@ -240,7 +243,7 @@
     <!-- ═══ AUDIT VIEW (admin) ═══ -->
     <div id="view-audit" class="hidden">
       <div class="admin-view">
-        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px">📋 Audit Log</h2>
+        <h2 class="view-heading" style="margin-bottom:16px">Audit Log</h2>
         <div id="auditList"></div>
       </div>
     </div>
@@ -249,7 +252,7 @@
     <div id="view-passkeys" class="hidden">
       <div class="admin-view">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <h2 style="font-size:18px;font-weight:600">🔑 Passkeys</h2>
+          <h2 class="view-heading">Passkeys</h2>
           <button class="btn-primary" onclick="registerPasskey()">+ Register this device</button>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Sign in faster with Face ID, Touch ID, Windows Hello, or your hardware security key — no password or 6-digit code needed. Each browser/device needs its own passkey.</p>

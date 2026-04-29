@@ -8,9 +8,9 @@ const cspDirectives = {
   scriptSrc: ["'self'"],
   // Inline onclick= handlers require this; see CLAUDE.md for context
   scriptSrcAttr: ["'unsafe-inline'"],
-  // Fonts and styles are fully local
-  styleSrc: ["'self'", "'unsafe-inline'"],
-  fontSrc: ["'self'", 'data:'],
+  // Fonts: self-hosted + Orbitron from Google Fonts
+  styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+  fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
   // blob: for getUserMedia camera stream; data: for generated QR images
   imgSrc: ["'self'", 'data:', 'blob:'],
   mediaSrc: ["'self'", 'blob:'],
