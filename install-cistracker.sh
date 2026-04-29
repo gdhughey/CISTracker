@@ -517,22 +517,13 @@ configure_ssh_port() {
 }
 
 print_summary() {
-  local public_ip lan_ip url
-  lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  public_ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
-
-  if [[ -n "${public_ip}" ]]; then
-    url="http://${public_ip}"
-  elif [[ -n "${lan_ip}" ]]; then
-    url="http://${lan_ip}"
-  else
-    url="http://YOUR_VM_IP"
-  fi
+  local lan_ip
+  lan_ip="${STATIC_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
 
   log "Installation complete"
   echo "App directory: ${APP_DIR}"
   echo "Service name:  ${APP_NAME}"
-  echo "App port:      ${APP_PORT} (proxied behind Nginx on port 80)"
+  echo "App port:      ${APP_PORT} (proxied behind Nginx)"
   echo
   echo "Service status:"
   echo "  sudo systemctl status ${APP_NAME} --no-pager"
@@ -543,18 +534,44 @@ print_summary() {
   echo "Restart app:"
   echo "  sudo systemctl restart ${APP_NAME}"
   echo
-  echo "Open the website (LAN):"
-  echo "  ${url}"
-  echo
 
-  echo "If this server is accessible over the internet, allow inbound TCP port 80 in the firewall."
+  if [[ -n "${STATIC_IP}" ]]; then
+    echo "Website (LAN):"
+    echo "  https://${DOMAIN}"
+    echo
+    echo "CA cert for Group Policy — copy this file to your Windows Server:"
+    echo "  /etc/ssl/cistracker/rootCA.crt"
+    echo
+    echo "  From a Windows machine on the LAN:"
+    echo "    scp ${SUDO_USER:-root}@${STATIC_IP}:/etc/ssl/cistracker/rootCA.crt ."
+    echo
+    echo "  Then in Group Policy Management:"
+    echo "    Computer Configuration → Policies → Windows Settings → Security Settings"
+    echo "    → Public Key Policies → Trusted Root Certification Authorities → Import"
+    echo
+  else
+    echo "Website (LAN, HTTP only — no STATIC_IP was provided):"
+    echo "  http://${lan_ip}"
+    echo
+  fi
+
+  if command -v tailscale >/dev/null 2>&1; then
+    echo "Tailscale remote access:"
+    echo "  1. sudo tailscale up                         (authenticate once in browser)"
+    echo "  2. tailscale ip -4                           (note your Tailscale IP)"
+    echo "  3. ssh -p ${SSH_EXTRA_PORT} ${SUDO_USER:-root}@<tailscale-ip>  (from anywhere with Tailscale)"
+    echo
+  fi
 }
 
 main() {
   require_root
   detect_os
+  configure_static_ip
   install_system_packages
   install_node
+  install_mkcert
+  setup_tls
   create_app_user
   clone_or_update_repo
   create_env_file
@@ -563,8 +580,8 @@ main() {
   create_systemd_service
   configure_nginx
   configure_firewall
-  install_tailscale
   configure_ssh_port
+  install_tailscale
   print_summary
 }
 
