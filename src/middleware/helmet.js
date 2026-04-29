@@ -4,22 +4,15 @@ const config = require('../config');
 
 const cspDirectives = {
   defaultSrc: ["'self'"],
-  // unpkg.com is allowed so the @zxing/browser QR scanner library can load
-  // from a CDN without bundling. The library itself is integrity-pinnable
-  // by version in index.html.
-  scriptSrc: ["'self'", 'https://unpkg.com'],
-  // The ported UI uses inline onclick= attributes on every button. Helmet's
-  // default blocks those via script-src-attr 'none'. 'unsafe-inline' on the
-  // attribute channel is the least-bad option until we refactor to
-  // addEventListener everywhere — it still blocks injected <script> tags.
+  // All scripts now served from /js/ — no CDN needed
+  scriptSrc: ["'self'"],
+  // Inline onclick= handlers require this; see CLAUDE.md for context
   scriptSrcAttr: ["'unsafe-inline'"],
-  // Google Fonts stylesheet is loaded from fonts.googleapis.com
-  styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-  // Google Fonts .woff2 files come from fonts.gstatic.com
-  fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-  imgSrc: ["'self'", 'data:', 'blob:', 'https://api.qrserver.com'],
-  // 'blob:' / 'mediaSrc' allows the live <video> stream from getUserMedia
-  // (the camera-based QR scanner on Check Out / Check In).
+  // Fonts and styles are fully local
+  styleSrc: ["'self'", "'unsafe-inline'"],
+  fontSrc: ["'self'", 'data:'],
+  // blob: for getUserMedia camera stream; data: for generated QR images
+  imgSrc: ["'self'", 'data:', 'blob:'],
   mediaSrc: ["'self'", 'blob:'],
   connectSrc: ["'self'"],
   objectSrc: ["'none'"],
