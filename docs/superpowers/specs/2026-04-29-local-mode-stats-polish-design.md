@@ -42,8 +42,10 @@ Approach 1 (chosen): Surgical — vendor all external assets locally, remove ema
 
 ### CSP (helmet.js)
 
-- Remove `unpkg.com` from `script-src`
-- Remove `fonts.googleapis.com` and `fonts.gstatic.com` from `style-src` / `font-src`
+- Remove `unpkg.com` from `scriptSrc`
+- Remove `fonts.googleapis.com` from `styleSrc`
+- Remove `fonts.gstatic.com` from `fontSrc`
+- Remove `https://api.qrserver.com` from `imgSrc` — this entry is dead; the app already uses the local `qrcode` npm package for all QR generation and never calls this external service
 - No other CSP changes
 
 ---
@@ -123,11 +125,28 @@ The 4 stat cards at the top of the inventory view: Total, Available, Checked Out
 **Number color:** matches the top border color per card  
 **Label:** `var(--text-sec)` = `#9ca3af`, `font-size: 11px`, `text-transform: uppercase`, `letter-spacing: 0.06em`
 
+### Existing HTML structure (confirmed)
+
+```html
+<div class="stats-bar">
+  <div class="stat-card"><div class="stat-num c-text"  id="statTotal">0</div><div class="stat-label">Total Items</div></div>
+  <div class="stat-card"><div class="stat-num c-green" id="statAvailable">0</div><div class="stat-label">Available</div></div>
+  <div class="stat-card"><div class="stat-num c-amber" id="statOut">0</div><div class="stat-label">Checked Out</div></div>
+  <div class="stat-card"><div class="stat-num c-red"   id="statOverdue">0</div><div class="stat-label">Overdue</div></div>
+</div>
+```
+
 ### Implementation
 
-- Update the stat card HTML in `public/index.html` (the 4 `.stat-card` or equivalent divs)
-- Update `.stat-card` CSS in `public/css/app.css`
-- Color variants applied via inline style or modifier classes (e.g. `.stat-card--blue`, `.stat-card--green`, etc.)
+- Add `border-top: 3px solid` to `.stat-card` per color variant by pairing it with the existing color class on `.stat-num`:
+  - `.stat-card:has(.c-text)`  → `border-top-color: var(--accent)`
+  - `.stat-card:has(.c-green)` → `border-top-color: var(--green)`
+  - `.stat-card:has(.c-amber)` → `border-top-color: var(--amber)`
+  - `.stat-card:has(.c-red)`   → `border-top-color: var(--red)`
+- Increase `.stat-num` font-size from current to `28px`, font-weight `600`
+- Style `.stat-label`: `font-size: 11px`, `text-transform: uppercase`, `letter-spacing: 0.06em`, color `var(--text-sec)`
+- Update `.stat-card` border to `#252836`
+- All changes in `public/css/app.css` only — no HTML changes needed
 
 ---
 
