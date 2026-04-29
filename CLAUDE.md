@@ -54,7 +54,7 @@ Frontend is **vanilla JS, no framework, no build step**. `public/js/app.js` is a
 ├── package.json                       # cistracker@1.0.0, no nodemailer/multer (those are removed)
 ├── .env                               # NOT in git — see .env.example for keys
 ├── ecosystem.config.js                # legacy pm2 config, not used (we use systemd)
-├── install-cistracker.sh              # the canonical installer (creates user, clones repo, sets up systemd + cloudflared)
+├── install-cistracker.sh              # the canonical installer (creates user, clones repo, sets up systemd + nginx TLS + tailscale)
 │
 ├── migrations/
 │   ├── 001-initial.sql                # users, sessions, equipment, checkout_log, audit_log
