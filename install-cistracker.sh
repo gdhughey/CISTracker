@@ -5,31 +5,37 @@ set -euo pipefail
 # Tested target: Ubuntu 22.04/24.04 or Debian 12
 #
 # What this does:
-# - Installs Node.js 20, Git, SQLite, Nginx, OpenSSL, and build tools
+# - Installs Node.js 20, Git, SQLite, Nginx, OpenSSL, mkcert, and build tools
 # - Clones https://github.com/gdhughey/CISTracker into /opt/CISTracker
 # - Creates a system user, .env with a generated SESSION_SECRET
 # - Installs npm dependencies (with mirror fallback for restricted networks)
 # - Runs database migration/seed scripts
 # - Creates a systemd service named cistracker
-# - Configures Nginx HTTP reverse proxy on port 80
-# - (Optional) Installs cloudflared and registers a Cloudflare Tunnel so the
-#   site is reachable over HTTPS without opening router ports, and so SSH
-#   can tunnel through Cloudflare for remote maintenance.
+# - Configures Nginx HTTPS reverse proxy on port 443 (with mkcert local CA)
+#   when STATIC_IP is provided; falls back to HTTP on port 80 otherwise
+# - Adds SSH on port 2222 for Tailscale remote access
+# - (Optional) Installs Tailscale for remote SSH maintenance
 #
 # This script is idempotent. It is safe to re-run on a partially installed host.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/gdhughey/CISTracker/main/install-cistracker.sh | sudo bash
+#   sudo STATIC_IP=10.0.2.10 bash install-cistracker.sh
 #
-# Or:
-#   sudo bash install-cistracker.sh
+# If your LAN uses different gateway/DNS, override them:
+#   sudo STATIC_IP=10.0.2.10 GATEWAY=192.168.1.1 DNS_SERVER=192.168.1.1 bash install-cistracker.sh
 #
-# Cloudflare Tunnel (optional) — pass the tunnel token from the Cloudflare
-# Zero Trust dashboard so the installer registers the tunnel automatically:
-#   sudo CLOUDFLARED_TOKEN="eyJh..." bash install-cistracker.sh
+# All options (pass as env vars):
+#   STATIC_IP        LAN IP to assign to this server (required for HTTPS)
+#   STATIC_NETMASK   CIDR prefix length (default: 16)
+#   GATEWAY          LAN default gateway (default: 10.0.255.1)
+#   DNS_SERVER       LAN DNS server IP (default: 10.2.201.4)
+#   DOMAIN           App domain name (default: cistracker.net)
+#   SSH_EXTRA_PORT   Extra SSH port for Tailscale access (default: 2222)
+#   SKIP_TAILSCALE   Set to 1 to skip Tailscale install (default: 0)
+#   MKCERT_VERSION   mkcert binary version (default: v1.4.4)
 #
-# To skip the tunnel entirely:
-#   sudo SKIP_CLOUDFLARED=1 bash install-cistracker.sh
+# To skip Tailscale:
+#   sudo STATIC_IP=10.0.2.10 SKIP_TAILSCALE=1 bash install-cistracker.sh
 
 APP_NAME="cistracker"
 REPO_URL="${REPO_URL:-https://github.com/gdhughey/CISTracker.git}"
@@ -39,8 +45,14 @@ APP_PORT="${APP_PORT:-3000}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 NPM_PRIMARY_REGISTRY="${NPM_PRIMARY_REGISTRY:-https://registry.npmjs.org/}"
 NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}"
-CLOUDFLARED_TOKEN="${CLOUDFLARED_TOKEN:-}"
-SKIP_CLOUDFLARED="${SKIP_CLOUDFLARED:-0}"
+STATIC_IP="${STATIC_IP:-}"
+STATIC_NETMASK="${STATIC_NETMASK:-16}"        # /16 = 255.255.0.0 — change to 24 for typical /24 LANs
+GATEWAY="${GATEWAY:-10.0.255.1}"               # site-specific — set via env var if different
+DNS_SERVER="${DNS_SERVER:-10.2.201.4}"         # site-specific — set via env var if different
+DOMAIN="${DOMAIN:-cistracker.net}"             # must resolve to STATIC_IP on client machines
+SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
+SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
+MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"
 
 log() {
   echo
@@ -50,6 +62,38 @@ log() {
 warn() {
   echo
   echo "WARNING: $*" >&2
+}
+
+configure_static_ip() {
+  if [[ -z "${STATIC_IP}" ]]; then
+    log "No STATIC_IP set — skipping static IP configuration (server will use DHCP)"
+    return
+  fi
+
+  log "Configuring static IP ${STATIC_IP}/${STATIC_NETMASK}"
+
+  # Detect primary non-loopback interface
+  local iface
+  iface="$(ip -o link show | awk '$2 != "lo:" {print $2}' | head -1 | tr -d ':')"
+
+  mkdir -p /etc/netplan
+  # Write config; this overwrites any existing 00-installer-config.yaml
+  cat > /etc/netplan/00-installer-config.yaml <<NETPLAN
+network:
+  version: 2
+  ethernets:
+    ${iface}:
+      dhcp4: false
+      addresses: [${STATIC_IP}/${STATIC_NETMASK}]
+      routes:
+        - to: default
+          via: ${GATEWAY}
+      nameservers:
+        addresses: [${DNS_SERVER}]
+NETPLAN
+
+  netplan apply
+  log "Static IP ${STATIC_IP} applied on ${iface}"
 }
 
 require_root() {
@@ -149,11 +193,14 @@ clone_or_update_repo() {
 }
 
 detect_app_url() {
+  # If a static IP and domain are configured, the app is served over HTTPS.
+  if [[ -n "${STATIC_IP}" ]]; then
+    echo "https://${DOMAIN}"
+    return
+  fi
+  # Otherwise use the LAN IP (no outbound internet call).
   local ip=""
   ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  if [[ -z "${ip}" ]]; then
-    ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
-  fi
   if [[ -n "${ip}" ]]; then
     echo "http://${ip}"
   else
@@ -171,12 +218,14 @@ create_env_file() {
   if [[ ! -f "${env_path}" ]]; then
     local secret
     secret="$(openssl rand -hex 48)"
+    local tls_enabled="false"
+    [[ -n "${STATIC_IP}" ]] && tls_enabled="true"
     cat > "${env_path}" <<EOF
 NODE_ENV=production
 PORT=${APP_PORT}
 DB_PATH=./data/cyberlab.db
 SESSION_SECRET=${secret}
-TLS_ENABLED=false
+TLS_ENABLED=${tls_enabled}
 APP_URL=${app_url}
 EOF
     log "Wrote new ${env_path}"
@@ -191,7 +240,9 @@ EOF
       secret="$(openssl rand -hex 48)"
       printf 'SESSION_SECRET=%s\n' "${secret}" >> "${env_path}"
     fi
-    ensure_env_kv "${env_path}" TLS_ENABLED false
+    local tls_enabled="false"
+    [[ -n "${STATIC_IP}" ]] && tls_enabled="true"
+    ensure_env_kv "${env_path}" TLS_ENABLED "${tls_enabled}"
     ensure_env_kv "${env_path}" APP_URL "${app_url}"
   fi
 
@@ -299,31 +350,111 @@ EOF
   systemctl restart "${APP_NAME}"
 }
 
+install_mkcert() {
+  if command -v mkcert >/dev/null 2>&1; then
+    log "mkcert already installed ($(mkcert --version 2>/dev/null || echo unknown))"
+  else
+    log "Installing mkcert ${MKCERT_VERSION}"
+    curl -fsSL \
+      "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64" \
+      -o /usr/local/bin/mkcert
+    chmod +x /usr/local/bin/mkcert
+  fi
+
+  log "Creating local CA (if not already created)"
+  mkcert -install
+}
+
+setup_tls() {
+  if [[ -z "${STATIC_IP}" ]]; then
+    log "No STATIC_IP set — skipping TLS cert generation"
+    return
+  fi
+
+  log "Generating TLS certificate for ${DOMAIN}"
+
+  mkdir -p /etc/ssl/cistracker
+
+  mkcert \
+    -cert-file /etc/ssl/cistracker/cert.pem \
+    -key-file  /etc/ssl/cistracker/key.pem \
+    "${DOMAIN}"
+
+  # Export CA root so the operator can distribute it via Group Policy
+  local caroot
+  caroot="$(mkcert -CAROOT)"
+  cp "${caroot}/rootCA.pem" /etc/ssl/cistracker/rootCA.crt
+
+  chmod 644 /etc/ssl/cistracker/cert.pem /etc/ssl/cistracker/rootCA.crt
+  chmod 640 /etc/ssl/cistracker/key.pem
+
+  log "Cert:    /etc/ssl/cistracker/cert.pem"
+  log "Key:     /etc/ssl/cistracker/key.pem"
+  log "CA root: /etc/ssl/cistracker/rootCA.crt  (copy to Windows Server for Group Policy)"
+}
+
 configure_nginx() {
   log "Configuring Nginx reverse proxy"
 
-  cat > "/etc/nginx/sites-available/${APP_NAME}" <<EOF
+  if [[ -n "${STATIC_IP}" ]]; then
+    # HTTPS — port 80 redirects to 443; TLS terminates here with mkcert cert.
+    cat > "/etc/nginx/sites-available/${APP_NAME}" <<EOF
 server {
     listen 80;
     listen [::]:80;
+    server_name ${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
 
-    server_name _;
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/ssl/cistracker/cert.pem;
+    ssl_certificate_key /etc/ssl/cistracker/key.pem;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers off;
 
     client_max_body_size 25m;
 
     location / {
-        proxy_pass http://127.0.0.1:${APP_PORT};
+        proxy_pass         http://127.0.0.1:${APP_PORT};
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
     }
 }
 EOF
+  else
+    # HTTP only — no static IP means no TLS cert available.
+    cat > "/etc/nginx/sites-available/${APP_NAME}" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+    client_max_body_size 25m;
+    location / {
+        proxy_pass         http://127.0.0.1:${APP_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+EOF
+  fi
 
   ln -sf "/etc/nginx/sites-available/${APP_NAME}" "/etc/nginx/sites-enabled/${APP_NAME}"
   rm -f /etc/nginx/sites-enabled/default
@@ -340,98 +471,59 @@ configure_firewall() {
   fi
 }
 
-# ────────────────────────────────────────────────────────────────────────────
-# Cloudflare Tunnel — exposes the app over HTTPS via Cloudflare's edge and
-# also lets you SSH into this box from anywhere without opening router ports.
-#
-# Setup flow on the Cloudflare side (one-time, in the dashboard):
-#   1. Go to Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel.
-#   2. Choose "Cloudflared", give it a name (e.g. "cistracker-school").
-#   3. Cloudflare shows you an install command containing a token starting
-#      with "eyJ...". Copy that token.
-#   4. Re-run this installer with the token, e.g.
-#        sudo CLOUDFLARED_TOKEN="eyJ..." bash install-cistracker.sh
-#   5. Back in the Cloudflare dashboard → Public Hostnames, add:
-#        - Subdomain: (blank)        Domain: cistracker.net
-#          Service:  HTTP            URL: localhost:80
-#        - Subdomain: ssh            Domain: cistracker.net
-#          Service:  SSH             URL: localhost:22
-#
-# To SSH into the box from your laptop later:
-#   1. Install cloudflared on your laptop (`brew install cloudflared` or grab
-#      the .msi/.pkg from Cloudflare).
-#   2. Add this to ~/.ssh/config:
-#        Host cistracker
-#          HostName ssh.cistracker.net
-#          ProxyCommand /usr/local/bin/cloudflared access ssh --hostname %h
-#          User cistracker-admin
-#   3. Run `ssh cistracker`.
-# ────────────────────────────────────────────────────────────────────────────
-install_cloudflared() {
-  if [[ "${SKIP_CLOUDFLARED}" == "1" ]]; then
-    log "Skipping Cloudflare Tunnel install (SKIP_CLOUDFLARED=1)"
+install_tailscale() {
+  if [[ "${SKIP_TAILSCALE}" == "1" ]]; then
+    log "Skipping Tailscale install (SKIP_TAILSCALE=1)"
     return
   fi
 
-  log "Installing cloudflared (Cloudflare Tunnel client)"
-
-  # Install cloudflared from Cloudflare's apt repo so it stays updated
-  if ! command -v cloudflared >/dev/null 2>&1; then
-    install -d -m 0755 /usr/share/keyrings
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-      | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs 2>/dev/null || echo bookworm) main" \
-      > /etc/apt/sources.list.d/cloudflared.list
-    apt-get update
-    apt-get install -y cloudflared
-  else
-    log "cloudflared already installed ($(cloudflared --version 2>/dev/null | head -1))"
-  fi
-
-  if [[ -z "${CLOUDFLARED_TOKEN}" ]]; then
-    warn "No CLOUDFLARED_TOKEN provided — cloudflared installed but not registered."
-    warn "Create a tunnel in Cloudflare Zero Trust → Tunnels, copy the token, then run:"
-    warn "  sudo cloudflared service install <YOUR_TOKEN>"
+  if command -v tailscale >/dev/null 2>&1; then
+    log "Tailscale already installed ($(tailscale version 2>/dev/null | head -1))"
     return
   fi
 
-  # If a previous tunnel service is registered, remove it before reinstalling
-  if systemctl list-unit-files cloudflared.service >/dev/null 2>&1; then
-    log "Reinstalling cloudflared tunnel service with the provided token"
-    systemctl stop cloudflared 2>/dev/null || true
-    cloudflared service uninstall 2>/dev/null || true
+  log "Installing Tailscale"
+  curl -fsSL https://tailscale.com/install.sh | sh
+  log "Tailscale installed — authenticate it after the installer finishes:"
+  log "  sudo tailscale up"
+  log "  tailscale ip -4   # note this IP for remote SSH"
+}
+
+configure_ssh_port() {
+  if [[ -z "${SSH_EXTRA_PORT}" ]]; then
+    return
   fi
 
-  cloudflared service install "${CLOUDFLARED_TOKEN}"
-  systemctl enable --now cloudflared
+  log "Adding SSH port ${SSH_EXTRA_PORT}"
 
-  if systemctl is-active --quiet cloudflared; then
-    log "cloudflared tunnel is active"
-    log "Now finish setup in Cloudflare Zero Trust → Tunnels → (your tunnel) → Public Hostnames:"
-    log "  - cistracker.net           → HTTP localhost:80"
-    log "  - ssh.cistracker.net       → SSH  localhost:22  (for remote maintenance)"
-  else
-    warn "cloudflared service did not start. Check: journalctl -u cloudflared -n 50"
+  local sshd_config="/etc/ssh/sshd_config"
+
+  # Ensure Port 22 is explicit (some Ubuntu cloud images omit it)
+  if ! grep -qE '^Port 22$' "${sshd_config}"; then
+    echo "Port 22" >> "${sshd_config}"
   fi
+
+  # Add extra port if not already present
+  if ! grep -qE "^Port ${SSH_EXTRA_PORT}$" "${sshd_config}"; then
+    sed -i "/^Port 22$/a Port ${SSH_EXTRA_PORT}" "${sshd_config}"
+  fi
+
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow "${SSH_EXTRA_PORT}/tcp" >/dev/null 2>&1 || true
+  fi
+
+  systemctl restart ssh
+  log "sshd listening on ports 22 and ${SSH_EXTRA_PORT}"
 }
 
 print_summary() {
-  local public_ip lan_ip url
-  lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  public_ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
-
-  if [[ -n "${public_ip}" ]]; then
-    url="http://${public_ip}"
-  elif [[ -n "${lan_ip}" ]]; then
-    url="http://${lan_ip}"
-  else
-    url="http://YOUR_VM_IP"
-  fi
+  local lan_ip
+  lan_ip="${STATIC_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
 
   log "Installation complete"
   echo "App directory: ${APP_DIR}"
   echo "Service name:  ${APP_NAME}"
-  echo "App port:      ${APP_PORT} (proxied behind Nginx on port 80)"
+  echo "App port:      ${APP_PORT} (proxied behind Nginx)"
   echo
   echo "Service status:"
   echo "  sudo systemctl status ${APP_NAME} --no-pager"
@@ -442,37 +534,44 @@ print_summary() {
   echo "Restart app:"
   echo "  sudo systemctl restart ${APP_NAME}"
   echo
-  echo "Open the website (LAN):"
-  echo "  ${url}"
-  echo
 
-  # Cloudflare Tunnel status
-  if systemctl is-active --quiet cloudflared 2>/dev/null; then
-    echo "Cloudflare Tunnel: ACTIVE"
-    echo "  Public URL:  https://cistracker.net (after adding the public hostname in Cloudflare)"
-    echo "  Tunnel logs: sudo journalctl -u cloudflared -f"
+  if [[ -n "${STATIC_IP}" ]]; then
+    echo "Website (LAN):"
+    echo "  https://${DOMAIN}"
     echo
-    echo "  Remote SSH (from your laptop, requires cloudflared installed locally):"
-    echo "    ssh -o ProxyCommand='cloudflared access ssh --hostname ssh.cistracker.net' \\\\"
-    echo "        ${SUDO_USER:-$USER}@ssh.cistracker.net"
-  elif command -v cloudflared >/dev/null 2>&1; then
-    echo "Cloudflare Tunnel: installed but NOT registered"
-    echo "  1. Create a tunnel in Cloudflare Zero Trust → Tunnels"
-    echo "  2. Copy the token, then run:"
-    echo "       sudo cloudflared service install <YOUR_TOKEN>"
-    echo "  3. Add public hostnames in the tunnel dashboard:"
-    echo "       cistracker.net          → HTTP localhost:80"
-    echo "       ssh.cistracker.net      → SSH  localhost:22"
+    echo "CA cert for Group Policy — copy this file to your Windows Server:"
+    echo "  /etc/ssl/cistracker/rootCA.crt"
+    echo
+    echo "  From a Windows machine on the LAN:"
+    echo "    scp ${SUDO_USER:-root}@${STATIC_IP}:/etc/ssl/cistracker/rootCA.crt ."
+    echo
+    echo "  Then in Group Policy Management:"
+    echo "    Computer Configuration → Policies → Windows Settings → Security Settings"
+    echo "    → Public Key Policies → Trusted Root Certification Authorities → Import"
+    echo
+  else
+    echo "Website (LAN, HTTP only — no STATIC_IP was provided):"
+    echo "  http://${lan_ip}"
+    echo
   fi
-  echo
-  echo "If this is a cloud VM with no tunnel, allow inbound TCP port 80 in the cloud firewall."
+
+  if command -v tailscale >/dev/null 2>&1; then
+    echo "Tailscale remote access:"
+    echo "  1. sudo tailscale up                         (authenticate once in browser)"
+    echo "  2. tailscale ip -4                           (note your Tailscale IP)"
+    echo "  3. ssh -p ${SSH_EXTRA_PORT} ${SUDO_USER:-root}@<tailscale-ip>  (from anywhere with Tailscale)"
+    echo
+  fi
 }
 
 main() {
   require_root
   detect_os
+  configure_static_ip
   install_system_packages
   install_node
+  install_mkcert
+  setup_tls
   create_app_user
   clone_or_update_repo
   create_env_file
@@ -481,7 +580,8 @@ main() {
   create_systemd_service
   configure_nginx
   configure_firewall
-  install_cloudflared
+  configure_ssh_port
+  install_tailscale
   print_summary
 }
 
