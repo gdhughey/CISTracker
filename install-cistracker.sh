@@ -64,6 +64,38 @@ warn() {
   echo "WARNING: $*" >&2
 }
 
+configure_static_ip() {
+  if [[ -z "${STATIC_IP}" ]]; then
+    log "No STATIC_IP set — skipping static IP configuration (server will use DHCP)"
+    return
+  fi
+
+  log "Configuring static IP ${STATIC_IP}/${STATIC_NETMASK}"
+
+  # Detect primary non-loopback interface
+  local iface
+  iface="$(ip -o link show | awk '$2 != "lo:" {print $2}' | head -1 | tr -d ':')"
+
+  mkdir -p /etc/netplan
+  # Write config; this overwrites any existing 00-installer-config.yaml
+  cat > /etc/netplan/00-installer-config.yaml <<NETPLAN
+network:
+  version: 2
+  ethernets:
+    ${iface}:
+      dhcp4: false
+      addresses: [${STATIC_IP}/${STATIC_NETMASK}]
+      routes:
+        - to: default
+          via: ${GATEWAY}
+      nameservers:
+        addresses: [${DNS_SERVER}]
+NETPLAN
+
+  netplan apply
+  log "Static IP ${STATIC_IP} applied on ${iface}"
+}
+
 require_root() {
   if [[ "${EUID}" -ne 0 ]]; then
     echo "Please run this installer with sudo or as root." >&2
@@ -161,11 +193,14 @@ clone_or_update_repo() {
 }
 
 detect_app_url() {
+  # If a static IP and domain are configured, the app is served over HTTPS.
+  if [[ -n "${STATIC_IP}" ]]; then
+    echo "https://${DOMAIN}"
+    return
+  fi
+  # Otherwise use the LAN IP (no outbound internet call).
   local ip=""
   ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  if [[ -z "${ip}" ]]; then
-    ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
-  fi
   if [[ -n "${ip}" ]]; then
     echo "http://${ip}"
   else
