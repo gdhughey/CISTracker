@@ -21,6 +21,9 @@ set -euo pipefail
 # Usage:
 #   sudo STATIC_IP=10.0.2.10 bash install-cistracker.sh
 #
+# If your LAN uses different gateway/DNS, override them:
+#   sudo STATIC_IP=10.0.2.10 GATEWAY=192.168.1.1 DNS_SERVER=192.168.1.1 bash install-cistracker.sh
+#
 # All options (pass as env vars):
 #   STATIC_IP        LAN IP to assign to this server (required for HTTPS)
 #   STATIC_NETMASK   CIDR prefix length (default: 16)
@@ -43,10 +46,10 @@ NODE_MAJOR="${NODE_MAJOR:-20}"
 NPM_PRIMARY_REGISTRY="${NPM_PRIMARY_REGISTRY:-https://registry.npmjs.org/}"
 NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}"
 STATIC_IP="${STATIC_IP:-}"
-STATIC_NETMASK="${STATIC_NETMASK:-16}"
-GATEWAY="${GATEWAY:-10.0.255.1}"
-DNS_SERVER="${DNS_SERVER:-10.2.201.4}"
-DOMAIN="${DOMAIN:-cistracker.net}"
+STATIC_NETMASK="${STATIC_NETMASK:-16}"        # /16 = 255.255.0.0 — change to 24 for typical /24 LANs
+GATEWAY="${GATEWAY:-10.0.255.1}"               # site-specific — set via env var if different
+DNS_SERVER="${DNS_SERVER:-10.2.201.4}"         # site-specific — set via env var if different
+DOMAIN="${DOMAIN:-cistracker.net}"             # must resolve to STATIC_IP on client machines
 SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
 MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"
