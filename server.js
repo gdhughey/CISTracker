@@ -65,8 +65,7 @@ const server = app.listen(config.port, () => {
   if (config.appUrl && config.appUrl !== 'http://localhost:3000') {
     console.log(`  → ${config.appUrl}`);
   }
-  // Start overdue-reminder cron job
-  require('./src/services/reminderService').start();
+
 });
 
 function shutdown(signal) {

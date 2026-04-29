@@ -51,25 +51,6 @@ const config = {
     bcryptCost: int(process.env.BCRYPT_COST, 12),
   },
 
-  resend: {
-    apiKey: process.env.RESEND_API_KEY || '',
-    noReplyFrom: process.env.RESEND_NOREPLY_FROM || 'CISTracker <noreply@cistracker.net>',
-    supportFrom: process.env.RESEND_SUPPORT_FROM || 'CISTracker Support <support@cistracker.net>',
-    // Tickets get forwarded here. MUST be set in .env — no personal email
-    // hardcoded as a fallback.
-    supportForwardTo: process.env.RESEND_SUPPORT_FORWARD || '',
-    // When an admin drops a ticket assignment without resolving the ticket,
-    // the ticket gets forwarded here so a fallback owner is alerted.
-    // MUST be set in .env if you want this notification (e.g. a personal
-    // address that gets read even when nobody else is monitoring tickets).
-    droppedForwardTo: process.env.RESEND_DROPPED_FORWARD || '',
-  },
-
-  reminders: {
-    reminderDays: int(process.env.REMINDER_DAYS, 3),
-    alertDays: int(process.env.ALERT_DAYS, 5),
-    cron: process.env.REMINDER_CRON || '0 9 * * *',
-  },
 
   appUrl: process.env.APP_URL || 'http://localhost:3000',
 
