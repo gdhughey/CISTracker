@@ -218,12 +218,14 @@ create_env_file() {
   if [[ ! -f "${env_path}" ]]; then
     local secret
     secret="$(openssl rand -hex 48)"
+    local tls_enabled="false"
+    [[ -n "${STATIC_IP}" ]] && tls_enabled="true"
     cat > "${env_path}" <<EOF
 NODE_ENV=production
 PORT=${APP_PORT}
 DB_PATH=./data/cyberlab.db
 SESSION_SECRET=${secret}
-TLS_ENABLED=false
+TLS_ENABLED=${tls_enabled}
 APP_URL=${app_url}
 EOF
     log "Wrote new ${env_path}"
@@ -238,7 +240,9 @@ EOF
       secret="$(openssl rand -hex 48)"
       printf 'SESSION_SECRET=%s\n' "${secret}" >> "${env_path}"
     fi
-    ensure_env_kv "${env_path}" TLS_ENABLED false
+    local tls_enabled="false"
+    [[ -n "${STATIC_IP}" ]] && tls_enabled="true"
+    ensure_env_kv "${env_path}" TLS_ENABLED "${tls_enabled}"
     ensure_env_kv "${env_path}" APP_URL "${app_url}"
   fi
 
