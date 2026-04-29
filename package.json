@@ -16,6 +16,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^11.0.0",
     "bcrypt": "^5.1.1",
     "better-sqlite3": "^11.3.0",
     "cookie-parser": "^1.4.7",
@@ -24,9 +25,7 @@
     "express-rate-limit": "^7.4.0",
     "helmet": "^8.0.0",
     "isomorphic-dompurify": "^2.16.0",
-    "multer": "^1.4.5-lts.1",
     "node-cron": "^4.2.1",
-    "nodemailer": "^6.9.15",
     "qrcode": "^1.5.4",
     "resend": "^4.1.2",
     "speakeasy": "^2.0.0",

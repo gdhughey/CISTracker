@@ -659,6 +659,17 @@ td { padding:10px 14px; vertical-align:middle; }
 .mt-12 { margin-top:12px; }
 .mb-16 { margin-bottom:16px; }
 
+/* ── Login divider (between password form and Sign in with passkey) ── */
+.login-divider {
+  display:flex; align-items:center; gap:10px;
+  margin:18px 0 14px;
+  color:var(--text-muted); font-size:11px;
+  text-transform:uppercase; letter-spacing:0.1em;
+}
+.login-divider::before, .login-divider::after {
+  content:''; flex:1; height:1px; background:var(--border);
+}
+
 /* ── First-time tour ── */
 .tour-overlay {
   position:fixed; inset:0; z-index:9000;

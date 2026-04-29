@@ -344,6 +344,7 @@ function switchView(view) {
   }
   if (view === 'users') loadUsers();
   if (view === 'audit') loadAudit();
+  if (view === 'passkeys') loadPasskeys();
 }
 
 function toggleMobileSidebar() {
@@ -1644,4 +1645,154 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PASSKEYS (WebAuthn)
+// ═══════════════════════════════════════════════════════════════════════
+
+// The @simplewebauthn/browser bundle attaches itself to `window.SimpleWebAuthnBrowser`.
+function swa() { return window.SimpleWebAuthnBrowser; }
+
+// Login screen — "Sign in with passkey"
+async function loginWithPasskey() {
+  const btn = document.getElementById('passkeyLoginBtn');
+  const errEl = document.getElementById('loginError');
+  if (!swa()) {
+    if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Passkey support not loaded. Refresh and try again.'; }
+    return;
+  }
+  if (errEl) errEl.style.display = 'none';
+  if (btn) btn.disabled = true;
+  try {
+    const optsRes = await fetch('/api/passkey/login-options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfCookie() },
+      credentials: 'include',
+      body: '{}',
+    });
+    if (!optsRes.ok) throw new Error('Server unavailable');
+    const options = await optsRes.json();
+
+    let assertion;
+    try {
+      assertion = await swa().startAuthentication({ optionsJSON: options });
+    } catch (err) {
+      // User cancelled or no passkey available
+      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Passkey sign-in cancelled.'; }
+        return;
+      }
+      throw err;
+    }
+
+    const verifyRes = await fetch('/api/passkey/login-verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfCookie() },
+      credentials: 'include',
+      body: JSON.stringify({ response: assertion }),
+    });
+    const data = await verifyRes.json();
+    if (!verifyRes.ok) {
+      if (errEl) { errEl.style.display = 'block'; errEl.textContent = data.error || 'Passkey login failed.'; }
+      return;
+    }
+    // Login succeeded — same path as the password flow uses
+    ME = data.user;
+    if (data.mustChangePw) { showChangePw(); }
+    else { await showApp(); }
+  } catch (err) {
+    if (errEl) { errEl.style.display = 'block'; errEl.textContent = err.message || 'Passkey login failed.'; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Settings → Passkeys view: list + register button
+async function loadPasskeys() {
+  const container = document.getElementById('passkeysList');
+  if (!container) return;
+  if (!window.PublicKeyCredential || !swa()) {
+    container.innerHTML = '<div class="empty-state"><h3>Not supported</h3><p>This browser doesn\'t support passkeys. Try a recent version of Safari, Chrome, Edge, or Firefox.</p></div>';
+    return;
+  }
+  try {
+    const { passkeys } = await api('/api/passkey');
+    if (!passkeys.length) {
+      container.innerHTML = '<div class="empty-state"><div class="icon">🔑</div><h3>No passkeys yet</h3><p>Click <strong>+ Register this device</strong> above to add one. You\'ll be able to sign in with Face ID, Touch ID, Windows Hello, or your security key.</p></div>';
+      return;
+    }
+    container.innerHTML = passkeys.map(pk => `
+      <div class="user-row">
+        <div class="avatar" style="background:rgba(79,142,247,0.2);color:var(--accent)">🔑</div>
+        <div class="user-info">
+          <div class="user-name">${esc(pk.device_name)}</div>
+          <div class="user-email">
+            Added ${fmtDate(pk.created_at)}
+            ${pk.last_used_at ? ` · last used ${fmtDate(pk.last_used_at)}` : ' · never used'}
+            ${pk.backed_up ? ' · ☁ synced' : ''}
+          </div>
+        </div>
+        <button class="btn-outline btn-sm" onclick="renamePasskey(${pk.id}, ${JSON.stringify(pk.device_name).replace(/"/g, '&quot;')})">Rename</button>
+        <button class="btn-outline btn-sm btn-red" onclick="deletePasskey(${pk.id}, ${JSON.stringify(pk.device_name).replace(/"/g, '&quot;')})">Remove</button>
+      </div>
+    `).join('');
+  } catch {
+    container.innerHTML = '<div class="empty-state"><p>Failed to load passkeys</p></div>';
+  }
+}
+
+async function registerPasskey() {
+  if (!swa()) { toast('Passkey support not loaded — refresh the page', 'error'); return; }
+  if (!window.PublicKeyCredential) { toast('Browser does not support passkeys', 'error'); return; }
+  try {
+    const options = await api('/api/passkey/register-options', { method: 'POST', body: {} });
+    let attestation;
+    try {
+      attestation = await swa().startRegistration({ optionsJSON: options });
+    } catch (err) {
+      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) return; // user cancelled
+      throw err;
+    }
+    const deviceName = prompt('Name this passkey (e.g. "iPhone 15", "Lab desktop"):', '') || '';
+    await api('/api/passkey/register-verify', {
+      method: 'POST',
+      body: { response: attestation, deviceName: deviceName.trim() },
+    });
+    toast('Passkey registered ✓', 'success');
+    loadPasskeys();
+  } catch (err) {
+    toast(err.error || err.message || 'Failed to register passkey', 'error');
+  }
+}
+
+async function renamePasskey(id, currentName) {
+  const next = prompt('New name for this passkey:', currentName || '');
+  if (next === null) return;
+  const trimmed = next.trim();
+  if (!trimmed) { toast('Name cannot be empty', 'error'); return; }
+  try {
+    await api(`/api/passkey/${id}`, { method: 'PUT', body: { device_name: trimmed } });
+    toast('Renamed', 'success');
+    loadPasskeys();
+  } catch (err) {
+    toast(err.error || 'Failed to rename', 'error');
+  }
+}
+
+async function deletePasskey(id, name) {
+  if (!confirm(`Remove the passkey "${name}"? You won't be able to sign in with that device's passkey anymore.`)) return;
+  try {
+    await api(`/api/passkey/${id}`, { method: 'DELETE' });
+    toast('Passkey removed', 'info');
+    loadPasskeys();
+  } catch (err) {
+    toast(err.error || 'Failed to remove passkey', 'error');
+  }
+}
+
+// Helper — read the CSRF cookie set by the server (httpOnly:false on this one)
+function getCsrfCookie() {
+  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
 }

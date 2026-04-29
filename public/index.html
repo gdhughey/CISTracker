@@ -36,6 +36,10 @@
       </div>
       <button type="submit" class="btn-primary">Sign In</button>
     </form>
+    <div class="login-divider"><span>or</span></div>
+    <button id="passkeyLoginBtn" type="button" class="btn-outline" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px" onclick="loginWithPasskey()">
+      🔑 Sign in with passkey
+    </button>
   </div>
 </div>
 
@@ -90,6 +94,12 @@
         <div class="nav-label">Support</div>
         <div class="nav-item" data-view="tickets" onclick="switchView('tickets')">
           🎫 Tickets <span id="ticketBadge" class="badge badge-purple hidden">0</span>
+        </div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">Account</div>
+        <div class="nav-item" data-view="passkeys" onclick="switchView('passkeys')">
+          🔑 Passkeys
         </div>
       </div>
       <div class="nav-section" id="adminNav" style="display:none">
@@ -235,6 +245,18 @@
       </div>
     </div>
 
+    <!-- ═══ PASSKEYS VIEW ═══ -->
+    <div id="view-passkeys" class="hidden">
+      <div class="admin-view">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <h2 style="font-size:18px;font-weight:600">🔑 Passkeys</h2>
+          <button class="btn-primary" onclick="registerPasskey()">+ Register this device</button>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Sign in faster with Face ID, Touch ID, Windows Hello, or your hardware security key — no password or 6-digit code needed. Each browser/device needs its own passkey.</p>
+        <div id="passkeysList"></div>
+      </div>
+    </div>
+
   </div><!-- /main-content -->
 </div><!-- /app-layout -->
 
@@ -252,6 +274,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
+<script src="https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.umd.min.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

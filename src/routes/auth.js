@@ -79,17 +79,11 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
     req.audit('login_failed', username, { reason: 'no_such_user' });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
-  if (userService.isLocked(user)) {
-    req.audit('login_locked', username);
-    return res.status(423).json({ error: 'Account is locked. Try again later.' });
-  }
   const ok = await userService.verifyPassword(user, password);
   if (!ok) {
-    const { failed, lockedUntil } = userService.recordFailedLogin(user);
-    req.audit('login_failed', username, { failed, lockedUntil });
+    req.audit('login_failed', username);
     return res.status(401).json({ error: 'Invalid credentials' });
   }
-  userService.clearFailedLogins(user.id);
 
   if (user.mfa_enabled) {
     // Issue a short-lived MFA challenge cookie binding to this user.
