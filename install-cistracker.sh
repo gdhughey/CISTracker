@@ -346,6 +346,49 @@ EOF
   systemctl restart "${APP_NAME}"
 }
 
+install_mkcert() {
+  if command -v mkcert >/dev/null 2>&1; then
+    log "mkcert already installed ($(mkcert --version 2>/dev/null || echo unknown))"
+  else
+    log "Installing mkcert ${MKCERT_VERSION}"
+    curl -fsSL \
+      "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64" \
+      -o /usr/local/bin/mkcert
+    chmod +x /usr/local/bin/mkcert
+  fi
+
+  log "Creating local CA (if not already created)"
+  mkcert -install
+}
+
+setup_tls() {
+  if [[ -z "${STATIC_IP}" ]]; then
+    log "No STATIC_IP set — skipping TLS cert generation"
+    return
+  fi
+
+  log "Generating TLS certificate for ${DOMAIN}"
+
+  mkdir -p /etc/ssl/cistracker
+
+  mkcert \
+    -cert-file /etc/ssl/cistracker/cert.pem \
+    -key-file  /etc/ssl/cistracker/key.pem \
+    "${DOMAIN}"
+
+  # Export CA root so the operator can distribute it via Group Policy
+  local caroot
+  caroot="$(mkcert -CAROOT)"
+  cp "${caroot}/rootCA.pem" /etc/ssl/cistracker/rootCA.crt
+
+  chmod 644 /etc/ssl/cistracker/cert.pem /etc/ssl/cistracker/rootCA.crt
+  chmod 640 /etc/ssl/cistracker/key.pem
+
+  log "Cert:    /etc/ssl/cistracker/cert.pem"
+  log "Key:     /etc/ssl/cistracker/key.pem"
+  log "CA root: /etc/ssl/cistracker/rootCA.crt  (copy to Windows Server for Group Policy)"
+}
+
 configure_nginx() {
   log "Configuring Nginx reverse proxy"
 
