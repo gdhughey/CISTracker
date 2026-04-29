@@ -1577,8 +1577,53 @@ async function toggleRole(id, newRole) {
 async function resetUserPw(id) {
   try {
     const { tempPassword } = await api(`/api/admin/users/${id}`, { method: 'PUT', body: { reset_password: true } });
-    toast(`Temporary password: ${tempPassword}`, 'info');
+    showTempPassword(tempPassword, 'Password Reset');
   } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+function showTempPassword(password, title) {
+  document.getElementById('modalContent').innerHTML = `
+    <div class="modal-title">${esc(title)}</div>
+    <div class="modal-name" style="margin-bottom:18px">Temporary Password</div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">
+      Copy this password and give it to the user. It won't be shown again once you close this dialog.
+    </p>
+    <div style="display:flex;gap:8px;align-items:center;background:rgba(3,6,16,0.8);border:1px solid var(--border-input);border-radius:3px;padding:10px 14px;">
+      <code id="tmpPwDisplay" style="flex:1;font-family:var(--mono);font-size:14px;font-weight:600;letter-spacing:0.12em;color:var(--accent);filter:blur(5px);user-select:all;transition:filter 0.2s">${esc(password)}</code>
+      <button class="btn-outline btn-sm" onclick="toggleTmpPwVisibility()" id="tmpPwToggleBtn" title="Show/hide">👁</button>
+      <button class="btn-outline btn-sm" onclick="copyTmpPw(${JSON.stringify(password)})" title="Copy">⎘ Copy</button>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:8px;font-family:var(--mono)">Click the eye icon to reveal · User must change password on first login</p>
+    <div class="form-actions" style="margin-top:20px">
+      <button class="btn-primary" onclick="closeModal()">✕ Close</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function toggleTmpPwVisibility() {
+  const el = document.getElementById('tmpPwDisplay');
+  const btn = document.getElementById('tmpPwToggleBtn');
+  if (!el) return;
+  const hidden = el.style.filter !== 'none' && el.style.filter !== '';
+  el.style.filter = hidden ? 'none' : 'blur(5px)';
+  btn.textContent = hidden ? '🙈' : '👁';
+}
+
+function copyTmpPw(password) {
+  navigator.clipboard.writeText(password).then(() => {
+    toast('Password copied to clipboard', 'success');
+  }).catch(() => {
+    // fallback for non-HTTPS contexts
+    const ta = document.createElement('textarea');
+    ta.value = password;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('Password copied to clipboard', 'success');
+  });
 }
 
 function changeUserEmail(id, currentEmail) {
@@ -1645,9 +1690,8 @@ async function submitCreateUser() {
         role: document.getElementById('newRole').value,
       },
     });
-    toast(`User created! Temp password: ${tempPassword}`, 'success');
-    closeModal();
     loadUsers();
+    showTempPassword(tempPassword, 'User Created');
   } catch (err) {
     toast(err.error || 'Failed to create user', 'error');
   }
