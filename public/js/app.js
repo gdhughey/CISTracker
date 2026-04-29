@@ -13,6 +13,11 @@ let locFilter = 'All';
 let ticketFilter = 'all';
 let _pendingPrint = null; // label queued for printing from add-item modal
 
+// Inventory rendering — show rows in batches to avoid blocking the main thread
+const RENDER_BATCH = 150;
+let renderVisible = []; // filtered item list (not yet all in DOM)
+let renderShown = 0;    // how many rows are currently rendered
+
 // ── UTC helper ─────────────────────────────────────────────────────────
 function utc(d) {
   if (!d) return new Date(NaN);
@@ -165,6 +170,7 @@ async function showApp() {
     document.getElementById('addItemBtn').style.display = '';
   }
   // Load data
+  initTableScroll();
   await Promise.all([loadItems(), loadOverdueCount(), loadTicketCounts()]);
   switchView('inventory');
   // First-time onboarding tour — only fires once per user/browser
@@ -448,25 +454,39 @@ function filterItems() { renderItems(); }
 
 function renderItems() {
   const q = (document.getElementById('searchInput').value || '').toLowerCase();
-  const tbody = document.getElementById('itemsBody');
-  tbody.innerHTML = '';
-  let count = 0;
-  const visible = [];
+  // Build filtered list
+  renderVisible = [];
   for (const item of ITEMS) {
     const st = getItemStatus(item);
-    // Status filter
     if (statusFilter !== 'all' && st !== statusFilter) continue;
-    // Category filter
     if (catFilter !== 'All' && item.category !== catFilter) continue;
-    // Location filter
     if (locFilter !== 'All' && item.location !== locFilter) continue;
-    // Search
     if (q) {
       const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location}`.toLowerCase();
       if (!hay.includes(q)) continue;
     }
-    visible.push(item);
-    count++;
+    renderVisible.push(item);
+  }
+  // Reset DOM and render first batch
+  document.getElementById('itemsBody').innerHTML = '';
+  renderShown = 0;
+  renderBatch();
+  document.getElementById('itemCount').textContent = `${renderVisible.length} item${renderVisible.length !== 1 ? 's' : ''}`;
+  computeStats(renderVisible);
+}
+
+function renderBatch() {
+  const tbody = document.getElementById('itemsBody');
+  // Remove existing sentinel if present
+  const existing = tbody.querySelector('.render-sentinel');
+  if (existing) existing.remove();
+
+  const end = Math.min(renderShown + RENDER_BATCH, renderVisible.length);
+  const frag = document.createDocumentFragment();
+
+  for (let i = renderShown; i < end; i++) {
+    const item = renderVisible[i];
+    const st = getItemStatus(item);
     const tr = document.createElement('tr');
     tr.onclick = () => openDetail(item.id);
     const statusLabel = st === 'available' ? 'Available' : st === 'checked_out' ? 'Checked Out' : 'Overdue';
@@ -491,10 +511,29 @@ function renderItems() {
           : `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return</button>`}
       </td>
     `;
-    tbody.appendChild(tr);
+    frag.appendChild(tr);
   }
-  document.getElementById('itemCount').textContent = `${count} item${count !== 1 ? 's' : ''}`;
-  computeStats(visible);
+  renderShown = end;
+  tbody.appendChild(frag);
+
+  // Add sentinel row if more rows remain; scroll handler will trigger next batch
+  if (renderShown < renderVisible.length) {
+    const sentinel = document.createElement('tr');
+    sentinel.className = 'render-sentinel';
+    sentinel.innerHTML = `<td colspan="6" style="text-align:center;padding:14px;color:var(--text-muted);font-family:var(--mono);font-size:11px">↓ ${renderVisible.length - renderShown} more</td>`;
+    tbody.appendChild(sentinel);
+  }
+}
+
+function initTableScroll() {
+  const wrap = document.querySelector('.table-wrap');
+  if (!wrap) return;
+  wrap.addEventListener('scroll', () => {
+    if (renderShown >= renderVisible.length) return;
+    if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 400) {
+      renderBatch();
+    }
+  }, { passive: true });
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────
