@@ -167,14 +167,6 @@ function checkin(equipmentId, actingUser, notes = '', source = 'Manual') {
     } catch { /* queue table may not exist yet */ }
   });
   tx();
-  // Send queue notification outside the transaction (async, fire-and-forget)
-  if (nextInQueue) {
-    const emailService = require('./emailService');
-    const item = getById(equipmentId);
-    emailService.sendQueueNotification(
-      nextInQueue.email, nextInQueue.username, item?.name || 'Equipment'
-    ).catch(() => {});
-  }
   return { item: getById(equipmentId), nextInQueue };
 }
 
