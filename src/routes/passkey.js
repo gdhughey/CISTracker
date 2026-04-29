@@ -223,6 +223,8 @@ router.get('/', requireAuth, (req, res) => {
 
 router.put('/:id(\\d+)', requireAuth, (req, res) => {
   const id = parseInt(req.params.id, 10);
+  const pk = passkeyService.getById(id);
+  if (!pk || pk.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' });
   const name = String(req.body?.device_name || '').trim();
   if (!name) return res.status(400).json({ error: 'device_name is required' });
   passkeyService.rename(id, req.user.id, name);

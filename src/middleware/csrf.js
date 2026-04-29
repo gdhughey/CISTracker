@@ -29,7 +29,10 @@ function verifyToken(req, res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   const cookieToken = req.cookies[COOKIE_NAME];
   const headerToken = req.get('X-CSRF-Token');
-  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+  const tokensMatch = cookieToken && headerToken &&
+    cookieToken.length === headerToken.length &&
+    crypto.timingSafeEqual(Buffer.from(cookieToken), Buffer.from(headerToken));
+  if (!tokensMatch) {
     return res.status(403).json({ error: 'Invalid CSRF token' });
   }
   next();

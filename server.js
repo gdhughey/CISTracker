@@ -59,9 +59,9 @@ app.use('/api/passkey', passkeyRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
-const server = app.listen(config.port, () => {
+const server = app.listen(config.port, '127.0.0.1', () => {
   // eslint-disable-next-line no-console
-  console.log(`CIS Tracker listening on http://0.0.0.0:${config.port} (env=${config.env})`);
+  console.log(`CIS Tracker listening on http://127.0.0.1:${config.port} (env=${config.env})`);
   if (config.appUrl && config.appUrl !== 'http://localhost:3000') {
     console.log(`  → ${config.appUrl}`);
   }

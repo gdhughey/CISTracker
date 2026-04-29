@@ -111,7 +111,7 @@ router.delete('/users/:id(\\d+)', (req, res) => {
 });
 
 router.get('/overdue', (req, res) => {
-  const days = parseInt(req.query.days, 10) || config.reminders.reminderDays;
+  const days = parseInt(req.query.days, 10) || 3;
   res.json({ items: equipmentService.getOverdue(days) });
 });
 

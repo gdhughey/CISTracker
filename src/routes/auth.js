@@ -76,9 +76,12 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
   }
 
   if (user.mfa_enabled) {
-    // Issue a short-lived MFA challenge cookie binding to this user.
-    const challenge = crypto.randomBytes(24).toString('hex');
-    res.cookie('cyberlab_mfa_challenge', `${user.id}:${challenge}`, {
+    // Issue a short-lived MFA challenge cookie. The value is HMAC-signed with
+    // SESSION_SECRET so it cannot be forged by crafting a userId:anything value.
+    const hmac = crypto.createHmac('sha256', config.session.secret)
+      .update(String(user.id))
+      .digest('hex');
+    res.cookie('cyberlab_mfa_challenge', `${user.id}:${hmac}`, {
       httpOnly: true, sameSite: 'strict', secure: req.secure, maxAge: 5 * 60_000, path: '/',
     });
     req.audit('login_mfa_required', username);
@@ -95,7 +98,15 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
 router.post('/mfa-verify', loginLimiter, validate(mfaVerifySchema), async (req, res) => {
   const challengeCookie = req.cookies.cyberlab_mfa_challenge;
   if (!challengeCookie) return res.status(400).json({ error: 'No MFA challenge in progress' });
-  const [userIdStr] = challengeCookie.split(':');
+  const [userIdStr, cookieHmac] = challengeCookie.split(':');
+  if (!userIdStr || !cookieHmac) return res.status(400).json({ error: 'Invalid challenge' });
+  // Verify the HMAC so the cookie cannot be forged with an arbitrary user ID
+  const expectedHmac = crypto.createHmac('sha256', config.session.secret)
+    .update(userIdStr)
+    .digest('hex');
+  if (!crypto.timingSafeEqual(Buffer.from(cookieHmac, 'hex'), Buffer.from(expectedHmac, 'hex'))) {
+    return res.status(400).json({ error: 'Invalid challenge' });
+  }
   const user = userService.getById(parseInt(userIdStr, 10));
   if (!user || !user.mfa_enabled) return res.status(400).json({ error: 'Invalid challenge' });
   const ok = mfaService.verifyToken(user.mfa_secret, req.body.token);

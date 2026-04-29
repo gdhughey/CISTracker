@@ -466,8 +466,9 @@ EOF
 configure_firewall() {
   if command -v ufw >/dev/null 2>&1; then
     log "Configuring UFW firewall rules (only takes effect if ufw is enabled)"
-    ufw allow OpenSSH >/dev/null 2>&1 || true
     ufw allow 'Nginx Full' >/dev/null 2>&1 || true
+    # Block direct access to Node.js port — nginx is the only entry point
+    ufw deny 3000/tcp >/dev/null 2>&1 || true
   fi
 }
 
@@ -498,22 +499,18 @@ configure_ssh_port() {
 
   local sshd_config="/etc/ssh/sshd_config"
 
-  # Ensure Port 22 is explicit (some Ubuntu cloud images omit it)
-  if ! grep -qE '^Port 22$' "${sshd_config}"; then
-    echo "Port 22" >> "${sshd_config}"
-  fi
-
-  # Add extra port if not already present
-  if ! grep -qE "^Port ${SSH_EXTRA_PORT}$" "${sshd_config}"; then
-    sed -i "/^Port 22$/a Port ${SSH_EXTRA_PORT}" "${sshd_config}"
-  fi
+  # Remove any existing Port directives and replace with only the extra port.
+  # Port 22 is intentionally NOT opened — SSH is only reachable via Tailscale on
+  # SSH_EXTRA_PORT (default 2222). This keeps the firewall surface minimal.
+  sed -i '/^Port /d' "${sshd_config}"
+  echo "Port ${SSH_EXTRA_PORT}" >> "${sshd_config}"
 
   if command -v ufw >/dev/null 2>&1; then
     ufw allow "${SSH_EXTRA_PORT}/tcp" >/dev/null 2>&1 || true
   fi
 
   systemctl restart ssh
-  log "sshd listening on ports 22 and ${SSH_EXTRA_PORT}"
+  log "sshd listening on port ${SSH_EXTRA_PORT} only (port 22 removed)"
 }
 
 print_summary() {

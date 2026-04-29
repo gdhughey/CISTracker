@@ -102,7 +102,7 @@ router.get('/:id(\\d+)', (req, res) => {
   res.json({ item });
 });
 
-router.post('/', validate(createSchema), (req, res) => {
+router.post('/', requireRole('admin'), validate(createSchema), (req, res) => {
   const item = equipmentService.create(req.body);
   req.audit('equipment_create', String(item.id), { name: item.name });
   res.status(201).json({ item });
