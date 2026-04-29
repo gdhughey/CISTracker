@@ -2,7 +2,6 @@
 const express = require('express');
 const { z } = require('zod');
 const ticketService = require('../services/ticketService');
-const emailService = require('../services/emailService');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { stripHtml } = require('../utils/sanitize');
@@ -64,10 +63,6 @@ router.post('/', validate(createSchema), (req, res) => {
     equipmentId: req.body.equipment_id,
   });
   req.audit('ticket_create', String(ticket.id));
-  // Forward to support email
-  emailService.sendSupportTicket(ticket, req.user.username).catch(err => {
-    console.error('[email] sendSupportTicket failed:', err?.message || err);
-  });
   res.status(201).json({ ticket });
 });
 
@@ -98,12 +93,6 @@ router.put('/:id(\\d+)', validate(updateSchema), (req, res) => {
     // fallback inbox so somebody knows it's back in the unassigned pool.
     // The "current" status is whatever was just written — prefer the request
     // body's status if set, otherwise the original ticket's status.
-    const finalStatus = req.body.status || ticket.status;
-    if (finalStatus !== 'resolved' && finalStatus !== 'closed') {
-      emailService.sendTicketDropped(updated, req.user.username).catch(err => {
-        console.error('[email] sendTicketDropped failed:', err?.message || err);
-      });
-    }
   } else if (reassignedToOther) {
     req.audit('ticket_assign', String(id), { from: ticket.assigned_to, to: req.body.assigned_to });
   } else {

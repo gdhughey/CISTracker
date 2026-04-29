@@ -5,7 +5,6 @@ const { z } = require('zod');
 const userService = require('../services/userService');
 const equipmentService = require('../services/equipmentService');
 const auditService = require('../services/auditService');
-const emailService = require('../services/emailService');
 const config = require('../config');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
@@ -59,8 +58,6 @@ router.post('/users', validate(createUserSchema), async (req, res) => {
   const tempPw = genTempPassword(7);
   const user = await userService.createUser({ ...req.body, password: tempPw, mustChangePw: 1 });
   req.audit('admin_create_user', req.body.username, { role: req.body.role });
-  // Email the student their temp password
-  emailService.sendNewAccount(req.body.email, req.body.username, tempPw).catch(() => {});
   res.status(201).json({ user: userService.pickPublic(user), tempPassword: tempPw });
 });
 
@@ -82,8 +79,6 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     }
     userService.updateEmail(id, req.body.email);
     req.audit('admin_change_email', user.username, { oldEmail: user.email, newEmail: req.body.email });
-    // Notify the user at their NEW address that the change took effect
-    emailService.sendEmailChangedNotice(req.body.email, user.username).catch(() => {});
   }
   if (req.body.reset_password) {
     const resetPw = genTempPassword(7);
@@ -92,8 +87,6 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     req.audit('admin_reset_password', user.username);
     // Kill sessions so they must log in with the new password
     sessionService.destroyAllForUser(id);
-    // Email the user their new temp password
-    emailService.sendPasswordReset(user.email, user.username, resetPw).catch(() => {});
     res.locals.tempPassword = resetPw;
   }
   if (req.body.unlock) {
