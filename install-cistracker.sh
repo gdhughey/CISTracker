@@ -5,31 +5,34 @@ set -euo pipefail
 # Tested target: Ubuntu 22.04/24.04 or Debian 12
 #
 # What this does:
-# - Installs Node.js 20, Git, SQLite, Nginx, OpenSSL, and build tools
+# - Installs Node.js 20, Git, SQLite, Nginx, OpenSSL, mkcert, and build tools
 # - Clones https://github.com/gdhughey/CISTracker into /opt/CISTracker
 # - Creates a system user, .env with a generated SESSION_SECRET
 # - Installs npm dependencies (with mirror fallback for restricted networks)
 # - Runs database migration/seed scripts
 # - Creates a systemd service named cistracker
-# - Configures Nginx HTTP reverse proxy on port 80
-# - (Optional) Installs cloudflared and registers a Cloudflare Tunnel so the
-#   site is reachable over HTTPS without opening router ports, and so SSH
-#   can tunnel through Cloudflare for remote maintenance.
+# - Configures Nginx HTTPS reverse proxy on port 443 (with mkcert local CA)
+#   when STATIC_IP is provided; falls back to HTTP on port 80 otherwise
+# - Adds SSH on port 2222 for Tailscale remote access
+# - (Optional) Installs Tailscale for remote SSH maintenance
 #
 # This script is idempotent. It is safe to re-run on a partially installed host.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/gdhughey/CISTracker/main/install-cistracker.sh | sudo bash
+#   sudo STATIC_IP=10.0.2.10 bash install-cistracker.sh
 #
-# Or:
-#   sudo bash install-cistracker.sh
+# All options (pass as env vars):
+#   STATIC_IP        LAN IP to assign to this server (required for HTTPS)
+#   STATIC_NETMASK   CIDR prefix length (default: 16)
+#   GATEWAY          LAN default gateway (default: 10.0.255.1)
+#   DNS_SERVER       LAN DNS server IP (default: 10.2.201.4)
+#   DOMAIN           App domain name (default: cistracker.net)
+#   SSH_EXTRA_PORT   Extra SSH port for Tailscale access (default: 2222)
+#   SKIP_TAILSCALE   Set to 1 to skip Tailscale install (default: 0)
+#   MKCERT_VERSION   mkcert binary version (default: v1.4.4)
 #
-# Cloudflare Tunnel (optional) — pass the tunnel token from the Cloudflare
-# Zero Trust dashboard so the installer registers the tunnel automatically:
-#   sudo CLOUDFLARED_TOKEN="eyJh..." bash install-cistracker.sh
-#
-# To skip the tunnel entirely:
-#   sudo SKIP_CLOUDFLARED=1 bash install-cistracker.sh
+# To skip Tailscale:
+#   sudo STATIC_IP=10.0.2.10 SKIP_TAILSCALE=1 bash install-cistracker.sh
 
 APP_NAME="cistracker"
 REPO_URL="${REPO_URL:-https://github.com/gdhughey/CISTracker.git}"
@@ -39,8 +42,14 @@ APP_PORT="${APP_PORT:-3000}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 NPM_PRIMARY_REGISTRY="${NPM_PRIMARY_REGISTRY:-https://registry.npmjs.org/}"
 NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}"
-CLOUDFLARED_TOKEN="${CLOUDFLARED_TOKEN:-}"
-SKIP_CLOUDFLARED="${SKIP_CLOUDFLARED:-0}"
+STATIC_IP="${STATIC_IP:-}"
+STATIC_NETMASK="${STATIC_NETMASK:-16}"
+GATEWAY="${GATEWAY:-10.0.255.1}"
+DNS_SERVER="${DNS_SERVER:-10.2.201.4}"
+DOMAIN="${DOMAIN:-cistracker.net}"
+SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
+SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
+MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"
 
 log() {
   echo
