@@ -6,7 +6,6 @@ const config = require('../config');
 const userService = require('../services/userService');
 const sessionService = require('../services/sessionService');
 const mfaService = require('../services/mfaService');
-const emailService = require('../services/emailService');
 const { validate } = require('../middleware/validate');
 const { loginLimiter } = require('../middleware/rateLimit');
 const { requireAuth } = require('../middleware/auth');
@@ -42,12 +41,6 @@ const changePasswordSchema = z.object({
 
 const mfaVerifySchema = z.object({
   token: z.string().length(6).regex(/^\d{6}$/),
-});
-
-const forgotSchema = z.object({ email: z.string().email() });
-const resetSchema = z.object({
-  token: z.string().min(10),
-  newPassword: passwordSchema,
 });
 
 // --- helpers ---
@@ -179,34 +172,6 @@ router.post('/mfa/disable', requireAuth, validate(mfaVerifySchema), (req, res) =
   }
   userService.setMfa(req.user.id, null, false);
   req.audit('mfa_disabled', req.user.username);
-  res.json({ ok: true });
-});
-
-router.post('/forgot-password', loginLimiter, validate(forgotSchema), async (req, res) => {
-  const user = userService.getByEmail(req.body.email);
-  // Always respond with success to avoid email enumeration.
-  if (user) {
-    const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 60 * 60_000).toISOString();
-    userService.setRecoveryToken(user.id, hashToken(token), expires);
-    const url = `${config.appUrl}/reset?token=${token}`;
-    try {
-      await emailService.sendPasswordResetLink(user.email, user.username, url);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[auth] failed to send reset email:', err.message);
-    }
-    req.audit('password_reset_requested', user.username);
-  }
-  res.json({ ok: true, message: 'If that email is registered, a reset link has been sent.' });
-});
-
-router.post('/reset-password', validate(resetSchema), async (req, res) => {
-  const user = userService.findByRecoveryToken(hashToken(req.body.token));
-  if (!user) return res.status(400).json({ error: 'Invalid or expired token' });
-  await userService.setPassword(user.id, req.body.newPassword);
-  sessionService.destroyAllForUser(user.id);
-  req.audit('password_reset_completed', user.username);
   res.json({ ok: true });
 });
 
