@@ -17,10 +17,10 @@
   --border:     #0b1428;
   --border-sub: #0e1c3a;
   --border-input:#122044;
-  --text:       #c0d6f0;
-  --text-sec:   #5288b0;
-  --text-muted: #264a68;
-  --text-faint: #122434;
+  --text:       #d0e4f8;
+  --text-sec:   #7ab4d8;
+  --text-muted: #4a80a8;
+  --text-faint: #1e4060;
   --accent:     #00c8ff;
   --accent-soft:rgba(0,200,255,0.07);
   --green:      #00ff94;
@@ -127,7 +127,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   display:flex; align-items:center; gap:0;
   padding:8px 14px; border-radius:2px; cursor:pointer;
   font-family: var(--display);
-  font-size:10px; font-weight:600; color:var(--text-muted);
+  font-size:10px; font-weight:600; color:var(--text-sec);
   text-transform:uppercase; letter-spacing:0.07em;
   transition: all 0.15s;
   position:relative; user-select:none;
