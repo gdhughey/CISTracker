@@ -89,10 +89,6 @@ router.put('/:id(\\d+)', validate(updateSchema), (req, res) => {
     req.audit('ticket_self_assign', String(id), { previous: ticket.assigned_to });
   } else if (droppedAssignment) {
     req.audit('ticket_unassign', String(id));
-    // If the ticket was dropped WITHOUT being resolved/closed, alert the
-    // fallback inbox so somebody knows it's back in the unassigned pool.
-    // The "current" status is whatever was just written — prefer the request
-    // body's status if set, otherwise the original ticket's status.
   } else if (reassignedToOther) {
     req.audit('ticket_assign', String(id), { from: ticket.assigned_to, to: req.body.assigned_to });
   } else {
