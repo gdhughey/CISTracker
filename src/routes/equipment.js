@@ -49,9 +49,12 @@ router.get('/', (req, res) => {
 });
 
 // Full activity log is admin-only.
+// Optionally filter by equipment_id (?equipment_id=123) so the detail
+// panel can fetch history for one item without scanning the whole log.
 router.get('/log', requireRole('admin'), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
-  res.json({ entries: equipmentService.getLog({ limit }) });
+  const equipmentId = req.query.equipment_id ? parseInt(req.query.equipment_id, 10) : undefined;
+  res.json({ entries: equipmentService.getLog({ limit, equipmentId }) });
 });
 
 router.delete('/log', requireRole('admin'), (req, res) => {

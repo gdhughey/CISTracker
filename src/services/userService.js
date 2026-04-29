@@ -139,7 +139,11 @@ function deleteUser(id) {
     // Clear remaining FK references
     db.prepare('DELETE FROM equipment_queue WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM ticket_comments WHERE user_id = ?').run(id);
-    db.prepare('DELETE FROM tickets WHERE user_id = ? OR assigned_to = ?').run(id, id);
+    // Only delete tickets this user created. If they were merely assigned to
+    // someone else's ticket, unassign rather than delete — the reporter's
+    // ticket should survive the deletion of a different user.
+    db.prepare('UPDATE tickets SET assigned_to = NULL WHERE assigned_to = ?').run(id);
+    db.prepare('DELETE FROM tickets WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM checkout_log WHERE performed_by = ?').run(id);
     // Preserve audit history but remove the FK reference
     db.prepare('UPDATE audit_log SET user_id = NULL WHERE user_id = ?').run(id);

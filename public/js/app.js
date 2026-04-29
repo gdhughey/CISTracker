@@ -171,7 +171,8 @@ async function showApp() {
   }
   // Load data
   initTableScroll();
-  await Promise.all([loadItems(), loadOverdueCount(), loadTicketCounts()]);
+  const adminLoads = ME.role === 'admin' ? [loadOverdueCount(), loadTicketCounts()] : [];
+  await Promise.all([loadItems(), ...adminLoads]);
   switchView('inventory');
   // First-time onboarding tour — only fires once per user/browser
   maybeStartTour();
@@ -575,11 +576,11 @@ async function openDetail(id) {
         </div>`;
     }
   } catch {}
-  // Load history
+  // Load history for this specific item
   let historyHtml = '';
   try {
-    const { entries } = await api(`/api/equipment/log?limit=10`);
-    const itemEntries = (entries || []).filter(e => e.equipment_id === id);
+    const { entries } = await api(`/api/equipment/log?equipment_id=${id}&limit=10`);
+    const itemEntries = (entries || []);
     if (itemEntries.length > 0) {
       historyHtml = `
         <div class="detail-section">
@@ -1233,7 +1234,21 @@ async function loadOverdueCount() {
 async function loadOverdue() {
   const container = document.getElementById('overdueList');
   try {
-    const { items } = await api('/api/admin/overdue?days=3');
+    let items;
+    if (ME.role === 'admin') {
+      // Admin: fetch from server so we get days_out calculated server-side
+      const data = await api('/api/admin/overdue?days=3');
+      items = (data.items || []).map(item => ({
+        ...item,
+        days_out: item.days_out,
+      }));
+    } else {
+      // Non-admin: derive from the already-loaded ITEMS list
+      items = ITEMS.filter(i => getItemStatus(i) === 'overdue').map(i => ({
+        ...i,
+        days_out: daysAgo(i.checked_out_at),
+      }));
+    }
     if (!items || items.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="icon">🎉</div><h3>No overdue items!</h3><p>Everything is returned on time.</p></div>';
       return;
@@ -1243,7 +1258,7 @@ async function loadOverdue() {
         <div style="width:6px;height:6px;border-radius:50%;background:var(--red)"></div>
         <div class="item-info">
           <div class="item-name">${esc(item.name)}</div>
-          <div class="item-meta">${esc(item.checked_out_username)} · ${item.days_out} days overdue</div>
+          <div class="item-meta">${esc(item.checked_out_username || '—')} · ${item.days_out} days overdue</div>
         </div>
         <button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return</button>
       </div>
@@ -1670,7 +1685,7 @@ function openCreateUserModal() {
           <option value="admin">Admin</option>
         </select>
       </div>
-      <div class="info-strip">A temporary password will be generated and emailed to the user.</div>
+      <div class="info-strip">A temporary password will be generated and shown to you. Give it to the user directly — they must change it on first login.</div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
         <button class="btn-primary" onclick="submitCreateUser()">Create User</button>
