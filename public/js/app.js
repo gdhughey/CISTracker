@@ -521,17 +521,19 @@ function renderBatch() {
   if (renderShown < renderVisible.length) {
     const sentinel = document.createElement('tr');
     sentinel.className = 'render-sentinel';
-    sentinel.innerHTML = `<td colspan="6" style="text-align:center;padding:14px;color:var(--text-muted);font-family:var(--mono);font-size:11px">↓ ${renderVisible.length - renderShown} more</td>`;
+    sentinel.style.cursor = 'pointer';
+    sentinel.onclick = () => renderBatch();
+    sentinel.innerHTML = `<td colspan="6" style="text-align:center;padding:14px;color:var(--text-muted);font-family:var(--mono);font-size:11px">↓ ${renderVisible.length - renderShown} more — click or scroll</td>`;
     tbody.appendChild(sentinel);
   }
 }
 
 function initTableScroll() {
-  const wrap = document.querySelector('.table-wrap');
-  if (!wrap) return;
-  wrap.addEventListener('scroll', () => {
+  const scroller = document.querySelector('.main-content');
+  if (!scroller) return;
+  scroller.addEventListener('scroll', () => {
     if (renderShown >= renderVisible.length) return;
-    if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 400) {
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 400) {
       renderBatch();
     }
   }, { passive: true });
