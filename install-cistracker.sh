@@ -227,6 +227,7 @@ DB_PATH=./data/cyberlab.db
 SESSION_SECRET=${secret}
 TLS_ENABLED=${tls_enabled}
 APP_URL=${app_url}
+SEED_ADMIN_PASSWORD=Password1
 EOF
     log "Wrote new ${env_path}"
   else
@@ -316,9 +317,25 @@ initialize_database() {
   fi
 
   if has_npm_script seed; then
-    log "Running database seed"
+    log "Running database seed (admin user)"
     sudo -u "${APP_USER}" npm run seed || warn "Seed command failed or data already exists. Continuing."
   fi
+
+  log "Running inventory seed v1 (Northeast closet)"
+  sudo -u "${APP_USER}" node scripts/seed-inventory.js \
+    || warn "seed-inventory.js failed or data already exists. Continuing."
+
+  log "Running inventory seed v2 (motherboards, GPUs, CPUs, RAM, storage, HP Compaqs)"
+  sudo -u "${APP_USER}" node scripts/seed-inventory-v2.js \
+    || warn "seed-inventory-v2.js failed or data already exists. Continuing."
+
+  log "Running inventory seed v3 (location backfill)"
+  sudo -u "${APP_USER}" node scripts/seed-inventory-v3.js \
+    || warn "seed-inventory-v3.js failed or data already exists. Continuing."
+
+  log "Running inventory seed v4 (Cisco 2600/2950, networking closet)"
+  sudo -u "${APP_USER}" node scripts/seed-inventory-v4.js \
+    || warn "seed-inventory-v4.js failed or data already exists. Continuing."
 }
 
 create_systemd_service() {
