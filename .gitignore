@@ -12,3 +12,9 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+# Claude Code skill artifacts
+.superpowers/
+.claude/
+.agents/
+skills-lock.json

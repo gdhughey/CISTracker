@@ -6,7 +6,7 @@ This file is the orientation doc for any Claude session opening the CISTracker r
 
 ## What this is
 
-**CISTracker** is a self-hosted equipment checkout & inventory tracker for a high-school CyberLab. Single Node.js process backed by SQLite, served behind a Cloudflare Tunnel. Used in production by one school; ~7,600 inventory items across 6 physical locations.
+**CISTracker** is a self-hosted equipment checkout & inventory tracker for a high-school CyberLab. Single Node.js process backed by SQLite, served LAN-only over HTTPS via nginx with an mkcert local CA cert. Used in production by one school; ~7,600 inventory items across 6 physical locations.
 
 Deployed at: **https://cistracker.net**
 
