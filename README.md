@@ -24,6 +24,8 @@ Runs as a single Node.js process backed by SQLite, with QR-code scanning for fas
 curl -fsSL https://raw.githubusercontent.com/gdhughey/CISTracker/main/install-cistracker.sh | sudo bash
 ```
 
+> **Air-gapped / school-network install?** If the target server can't reach GitHub or npm, see [`docs/OFFLINE-INSTALL.md`](docs/OFFLINE-INSTALL.md) — build a single tarball at home, copy it via USB, run one script on the server.
+
 The installer:
 
 1. Creates a system user and clones the repo to `/opt/CISTracker`
