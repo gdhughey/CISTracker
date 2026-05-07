@@ -5,6 +5,7 @@ const ticketService = require('../services/ticketService');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { stripHtml } = require('../utils/sanitize');
+const emailService = require('../services/emailService');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -63,6 +64,7 @@ router.post('/', validate(createSchema), (req, res) => {
     equipmentId: req.body.equipment_id,
   });
   req.audit('ticket_create', String(ticket.id));
+  if (req.user.email) emailService.sendTicketConfirmation(req.user, ticket);
   res.status(201).json({ ticket });
 });
 
@@ -84,6 +86,14 @@ router.put('/:id(\\d+)', validate(updateSchema), (req, res) => {
   const reassignedToOther = req.body.assigned_to !== undefined && req.body.assigned_to !== null && req.body.assigned_to !== ticket.assigned_to;
 
   const updated = ticketService.update(id, req.body);
+
+  // Notify reporter when status changes (skip if they're the one making the change).
+  if (req.body.status && req.body.status !== ticket.status && updated.reporter_email && updated.user_id !== req.user.id) {
+    emailService.sendTicketStatusUpdate(
+      { username: updated.reporter_username, email: updated.reporter_email },
+      updated,
+    );
+  }
 
   if (becameAssignee) {
     req.audit('ticket_self_assign', String(id), { previous: ticket.assigned_to });

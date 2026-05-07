@@ -11,6 +11,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const { stripHtml } = require('../utils/sanitize');
 const sessionService = require('../services/sessionService');
+const emailService = require('../services/emailService');
 
 // Generates a strong 14-char temp password that meets the app's complexity
 // rules (uppercase, lowercase, digit, symbol, ≥10 chars). Mirrors the
@@ -75,6 +76,7 @@ router.post('/users', validate(createUserSchema), async (req, res) => {
     userService.updateStudentGroup(user.id, req.body.student_group);
   }
   req.audit('admin_create_user', req.body.username, { role: req.body.role, group: req.body.student_group });
+  emailService.sendWelcome(user, tempPw);
   res.status(201).json({ user: userService.pickPublic(userService.getById(user.id)), tempPassword: tempPw });
 });
 
@@ -96,6 +98,7 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     }
     userService.updateEmail(id, req.body.email);
     req.audit('admin_change_email', user.username, { oldEmail: user.email, newEmail: req.body.email });
+    emailService.sendEmailChanged(req.body.email, user.username);
   }
   if (req.body.reset_password) {
     const resetPw = genTempPassword();
@@ -105,6 +108,7 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     // Kill sessions so they must log in with the new password
     sessionService.destroyAllForUser(id);
     res.locals.tempPassword = resetPw;
+    emailService.sendWelcome(user, resetPw);
   }
   if (req.body.student_group !== undefined) {
     userService.updateStudentGroup(id, req.body.student_group);

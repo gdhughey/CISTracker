@@ -20,6 +20,8 @@ const passkeyRoutes = require('./src/routes/passkey');
 const { runMigrations } = require('./src/db/migrate');
 runMigrations();
 
+require('./src/services/reminderService');
+
 const app = express();
 
 if (config.trustProxy) app.set('trust proxy', 1);

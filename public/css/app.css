@@ -196,6 +196,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   transform: translateY(-1px);
 }
 .btn-primary:active { transform: translateY(0); }
+.link-btn {
+  background: none; border: none; padding: 0; color: var(--accent);
+  font-size: 13px; cursor: pointer; font-family: var(--font); text-decoration: underline;
+}
+.link-btn:hover { opacity: 0.8; }
 .btn-outline {
   padding: 8px 16px; border-radius: var(--r-sm);
   border: 1px solid var(--border-input); background: transparent;

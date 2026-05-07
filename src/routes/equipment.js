@@ -159,6 +159,10 @@ router.post('/:id(\\d+)/checkin', validate(checkoutSchema), (req, res, next) => 
     const id = parseInt(req.params.id, 10);
     const result = equipmentService.checkin(id, req.user, req.body.notes, req.body.source);
     req.audit('checkin', String(id));
+    if (result.nextInQueue && result.nextInQueue.email) {
+      const emailService = require('../services/emailService');
+      emailService.sendQueueNotification(result.nextInQueue, result.item.name);
+    }
     res.json({
       item: result.item,
       nextInQueue: result.nextInQueue ? { username: result.nextInQueue.username } : null,

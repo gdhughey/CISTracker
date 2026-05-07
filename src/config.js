@@ -54,6 +54,12 @@ const config = {
 
   appUrl: process.env.APP_URL || 'http://localhost:3000',
 
+  resend: {
+    apiKey: process.env.RESEND_API_KEY || '',
+    from: 'noreply@cistracker.net',
+    overdueHour: int(process.env.RESEND_OVERDUE_HOUR, 8),
+  },
+
   seed: {
     username: process.env.SEED_ADMIN_USERNAME || 'admin',
     email: process.env.SEED_ADMIN_EMAIL || 'admin@example.com',

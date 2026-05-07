@@ -73,6 +73,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Login form
   document.getElementById('loginForm').addEventListener('submit', handleLogin);
   document.getElementById('changePwForm').addEventListener('submit', handleChangePw);
+  document.getElementById('forgotPwForm').addEventListener('submit', handleForgotPw);
+  document.getElementById('resetPwForm').addEventListener('submit', handleResetPw);
+
+  // If URL contains ?reset_token=, show the reset-password page directly.
+  const resetToken = new URLSearchParams(window.location.search).get('reset_token');
+  if (resetToken) {
+    showResetPw(resetToken);
+    return;
+  }
+
   // Check session
   try {
     const { user } = await api('/api/auth/me');
@@ -92,12 +102,39 @@ document.addEventListener('DOMContentLoaded', async () => {
 function showLogin() {
   document.getElementById('loginPage').classList.remove('hidden');
   document.getElementById('changePwPage').classList.add('hidden');
+  document.getElementById('forgotPwPage').classList.add('hidden');
+  document.getElementById('resetPwPage').classList.add('hidden');
   document.getElementById('appLayout').classList.add('hidden');
+  // Clean the reset token from the URL without a page reload.
+  if (window.location.search) history.replaceState(null, '', window.location.pathname);
 }
 function showChangePw() {
   document.getElementById('loginPage').classList.add('hidden');
   document.getElementById('changePwPage').classList.remove('hidden');
+  document.getElementById('forgotPwPage').classList.add('hidden');
+  document.getElementById('resetPwPage').classList.add('hidden');
   document.getElementById('appLayout').classList.add('hidden');
+}
+function showForgotPassword() {
+  document.getElementById('loginPage').classList.add('hidden');
+  document.getElementById('forgotPwPage').classList.remove('hidden');
+  document.getElementById('resetPwPage').classList.add('hidden');
+  document.getElementById('appLayout').classList.add('hidden');
+  document.getElementById('forgotPwEmail').value = '';
+  const msg = document.getElementById('forgotPwMsg');
+  msg.style.display = 'none';
+}
+let _resetToken = '';
+function showResetPw(token) {
+  _resetToken = token;
+  document.getElementById('loginPage').classList.add('hidden');
+  document.getElementById('forgotPwPage').classList.add('hidden');
+  document.getElementById('resetPwPage').classList.remove('hidden');
+  document.getElementById('appLayout').classList.add('hidden');
+  document.getElementById('resetPwNew').value = '';
+  document.getElementById('resetPwConfirm').value = '';
+  const msg = document.getElementById('resetPwMsg');
+  msg.style.display = 'none';
 }
 
 let mfaPending = false;
@@ -146,6 +183,41 @@ async function handleChangePw(e) {
   } catch (err) {
     errEl.textContent = err.error || 'Failed to change password';
     errEl.style.display = 'block';
+  }
+}
+
+async function handleForgotPw(e) {
+  e.preventDefault();
+  const msg = document.getElementById('forgotPwMsg');
+  msg.style.display = 'none';
+  try {
+    await api('/api/auth/forgot-password', { method: 'POST', body: { email: document.getElementById('forgotPwEmail').value } });
+    msg.textContent = 'If that email is registered, a reset link is on its way. Check your inbox.';
+    msg.style.cssText = 'display:block;color:var(--green);background:var(--green-soft);padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:12px;';
+    document.getElementById('forgotPwForm').reset();
+  } catch (err) {
+    msg.textContent = err.error || 'Something went wrong. Please try again.';
+    msg.style.cssText = 'display:block;color:var(--red);background:var(--red-soft);padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:12px;';
+  }
+}
+
+async function handleResetPw(e) {
+  e.preventDefault();
+  const msg = document.getElementById('resetPwMsg');
+  msg.style.display = 'none';
+  const newPw = document.getElementById('resetPwNew').value;
+  if (newPw !== document.getElementById('resetPwConfirm').value) {
+    msg.textContent = 'Passwords do not match';
+    msg.style.cssText = 'display:block;color:var(--red);background:var(--red-soft);padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:12px;';
+    return;
+  }
+  try {
+    await api('/api/auth/reset-password', { method: 'POST', body: { token: _resetToken, newPassword: newPw } });
+    toast('Password reset! Please sign in with your new password.', 'success');
+    showLogin();
+  } catch (err) {
+    msg.textContent = err.error || 'Reset failed. The link may have expired.';
+    msg.style.cssText = 'display:block;color:var(--red);background:var(--red-soft);padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:12px;';
   }
 }
 

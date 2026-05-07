@@ -6,6 +6,7 @@ const config = require('../config');
 const userService = require('../services/userService');
 const sessionService = require('../services/sessionService');
 const mfaService = require('../services/mfaService');
+const emailService = require('../services/emailService');
 const { validate } = require('../middleware/validate');
 const { loginLimiter } = require('../middleware/rateLimit');
 const { requireAuth } = require('../middleware/auth');
@@ -180,6 +181,33 @@ router.post('/mfa/disable', requireAuth, validate(mfaVerifySchema), (req, res) =
   }
   userService.setMfa(req.user.id, null, false);
   req.audit('mfa_disabled', req.user.username);
+  res.json({ ok: true });
+});
+
+// Forgot password — generate a reset token and email a link.
+// Always returns 200 so we don't reveal whether the email exists.
+router.post('/forgot-password', loginLimiter, validate(z.object({ email: z.string().email() })), async (req, res) => {
+  const user = userService.getByEmail(req.body.email);
+  if (user) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+    userService.setRecoveryToken(user.id, token, expires);
+    const resetUrl = `${config.appUrl}/?reset_token=${token}`;
+    emailService.sendPasswordReset(user, resetUrl);
+  }
+  res.json({ ok: true });
+});
+
+// Reset password — validate token, set new password, clear token.
+router.post('/reset-password', validate(z.object({
+  token: z.string().min(1),
+  newPassword: passwordSchema,
+})), async (req, res) => {
+  // findByRecoveryToken already checks expiry in SQL; returns null if expired/missing.
+  const user = userService.findByRecoveryToken(req.body.token);
+  if (!user) return res.status(400).json({ error: 'Invalid or expired reset link' });
+  await userService.setPassword(user.id, req.body.newPassword); // also clears recovery_token
+  sessionService.destroyAllForUser(user.id);
   res.json({ ok: true });
 });
 
