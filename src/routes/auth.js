@@ -16,11 +16,7 @@ const router = express.Router();
 // --- schemas ---
 
 const passwordSchema = z.string()
-  .min(config.auth.passwordMinLength, `Password must be at least ${config.auth.passwordMinLength} characters`)
-  .regex(/[A-Z]/, 'Password must contain an uppercase letter')
-  .regex(/[a-z]/, 'Password must contain a lowercase letter')
-  .regex(/[0-9]/, 'Password must contain a digit')
-  .regex(/[^A-Za-z0-9]/, 'Password must contain a special character');
+  .min(config.auth.passwordMinLength, `Password must be at least ${config.auth.passwordMinLength} characters`);
 
 const usernameSchema = z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/, 'Username must be alphanumeric/underscore');
 
