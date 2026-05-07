@@ -11,6 +11,7 @@
 // Usernames that will NEVER be deleted, regardless of what else is in the DB.
 const PROTECTED = new Set(['admin', 'Bryceson_McDaniels']);
 
+require('dotenv').config();
 const crypto = require('crypto');
 const userService = require('../src/services/userService');
 const { runMigrations } = require('../src/db/migrate');
