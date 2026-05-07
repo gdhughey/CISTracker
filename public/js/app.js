@@ -1759,6 +1759,16 @@ function groupLabel(g) {
   return '';
 }
 
+function groupBadgeStyle(g) {
+  const styles = {
+    am:     'background:rgba(59,130,246,0.15);color:#60a5fa',
+    pm:     'background:rgba(16,185,129,0.15);color:#34d399',
+    allday: 'background:rgba(245,158,11,0.15);color:#fbbf24',
+    staff:  'background:rgba(239,68,68,0.15);color:#f87171',
+  };
+  return styles[g] || 'background:rgba(139,92,246,0.15);color:#a78bfa';
+}
+
 async function loadUsers() {
   const container = document.getElementById('usersList');
   if (!container) return;
@@ -1800,7 +1810,7 @@ function renderUsers() {
       </div>
       <span class="role-badge role-${u.role}">${u.role}</span>
       ${u.student_group && u.student_group !== 'none'
-        ? `<span class="role-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">${groupLabel(u.student_group)}</span>`
+        ? `<span class="role-badge" style="${groupBadgeStyle(u.student_group)}">${groupLabel(u.student_group)}</span>`
         : ''}
     </div>
   `).join('');
