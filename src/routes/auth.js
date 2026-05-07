@@ -60,7 +60,10 @@ function setSessionCookie(res, sid, secure) {
 // --- routes ---
 
 router.get('/me', (req, res) => {
-  res.json({ user: req.user ? userService.pickPublic(req.user) : null });
+  res.json({
+    user: req.user ? userService.pickPublic(req.user) : null,
+    mustChangePw: req.user ? !!req.user.must_change_pw : false,
+  });
 });
 
 router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {

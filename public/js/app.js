@@ -181,7 +181,9 @@ async function handleChangePw(e) {
     toast('Password changed! Please log in again.', 'success');
     showLogin();
   } catch (err) {
-    errEl.textContent = err.error || 'Failed to change password';
+    // Show the first specific validation issue if available, otherwise fall back to generic message
+    const firstIssue = err.issues?.fieldErrors?.newPassword?.[0] || err.issues?.formErrors?.[0];
+    errEl.textContent = firstIssue || err.error || 'Failed to change password';
     errEl.style.display = 'block';
   }
 }
