@@ -44,26 +44,6 @@ const USERS = [
   { username: 'Jackson_Zuelsdorf',     email: 'jackson.zuelsdorf@students.cvtech.edu',     role: 'user',  group: 'pm' },
   { username: 'Iestin_Lane',           email: 'iestin.lane@students.cvtech.edu',           role: 'user',  group: 'pm' },
 
-  // ── AM ────────────────────────────────────────────────────────────────────
-  { username: 'Carsen_Renegar',        email: 'carsen.renegar@students.cvtech.edu',        role: 'admin', group: 'am' },
-
-  { username: 'Simeon_Angelov',        email: 'simeon.angelov@students.cvtech.edu',        role: 'user',  group: 'am' },
-  { username: 'Zayden_Arney',          email: 'zayden.arney@students.cvtech.edu',          role: 'user',  group: 'am' },
-  { username: 'Isaiah_Boice',          email: 'isaiah.boice@students.cvtech.edu',          role: 'user',  group: 'am' },
-  { username: 'Mai_Brouhard',          email: 'mai.brouhard@students.cvtech.edu',          role: 'user',  group: 'am' },
-  { username: 'Rylen_Chamberlain',     email: 'rylen.chamberlain@students.cvtech.edu',     role: 'user',  group: 'am' },
-  { username: 'Alyssa_Deakins',        email: 'alyssa.deakins@students.cvtech.edu',        role: 'user',  group: 'am' },
-  { username: 'Jacob_Faerber',         email: 'jacob.faerber@students.cvtech.edu',         role: 'user',  group: 'am' },
-  { username: 'Robert_Genzler',        email: 'robert.genzler@students.cvtech.edu',        role: 'user',  group: 'am' },
-  { username: 'Huy_Huynh',             email: 'huy.huynh@students.cvtech.edu',             role: 'user',  group: 'am' },
-  { username: 'Devon_James',           email: 'devon.james@students.cvtech.edu',           role: 'user',  group: 'am' },
-  { username: 'Luke_Labus',            email: 'luke.labus@students.cvtech.edu',            role: 'user',  group: 'am' },
-  { username: 'Eric_Pouncy',           email: 'eric.pouncy@students.cvtech.edu',           role: 'user',  group: 'am' },
-  { username: 'Grant_Rayburn',         email: 'grant.rayburn@students.cvtech.edu',         role: 'user',  group: 'am' },
-  { username: 'Cooper_Remy',           email: 'cooper.remy@students.cvtech.edu',           role: 'user',  group: 'am' },
-  { username: 'Cole_Washington',       email: 'cole.washington@students.cvtech.edu',       role: 'user',  group: 'am' },
-  { username: 'Braxton_Wood',          email: 'braxton.wood@students.cvtech.edu',          role: 'user',  group: 'am' },
-
   // ── All Day ───────────────────────────────────────────────────────────────
   { username: 'Garrett_Hughey',        email: 'garrett.hughey@students.cvtech.edu',        role: 'admin', group: 'allday' },
   { username: 'Bryceson_McDaniels',    email: 'bryceson.mcdaniels@students.cvtech.edu',    role: 'admin', group: 'allday' },
