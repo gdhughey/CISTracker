@@ -20,6 +20,16 @@ function queueLength(equipmentId) {
   return row ? row.cnt : 0;
 }
 
+/** Fetch all queue lengths in one query. Returns a Map of equipment_id → count. */
+function allQueueLengths() {
+  const rows = db.prepare(
+    'SELECT equipment_id, COUNT(*) AS cnt FROM equipment_queue GROUP BY equipment_id'
+  ).all();
+  const map = new Map();
+  for (const r of rows) map.set(r.equipment_id, r.cnt);
+  return map;
+}
+
 /** Join the queue. Returns the new queue entry. */
 function join(equipmentId, userId) {
   // Already in queue?
@@ -101,4 +111,4 @@ function getUserQueues(userId) {
   `).all(userId);
 }
 
-module.exports = { getQueue, queueLength, join, leave, removeUser, popNext, getUserQueues };
+module.exports = { getQueue, queueLength, allQueueLengths, join, leave, removeUser, popNext, getUserQueues };

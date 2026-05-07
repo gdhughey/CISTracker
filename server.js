@@ -1,6 +1,7 @@
 'use strict';
 const path = require('path');
 const express = require('express');
+const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const config = require('./src/config');
 const helmetMw = require('./src/middleware/helmet');
@@ -27,6 +28,7 @@ const app = express();
 if (config.trustProxy) app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
+app.use(compression());
 app.use(helmetMw);
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: false, limit: '5mb' }));
