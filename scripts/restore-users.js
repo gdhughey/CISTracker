@@ -74,7 +74,7 @@ const USERS = [
   { username: 'Clarence_Woodberry',    email: 'clarence.woodberry@students.cvtech.edu',    role: 'user',  group: 'allday' },
 ];
 
-const APP_URL  = process.env.APP_URL || 'https://cistracker.net';
+const APP_URL  = 'https://cistracker.net';
 const API_KEY  = process.env.RESEND_API_KEY || '';
 const FROM     = process.env.RESEND_FROM || 'CISTracker <noreply@cistracker.net>';
 const SEND_EMAIL = !!API_KEY;
