@@ -5,37 +5,42 @@ set -euo pipefail
 # Tested target: Ubuntu 22.04/24.04 or Debian 12
 #
 # What this does:
-# - Installs Node.js 20, Git, SQLite, Nginx, OpenSSL, mkcert, and build tools
+# - Installs Node.js 20, Git, SQLite, Nginx, and build tools
 # - Clones https://github.com/gdhughey/CISTracker into /opt/CISTracker
 # - Creates a system user, .env with a generated SESSION_SECRET
 # - Installs npm dependencies (with mirror fallback for restricted networks)
 # - Runs database migration/seed scripts
 # - Creates a systemd service named cistracker
-# - Configures Nginx HTTPS reverse proxy on port 443 (with mkcert local CA)
-#   when STATIC_IP is provided; falls back to HTTP on port 80 otherwise
+# - Configures Nginx HTTPS reverse proxy on port 443
+#     • With CF_API_TOKEN: real Let's Encrypt cert via Cloudflare DNS-01 challenge
+#       (works behind Cloudflare proxy; no port 80 exposure needed)
+#     • Without CF_API_TOKEN but with STATIC_IP: mkcert self-signed cert (LAN-only)
+#     • Neither: HTTP on port 80 only
 # - Adds SSH on port 2222 for Tailscale remote access
 # - (Optional) Installs Tailscale for remote SSH maintenance
 #
 # This script is idempotent. It is safe to re-run on a partially installed host.
 #
-# Usage:
+# Usage (with Cloudflare — recommended for cistracker.net):
+#   sudo CF_API_TOKEN=<token> STATIC_IP=<server-public-ip> bash install-cistracker.sh
+#
+#   The Cloudflare API token needs Zone → DNS → Edit permission for cistracker.net.
+#   Create one at: https://dash.cloudflare.com/profile/api-tokens
+#
+# Usage (LAN-only, no Cloudflare):
 #   sudo STATIC_IP=10.0.2.10 bash install-cistracker.sh
 #
-# If your LAN uses different gateway/DNS, override them:
-#   sudo STATIC_IP=10.0.2.10 GATEWAY=192.168.1.1 DNS_SERVER=192.168.1.1 bash install-cistracker.sh
-#
 # All options (pass as env vars):
-#   STATIC_IP        LAN IP to assign to this server (required for HTTPS)
+#   CF_API_TOKEN     Cloudflare API token (Zone:DNS:Edit) — enables Let's Encrypt DNS-01
+#   CERT_EMAIL       Email for Let's Encrypt account (default: admin@<DOMAIN>)
+#   STATIC_IP        Server's IP address (public or LAN, required for HTTPS)
 #   STATIC_NETMASK   CIDR prefix length (default: 16)
 #   GATEWAY          LAN default gateway (default: 10.0.255.1)
 #   DNS_SERVER       LAN DNS server IP (default: 10.2.201.4)
 #   DOMAIN           App domain name (default: cistracker.net)
 #   SSH_EXTRA_PORT   Extra SSH port for Tailscale access (default: 2222)
 #   SKIP_TAILSCALE   Set to 1 to skip Tailscale install (default: 0)
-#   MKCERT_VERSION   mkcert binary version (default: v1.4.4)
-#
-# To skip Tailscale:
-#   sudo STATIC_IP=10.0.2.10 SKIP_TAILSCALE=1 bash install-cistracker.sh
+#   MKCERT_VERSION   mkcert binary version used for LAN-only fallback (default: v1.4.4)
 
 APP_NAME="cistracker"
 REPO_URL="${REPO_URL:-https://github.com/gdhughey/CISTracker.git}"
@@ -45,14 +50,16 @@ APP_PORT="${APP_PORT:-3000}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 NPM_PRIMARY_REGISTRY="${NPM_PRIMARY_REGISTRY:-https://registry.npmjs.org/}"
 NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}"
+CF_API_TOKEN="${CF_API_TOKEN:-}"          # Cloudflare API token (Zone:DNS:Edit)
+CERT_EMAIL="${CERT_EMAIL:-}"             # Let's Encrypt account email
 STATIC_IP="${STATIC_IP:-}"
-STATIC_NETMASK="${STATIC_NETMASK:-16}"        # /16 = 255.255.0.0 — change to 24 for typical /24 LANs
-GATEWAY="${GATEWAY:-10.0.255.1}"               # site-specific — set via env var if different
-DNS_SERVER="${DNS_SERVER:-10.2.201.4}"         # site-specific — set via env var if different
-DOMAIN="${DOMAIN:-cistracker.net}"             # must resolve to STATIC_IP on client machines
+STATIC_NETMASK="${STATIC_NETMASK:-16}"   # /16 = 255.255.0.0 — change to 24 for typical /24 LANs
+GATEWAY="${GATEWAY:-10.0.255.1}"         # site-specific — set via env var if different
+DNS_SERVER="${DNS_SERVER:-10.2.201.4}"   # site-specific — set via env var if different
+DOMAIN="${DOMAIN:-cistracker.net}"
 SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
-MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"
+MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"  # used only when CF_API_TOKEN is absent
 
 log() {
   echo
@@ -72,12 +79,10 @@ configure_static_ip() {
 
   log "Configuring static IP ${STATIC_IP}/${STATIC_NETMASK}"
 
-  # Detect primary non-loopback interface
   local iface
   iface="$(ip -o link show | awk '$2 != "lo:" {print $2}' | head -1 | tr -d ':')"
 
   mkdir -p /etc/netplan
-  # Write config; this overwrites any existing 00-installer-config.yaml
   cat > /etc/netplan/00-installer-config.yaml <<NETPLAN
 network:
   version: 2
@@ -168,13 +173,10 @@ create_app_user() {
 clone_or_update_repo() {
   log "Installing app into ${APP_DIR}"
 
-  # Avoid git "dubious ownership" / safe.directory failures regardless of
-  # who previously owned APP_DIR.
   git config --global --add safe.directory "${APP_DIR}" || true
 
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Existing repository found. Pulling latest main"
-    # Fix ownership before any git ops so fetch/pull succeed cleanly.
     chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
     sudo -u "${APP_USER}" git -C "${APP_DIR}" fetch origin
     sudo -u "${APP_USER}" git -C "${APP_DIR}" checkout main
@@ -193,12 +195,10 @@ clone_or_update_repo() {
 }
 
 detect_app_url() {
-  # If a static IP and domain are configured, the app is served over HTTPS.
   if [[ -n "${STATIC_IP}" ]]; then
     echo "https://${DOMAIN}"
     return
   fi
-  # Otherwise use the LAN IP (no outbound internet call).
   local ip=""
   ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
   if [[ -n "${ip}" ]]; then
@@ -232,7 +232,6 @@ EOF
     log "Wrote new ${env_path}"
   else
     log "${env_path} already exists. Ensuring required keys are present."
-    # Ensure each key exists; do not overwrite existing values.
     ensure_env_kv "${env_path}" NODE_ENV production
     ensure_env_kv "${env_path}" PORT "${APP_PORT}"
     ensure_env_kv "${env_path}" DB_PATH "./data/cyberlab.db"
@@ -259,7 +258,6 @@ ensure_env_kv() {
 }
 
 run_npm_install() {
-  # Run an npm install/ci command as APP_USER. Returns its exit code.
   local cmd="$1"
   if [[ "${cmd}" == "ci" ]]; then
     sudo -u "${APP_USER}" npm ci --omit=dev
@@ -277,7 +275,6 @@ install_app_dependencies() {
     cmd="ci"
   fi
 
-  # Ensure the user-level npm config starts on the canonical registry.
   sudo -u "${APP_USER}" npm config set registry "${NPM_PRIMARY_REGISTRY}" >/dev/null 2>&1 || true
 
   if run_npm_install "${cmd}"; then
@@ -292,8 +289,6 @@ install_app_dependencies() {
       echo "npm ${cmd} failed against both ${NPM_PRIMARY_REGISTRY} and ${NPM_FALLBACK_REGISTRY}." >&2
       exit 1
     fi
-    # Restore the canonical registry once the install succeeded so future
-    # operations on this host hit npmjs by default.
     sudo -u "${APP_USER}" npm config set registry "${NPM_PRIMARY_REGISTRY}" >/dev/null 2>&1 || true
   fi
 }
@@ -367,6 +362,46 @@ EOF
   systemctl restart "${APP_NAME}"
 }
 
+# ── TLS: Let's Encrypt via Cloudflare DNS-01 (primary) ──────────────────────
+
+install_certbot() {
+  log "Installing certbot and Cloudflare DNS plugin"
+  apt-get install -y certbot python3-certbot-dns-cloudflare
+}
+
+setup_letsencrypt_cf() {
+  log "Obtaining Let's Encrypt certificate for ${DOMAIN} via Cloudflare DNS-01"
+
+  # Credentials file — readable only by root
+  mkdir -p /etc/letsencrypt
+  cat > /etc/letsencrypt/cloudflare.ini <<EOF
+dns_cloudflare_api_token = ${CF_API_TOKEN}
+EOF
+  chmod 600 /etc/letsencrypt/cloudflare.ini
+
+  local email="${CERT_EMAIL:-admin@${DOMAIN}}"
+
+  # --keep-until-expiring makes this idempotent — skips renewal if cert is
+  # still valid, re-issues if it's within 30 days of expiry.
+  certbot certonly \
+    --dns-cloudflare \
+    --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+    --dns-cloudflare-propagation-seconds 30 \
+    --domain "${DOMAIN}" \
+    --email "${email}" \
+    --agree-tos \
+    --non-interactive \
+    --keep-until-expiring
+
+  log "Certificate issued:"
+  log "  Chain:  /etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+  log "  Key:    /etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+  log "Auto-renewal: certbot installs a systemd timer (certbot.timer) — verify with:"
+  log "  systemctl status certbot.timer"
+}
+
+# ── TLS: mkcert self-signed fallback (LAN-only, no Cloudflare token) ────────
+
 install_mkcert() {
   if command -v mkcert >/dev/null 2>&1; then
     log "mkcert already installed ($(mkcert --version 2>/dev/null || echo unknown))"
@@ -382,13 +417,8 @@ install_mkcert() {
   mkcert -install
 }
 
-setup_tls() {
-  if [[ -z "${STATIC_IP}" ]]; then
-    log "No STATIC_IP set — skipping TLS cert generation"
-    return
-  fi
-
-  log "Generating TLS certificate for ${DOMAIN}"
+setup_mkcert_cert() {
+  log "Generating mkcert certificate for ${DOMAIN} (LAN-only — not trusted by Cloudflare)"
 
   mkdir -p /etc/ssl/cistracker
 
@@ -397,7 +427,6 @@ setup_tls() {
     -key-file  /etc/ssl/cistracker/key.pem \
     "${DOMAIN}"
 
-  # Export CA root so the operator can distribute it via Group Policy
   local caroot
   caroot="$(mkcert -CAROOT)"
   cp "${caroot}/rootCA.pem" /etc/ssl/cistracker/rootCA.crt
@@ -407,19 +436,85 @@ setup_tls() {
 
   log "Cert:    /etc/ssl/cistracker/cert.pem"
   log "Key:     /etc/ssl/cistracker/key.pem"
-  log "CA root: /etc/ssl/cistracker/rootCA.crt  (copy to Windows Server for Group Policy)"
+  log "CA root: /etc/ssl/cistracker/rootCA.crt  (distribute via Group Policy for LAN trust)"
 }
+
+# ── Dispatcher ───────────────────────────────────────────────────────────────
+
+setup_tls() {
+  if [[ -z "${STATIC_IP}" ]]; then
+    log "No STATIC_IP set — skipping TLS setup"
+    return
+  fi
+
+  if [[ -n "${CF_API_TOKEN}" ]]; then
+    install_certbot
+    setup_letsencrypt_cf
+  else
+    warn "CF_API_TOKEN not set — falling back to mkcert self-signed cert (LAN-only)."
+    warn "Cloudflare proxy requires a real cert. Set CF_API_TOKEN to fix this."
+    install_mkcert
+    setup_mkcert_cert
+  fi
+}
+
+# ── Nginx ────────────────────────────────────────────────────────────────────
+
+# Cloudflare publishes its full IP list at:
+#   https://www.cloudflare.com/ips-v4  /  https://www.cloudflare.com/ips-v6
+# nginx's real_ip module uses these to restore the original visitor IP from the
+# CF-Connecting-IP header, so the app sees real client IPs (not Cloudflare's).
+CF_IPV4_RANGES="
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;"
+
+CF_IPV6_RANGES="
+    set_real_ip_from 2400:cb00::/32;
+    set_real_ip_from 2606:4700::/32;
+    set_real_ip_from 2803:f800::/32;
+    set_real_ip_from 2405:b500::/32;
+    set_real_ip_from 2405:8100::/32;
+    set_real_ip_from 2a06:98c0::/29;
+    set_real_ip_from 2c0f:f248::/32;"
 
 configure_nginx() {
   log "Configuring Nginx reverse proxy"
 
   if [[ -n "${STATIC_IP}" ]]; then
-    # HTTPS — port 80 redirects to 443; TLS terminates here with mkcert cert.
+    # Decide cert paths based on which TLS path ran
+    local cert_pem key_pem
+    if [[ -n "${CF_API_TOKEN}" ]]; then
+      cert_pem="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+      key_pem="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+    else
+      cert_pem="/etc/ssl/cistracker/cert.pem"
+      key_pem="/etc/ssl/cistracker/key.pem"
+    fi
+
     cat > "/etc/nginx/sites-available/${APP_NAME}" <<EOF
+# Restore real visitor IP when traffic arrives through Cloudflare proxy
+${CF_IPV4_RANGES}
+${CF_IPV6_RANGES}
+    real_ip_header CF-Connecting-IP;
+
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
+    # Cloudflare handles the browser→CF leg; this redirects CF→origin on port 80
     return 301 https://\$host\$request_uri;
 }
 
@@ -428,8 +523,8 @@ server {
     listen [::]:443 ssl;
     server_name ${DOMAIN};
 
-    ssl_certificate     /etc/ssl/cistracker/cert.pem;
-    ssl_certificate_key /etc/ssl/cistracker/key.pem;
+    ssl_certificate     ${cert_pem};
+    ssl_certificate_key ${key_pem};
 
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
@@ -451,7 +546,7 @@ server {
 }
 EOF
   else
-    # HTTP only — no static IP means no TLS cert available.
+    # HTTP only
     cat > "/etc/nginx/sites-available/${APP_NAME}" <<EOF
 server {
     listen 80;
@@ -482,9 +577,8 @@ EOF
 
 configure_firewall() {
   if command -v ufw >/dev/null 2>&1; then
-    log "Configuring UFW firewall rules (only takes effect if ufw is enabled)"
+    log "Configuring UFW firewall rules"
     ufw allow 'Nginx Full' >/dev/null 2>&1 || true
-    # Block direct access to Node.js port — nginx is the only entry point
     ufw deny 3000/tcp >/dev/null 2>&1 || true
   fi
 }
@@ -515,10 +609,6 @@ configure_ssh_port() {
   log "Adding SSH port ${SSH_EXTRA_PORT}"
 
   local sshd_config="/etc/ssh/sshd_config"
-
-  # Remove any existing Port directives and replace with only the extra port.
-  # Port 22 is intentionally NOT opened — SSH is only reachable via Tailscale on
-  # SSH_EXTRA_PORT (default 2222). This keeps the firewall surface minimal.
   sed -i '/^Port /d' "${sshd_config}"
   echo "Port ${SSH_EXTRA_PORT}" >> "${sshd_config}"
 
@@ -550,21 +640,32 @@ print_summary() {
   echo
 
   if [[ -n "${STATIC_IP}" ]]; then
-    echo "Website (LAN):"
+    echo "Website:"
     echo "  https://${DOMAIN}"
     echo
-    echo "CA cert for Group Policy — copy this file to your Windows Server:"
-    echo "  /etc/ssl/cistracker/rootCA.crt"
-    echo
-    echo "  From a Windows machine on the LAN:"
-    echo "    scp ${SUDO_USER:-root}@${STATIC_IP}:/etc/ssl/cistracker/rootCA.crt ."
-    echo
-    echo "  Then in Group Policy Management:"
-    echo "    Computer Configuration → Policies → Windows Settings → Security Settings"
-    echo "    → Public Key Policies → Trusted Root Certification Authorities → Import"
-    echo
+
+    if [[ -n "${CF_API_TOKEN}" ]]; then
+      echo "SSL: Let's Encrypt (trusted everywhere)"
+      echo "  Cert: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+      echo "  Auto-renewal: systemctl status certbot.timer"
+      echo
+      echo "Cloudflare SSL mode: set to 'Full (Strict)' in Cloudflare dashboard"
+      echo "  https://dash.cloudflare.com → cistracker.net → SSL/TLS → Overview"
+      echo
+    else
+      echo "SSL: mkcert self-signed (LAN-only — not trusted by Cloudflare)"
+      echo "  CA root: /etc/ssl/cistracker/rootCA.crt"
+      echo "  Distribute via Group Policy to trust on LAN machines."
+      echo
+      echo "  From a Windows machine:"
+      echo "    scp ${SUDO_USER:-root}@${lan_ip}:/etc/ssl/cistracker/rootCA.crt ."
+      echo "  Then import into:"
+      echo "    Computer Configuration → Policies → Windows Settings → Security Settings"
+      echo "    → Public Key Policies → Trusted Root Certification Authorities → Import"
+      echo
+    fi
   else
-    echo "Website (LAN, HTTP only — no STATIC_IP was provided):"
+    echo "Website (HTTP only — no STATIC_IP was provided):"
     echo "  http://${lan_ip}"
     echo
   fi
@@ -584,7 +685,6 @@ main() {
   configure_static_ip
   install_system_packages
   install_node
-  install_mkcert
   setup_tls
   create_app_user
   clone_or_update_repo
