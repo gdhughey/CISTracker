@@ -1482,7 +1482,7 @@ async function openTicket(id) {
   const detail = document.getElementById('ticketDetail');
   detail.classList.remove('hidden');
   try {
-    const { ticket, comments } = await api(`/api/tickets/${id}`);
+    const { ticket, comments, attachments = [] } = await api(`/api/tickets/${id}`);
     const isAdmin = ME.role === 'admin';
     const assignedToMe = ticket.assigned_to === ME.id;
     const isAssigned = !!ticket.assigned_to;
@@ -1519,6 +1519,25 @@ async function openTicket(id) {
       <div style="font-size:13px;line-height:1.7;padding:16px;background:var(--bg-surface);border-radius:10px;border:1px solid var(--border)">
         ${esc(ticket.description || 'No description').replace(/\n/g, '<br>')}
       </div>
+      ${attachments.length > 0 ? `
+        <div style="margin-top:12px">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Attachments (${attachments.length})</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            ${attachments.map(a => {
+              const url = `/uploads/tickets/${esc(a.filename)}`;
+              const isImage = a.mimetype.startsWith('image/');
+              const isVideo = a.mimetype.startsWith('video/');
+              if (isImage) {
+                return `<a href="${url}" target="_blank" style="display:block;border-radius:8px;overflow:hidden;border:1px solid var(--border)"><img src="${url}" alt="${esc(a.original_name)}" style="max-width:200px;max-height:150px;display:block;object-fit:cover"></a>`;
+              } else if (isVideo) {
+                return `<video src="${url}" controls style="max-width:300px;max-height:200px;border-radius:8px;border:1px solid var(--border)"></video>`;
+              } else {
+                return `<a href="${url}" download="${esc(a.original_name)}" style="padding:8px 12px;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text);text-decoration:none">📎 ${esc(a.original_name)}</a>`;
+              }
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
       ${isAdmin ? `
         <div style="display:flex;gap:8px;margin-top:12px">
           <select id="ticketStatusSelect" onchange="updateTicketStatus(${id})" style="padding:8px;border-radius:8px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:12px">
@@ -1621,6 +1640,10 @@ function openNewTicketModal() {
         </select>
       </div>
       <div class="form-group"><label>Description</label><textarea id="ticketDesc" rows="4" placeholder="Detailed description…"></textarea></div>
+      <div class="form-group">
+        <label>Attachment <span style="color:var(--text-muted);font-weight:400">(optional — image or video, max 25MB)</span></label>
+        <input type="file" id="ticketFile" accept="image/*,video/mp4,video/quicktime,video/webm" style="width:100%;padding:8px 0;color:var(--text)">
+      </div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
         <button class="btn-primary" onclick="submitTicket()">Submit Ticket</button>
@@ -1634,7 +1657,7 @@ async function submitTicket() {
   const subject = document.getElementById('ticketSubject')?.value?.trim();
   if (!subject) { toast('Subject is required', 'error'); return; }
   try {
-    await api('/api/tickets', {
+    const { ticket } = await api('/api/tickets', {
       method: 'POST',
       body: {
         subject,
@@ -1642,6 +1665,21 @@ async function submitTicket() {
         description: document.getElementById('ticketDesc')?.value || '',
       },
     });
+    const fileInput = document.getElementById('ticketFile');
+    if (fileInput && fileInput.files.length > 0) {
+      const form = new FormData();
+      form.append('file', fileInput.files[0]);
+      const csrfToken = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+      const resp = await fetch(`/api/tickets/${ticket.id}/attachments`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': decodeURIComponent(csrfToken) },
+        body: form,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        toast('Ticket created but file upload failed: ' + (err.error || 'unknown error'), 'error');
+      }
+    }
     toast('Ticket submitted!', 'success');
     closeModal();
     loadTickets();

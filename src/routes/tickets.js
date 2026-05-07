@@ -1,11 +1,41 @@
 'use strict';
+const path = require('path');
+const crypto = require('crypto');
+const fs = require('fs');
 const express = require('express');
 const { z } = require('zod');
+const multer = require('multer');
+const db = require('../db/connection');
 const ticketService = require('../services/ticketService');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { stripHtml } = require('../utils/sanitize');
 const emailService = require('../services/emailService');
+
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'public', 'uploads', 'tickets');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const ALLOWED_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'video/mp4', 'video/quicktime', 'video/webm',
+]);
+
+const storage = multer.diskStorage({
+  destination: UPLOAD_DIR,
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '');
+    cb(null, crypto.randomBytes(16).toString('hex') + ext);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_TYPES.has(file.mimetype)) cb(null, true);
+    else cb(new Error('Only images and videos are allowed'));
+  },
+});
 
 const router = express.Router();
 router.use(requireAuth);
@@ -29,6 +59,12 @@ const commentSchema = z.object({
   body: z.string().min(1).max(5000).transform(stripHtml),
 });
 
+function getAttachments(ticketId) {
+  return db.prepare(
+    'SELECT * FROM ticket_attachments WHERE ticket_id = ? ORDER BY created_at ASC'
+  ).all(ticketId);
+}
+
 // List tickets — admins see all, users see their own
 router.get('/', (req, res) => {
   const opts = { limit: Math.min(parseInt(req.query.limit, 10) || 100, 500) };
@@ -46,12 +82,12 @@ router.get('/counts', (req, res) => {
 router.get('/:id(\\d+)', (req, res) => {
   const ticket = ticketService.getById(parseInt(req.params.id, 10));
   if (!ticket) return res.status(404).json({ error: 'Not found' });
-  // Non-admins can only see their own tickets
   if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const comments = ticketService.getComments(ticket.id);
-  res.json({ ticket, comments });
+  const attachments = getAttachments(ticket.id);
+  res.json({ ticket, comments, attachments });
 });
 
 // Create ticket
@@ -68,26 +104,44 @@ router.post('/', validate(createSchema), (req, res) => {
   res.status(201).json({ ticket });
 });
 
+// Upload attachment
+router.post('/:id(\\d+)/attachments', (req, res, next) => {
+  const id = parseInt(req.params.id, 10);
+  const ticket = ticketService.getById(id);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && ticket.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  upload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const info = db.prepare(`
+      INSERT INTO ticket_attachments (ticket_id, filename, original_name, mimetype, size, uploaded_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.user.id);
+    const attachment = db.prepare('SELECT * FROM ticket_attachments WHERE id = ?').get(info.lastInsertRowid);
+    req.audit('ticket_attachment', String(id), { file: req.file.originalname });
+    res.status(201).json({ attachment });
+  });
+});
+
 // Update ticket (admin only for status/assignment, owner for subject/description)
 router.put('/:id(\\d+)', validate(updateSchema), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const ticket = ticketService.getById(id);
   if (!ticket) return res.status(404).json({ error: 'Not found' });
-  // Non-admins can only update their own ticket's subject/description
   if (req.user.role !== 'admin') {
     if (ticket.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     const { subject, description } = req.body;
     const updated = ticketService.update(id, { subject, description });
     return res.json({ ticket: updated });
   }
-  // Detect assignment changes for a more useful audit entry
-  const becameAssignee   = req.body.assigned_to !== undefined && req.body.assigned_to === req.user.id && ticket.assigned_to !== req.user.id;
+  const becameAssignee    = req.body.assigned_to !== undefined && req.body.assigned_to === req.user.id && ticket.assigned_to !== req.user.id;
   const droppedAssignment = req.body.assigned_to === null && ticket.assigned_to === req.user.id;
   const reassignedToOther = req.body.assigned_to !== undefined && req.body.assigned_to !== null && req.body.assigned_to !== ticket.assigned_to;
 
   const updated = ticketService.update(id, req.body);
 
-  // Notify reporter when status changes (skip if they're the one making the change).
   if (req.body.status && req.body.status !== ticket.status && updated.reporter_email && updated.user_id !== req.user.id) {
     emailService.sendTicketStatusUpdate(
       { username: updated.reporter_username, email: updated.reporter_email },
