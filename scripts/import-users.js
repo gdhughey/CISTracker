@@ -135,7 +135,8 @@ async function main() {
 
   runMigrations();
 
-  let created = 0, skipped = 0, failed = 0, emailed = 0, emailFailed = 0;
+  let created = 0, skipped = 0, failed = 0;
+  const toEmail = [];
 
   for (const u of users) {
     const byUsername = userService.getByUsername(u.username);
@@ -161,19 +162,25 @@ async function main() {
       userService.updateStudentGroup(created_user.id, u.group);
       created++;
       console.log(`OK    ${u.username.padEnd(28)} ${u.role.padEnd(5)} ${u.group}`);
-
-      if (SEND_EMAIL) {
-        try {
-          await sendWelcomeEmail(u);
-          emailed++;
-        } catch (err) {
-          console.warn(`      └ email failed: ${err.message}`);
-          emailFailed++;
-        }
-      }
+      if (SEND_EMAIL) toEmail.push(u);
     } catch (err) {
       console.error(`FAIL  ${u.username.padEnd(28)} ${err.message}`);
       failed++;
+    }
+  }
+
+  // Send all welcome emails in parallel
+  let emailed = 0, emailFailed = 0;
+  if (SEND_EMAIL && toEmail.length) {
+    console.log(`\nSending ${toEmail.length} welcome emails in parallel...`);
+    const results = await Promise.allSettled(toEmail.map(u => sendWelcomeEmail(u)));
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === 'fulfilled') {
+        emailed++;
+      } else {
+        console.warn(`  └ email failed for ${toEmail[i].username}: ${results[i].reason?.message}`);
+        emailFailed++;
+      }
     }
   }
 
