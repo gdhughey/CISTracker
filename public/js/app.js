@@ -350,6 +350,7 @@ function switchView(view) {
     markTicketsSeen();
   }
   if (view === 'users') loadUsers();
+  if (view === 'locations') loadLocations();
   if (view === 'audit') loadAudit();
   if (view === 'passkeys') loadPasskeys();
 }
@@ -1525,6 +1526,7 @@ async function submitTicket() {
 
 async function loadUsers() {
   const container = document.getElementById('usersList');
+  if (!container) return;
   try {
     const { users } = await api('/api/admin/users');
     container.innerHTML = users.map(u => `
@@ -1535,6 +1537,9 @@ async function loadUsers() {
           <div class="user-email">${esc(u.email || '—')}</div>
         </div>
         <span class="role-badge role-${u.role}">${u.role}</span>
+        ${u.student_group && u.student_group !== 'none'
+          ? `<span class="role-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">${u.student_group === 'allday' ? 'All Day' : u.student_group.toUpperCase()}</span>`
+          : ''}
       </div>
     `).join('');
   } catch {
@@ -1561,9 +1566,10 @@ async function openUserDetail(id) {
           <button class="btn-outline btn-sm" onclick="toggleRole(${u.id},'${u.role === 'admin' ? 'user' : 'admin'}')">
             ${u.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
           </button>
+          <button class="btn-outline btn-sm" onclick="changeUserGroup(${u.id}, '${u.student_group || 'none'}')">Change Group</button>
           <button class="btn-outline btn-sm" onclick="changeUserEmail(${u.id}, ${JSON.stringify(u.email || '').replace(/"/g, '&quot;')})">Change Email</button>
           <button class="btn-outline btn-sm" onclick="resetUserPw(${u.id})">Reset Password</button>
-          <button class="btn-outline btn-sm btn-red" onclick="deleteUser(${u.id})">Delete User</button>
+          <button class="btn-outline btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteUser(${u.id})">Delete User</button>
         </div>
         ${data.currentCheckouts && data.currentCheckouts.length > 0 ? `
           <div style="margin-top:16px">
@@ -1678,13 +1684,22 @@ function openCreateUserModal() {
   modal.innerHTML = `
     <div class="modal-title">Add User</div>
     <div class="modal-body">
-      <div class="form-group"><label>Username *</label><input id="newUsername" required></div>
-      <div class="form-group"><label>Email *</label><input id="newEmail" type="email" required></div>
+      <div class="form-group"><label>Username *</label><input id="newUsername" class="form-input" autofocus></div>
+      <div class="form-group"><label>Email *</label><input id="newEmail" type="email" class="form-input"></div>
       <div class="form-group">
         <label>Role</label>
         <select id="newRole" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
           <option value="user">User</option>
           <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Student Group</label>
+        <select id="newGroup" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
+          <option value="none">No Group (Admin / Staff)</option>
+          <option value="am">AM Students (morning only)</option>
+          <option value="pm">PM Students (afternoon only)</option>
+          <option value="allday">All Day Students</option>
         </select>
       </div>
       <div class="info-strip">A temporary password will be generated and shown to you. Give it to the user directly — they must change it on first login.</div>
@@ -1699,12 +1714,13 @@ function openCreateUserModal() {
 
 async function submitCreateUser() {
   try {
-    const { user, tempPassword } = await api('/api/admin/users', {
+    const { tempPassword } = await api('/api/admin/users', {
       method: 'POST',
       body: {
         username: document.getElementById('newUsername').value,
         email: document.getElementById('newEmail').value,
         role: document.getElementById('newRole').value,
+        student_group: document.getElementById('newGroup').value,
       },
     });
     loadUsers();
@@ -1712,6 +1728,165 @@ async function submitCreateUser() {
   } catch (err) {
     toast(err.error || 'Failed to create user', 'error');
   }
+}
+
+async function changeUserGroup(id, currentGroup) {
+  const choice = prompt(
+    `Change group for this user:\n  none = No Group\n  am = AM Students\n  pm = PM Students\n  allday = All Day\n\nCurrent: ${currentGroup}\nEnter new group:`,
+    currentGroup || 'none'
+  );
+  if (!choice || choice.trim() === currentGroup) return;
+  const g = choice.trim().toLowerCase();
+  if (!['am', 'pm', 'allday', 'none'].includes(g)) {
+    toast('Invalid group — use: am, pm, allday, or none', 'error'); return;
+  }
+  try {
+    await api(`/api/admin/users/${id}`, { method: 'PUT', body: { student_group: g } });
+    toast('Group updated', 'success');
+    closeModal();
+    loadUsers();
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LOCATIONS (admin)
+// ═══════════════════════════════════════════════════════════════════════
+
+let _allLocations = [];
+
+async function loadLocations() {
+  const container = document.getElementById('locationsList');
+  if (!container) return;
+  try {
+    const { locations } = await api('/api/admin/locations');
+    _allLocations = locations;
+    if (!locations.length) {
+      container.innerHTML = '<div class="empty-state"><p>No locations yet. Add your first location above.</p></div>';
+      return;
+    }
+    container.innerHTML = locations.map(loc => `
+      <div class="user-row" onclick="openEditLocationModal(${loc.id})" style="cursor:pointer">
+        <div class="user-info">
+          <div class="user-name">${esc(loc.name)}</div>
+          <div class="user-email">${[loc.building, loc.room].filter(Boolean).join(' · ') || '—'}</div>
+        </div>
+        ${loc.description
+          ? `<span style="font-size:11px;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(loc.description)}</span>`
+          : ''}
+      </div>
+    `).join('');
+  } catch {
+    container.innerHTML = '<div class="empty-state"><p>Failed to load locations</p></div>';
+  }
+}
+
+function openCreateLocationModal() {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Add Location</div>
+    <div class="form-group">
+      <label class="form-label">Name <span style="color:var(--red)">*</span></label>
+      <input id="locName" class="form-input" placeholder="e.g. Main Lab" autofocus>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Building</label>
+      <input id="locBuilding" class="form-input" placeholder="e.g. Building A">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Room</label>
+      <input id="locRoom" class="form-input" placeholder="e.g. Room 101">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input id="locDesc" class="form-input" placeholder="Optional notes about this location">
+    </div>
+    <div class="form-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitCreateLocation()">Add Location</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function submitCreateLocation() {
+  const name = document.getElementById('locName')?.value.trim();
+  if (!name) { toast('Name is required', 'error'); return; }
+  try {
+    await api('/api/admin/locations', {
+      method: 'POST',
+      body: {
+        name,
+        building:    document.getElementById('locBuilding')?.value.trim() || null,
+        room:        document.getElementById('locRoom')?.value.trim() || null,
+        description: document.getElementById('locDesc')?.value.trim() || null,
+      },
+    });
+    toast('Location added', 'success');
+    closeModal();
+    loadLocations();
+  } catch (err) { toast(err.error || 'Failed to add location', 'error'); }
+}
+
+async function openEditLocationModal(id) {
+  const loc = _allLocations.find(l => l.id === id);
+  if (!loc) { toast('Location not found', 'error'); return; }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Edit Location</div>
+    <div class="form-group">
+      <label class="form-label">Name <span style="color:var(--red)">*</span></label>
+      <input id="locName" class="form-input" value="${esc(loc.name)}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Building</label>
+      <input id="locBuilding" class="form-input" value="${esc(loc.building || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Room</label>
+      <input id="locRoom" class="form-input" value="${esc(loc.room || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input id="locDesc" class="form-input" value="${esc(loc.description || '')}">
+    </div>
+    <div class="form-actions" style="justify-content:space-between">
+      <button class="btn-outline btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteLocation(${loc.id})">Delete</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="submitEditLocation(${loc.id})">Save Changes</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function submitEditLocation(id) {
+  const name = document.getElementById('locName')?.value.trim();
+  if (!name) { toast('Name is required', 'error'); return; }
+  try {
+    await api(`/api/admin/locations/${id}`, {
+      method: 'PUT',
+      body: {
+        name,
+        building:    document.getElementById('locBuilding')?.value.trim() || null,
+        room:        document.getElementById('locRoom')?.value.trim() || null,
+        description: document.getElementById('locDesc')?.value.trim() || null,
+      },
+    });
+    toast('Location updated', 'success');
+    closeModal();
+    loadLocations();
+  } catch (err) { toast(err.error || 'Failed to update', 'error'); }
+}
+
+async function deleteLocation(id) {
+  if (!confirm('Delete this location? This cannot be undone.')) return;
+  try {
+    await api(`/api/admin/locations/${id}`, { method: 'DELETE' });
+    toast('Location deleted', 'success');
+    closeModal();
+    loadLocations();
+  } catch (err) { toast(err.error || 'Failed to delete', 'error'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

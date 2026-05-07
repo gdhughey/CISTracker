@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const db = require('../db/connection');
 const config = require('../config');
 
-const PUBLIC_FIELDS = ['id', 'username', 'email', 'role', 'mfa_enabled', 'must_change_pw', 'created_at'];
+const PUBLIC_FIELDS = ['id', 'username', 'email', 'role', 'mfa_enabled', 'must_change_pw', 'student_group', 'created_at'];
 
 function pickPublic(user) {
   if (!user) return null;
@@ -130,6 +130,12 @@ function updateEmail(id, email) {
   `).run(email, id);
 }
 
+function updateStudentGroup(id, group) {
+  db.prepare(`
+    UPDATE users SET student_group = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(group, id);
+}
+
 module.exports = {
   pickPublic,
   getById,
@@ -145,4 +151,5 @@ module.exports = {
   deleteUser,
   updateRole,
   updateEmail,
+  updateStudentGroup,
 };

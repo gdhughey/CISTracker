@@ -110,6 +110,9 @@
         <div class="nav-item" data-view="users" onclick="switchView('users')">
           Users
         </div>
+        <div class="nav-item" data-view="locations" onclick="switchView('locations')">
+          Locations
+        </div>
         <div class="nav-item" data-view="audit" onclick="switchView('audit')">
           Audit Log
         </div>
@@ -237,6 +240,17 @@
           <button class="btn-primary" onclick="openCreateUserModal()">+ Add User</button>
         </div>
         <div id="usersList"></div>
+      </div>
+    </div>
+
+    <!-- ═══ LOCATIONS VIEW (admin) ═══ -->
+    <div id="view-locations" class="hidden">
+      <div class="admin-view">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 class="view-heading">Locations</h2>
+          <button class="btn-primary" onclick="openCreateLocationModal()">+ Add Location</button>
+        </div>
+        <div id="locationsList"></div>
       </div>
     </div>
 

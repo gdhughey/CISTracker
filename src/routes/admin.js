@@ -2,12 +2,14 @@
 const crypto = require('crypto');
 const express = require('express');
 const { z } = require('zod');
+const db = require('../db/connection');
 const userService = require('../services/userService');
 const equipmentService = require('../services/equipmentService');
 const auditService = require('../services/auditService');
 const config = require('../config');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
+const { stripHtml } = require('../utils/sanitize');
 const sessionService = require('../services/sessionService');
 
 // Generates a strong 14-char temp password that meets the app's complexity
@@ -31,15 +33,19 @@ const router = express.Router();
 
 router.use(requireAuth, requireRole('admin'));
 
+const studentGroupEnum = z.enum(['am', 'pm', 'allday', 'none']);
+
 const createUserSchema = z.object({
   username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/),
   email: z.string().email(),
   password: z.string().optional(), // auto-generated if omitted
   role: z.enum(['admin', 'user']).default('user'),
+  student_group: studentGroupEnum.default('none'),
 });
 
 const updateUserSchema = z.object({
   role: z.enum(['admin', 'user']).optional(),
+  student_group: studentGroupEnum.optional(),
   reset_password: z.boolean().optional(), // true = auto-gen new temp password
   unlock: z.boolean().optional(),
   email: z.string().email().max(254).optional(),
@@ -65,8 +71,11 @@ router.post('/users', validate(createUserSchema), async (req, res) => {
   if (userService.getByEmail(req.body.email)) return res.status(409).json({ error: 'Email already registered' });
   const tempPw = genTempPassword();
   const user = await userService.createUser({ ...req.body, password: tempPw, mustChangePw: 1 });
-  req.audit('admin_create_user', req.body.username, { role: req.body.role });
-  res.status(201).json({ user: userService.pickPublic(user), tempPassword: tempPw });
+  if (req.body.student_group && req.body.student_group !== 'none') {
+    userService.updateStudentGroup(user.id, req.body.student_group);
+  }
+  req.audit('admin_create_user', req.body.username, { role: req.body.role, group: req.body.student_group });
+  res.status(201).json({ user: userService.pickPublic(userService.getById(user.id)), tempPassword: tempPw });
 });
 
 router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
@@ -97,6 +106,10 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     sessionService.destroyAllForUser(id);
     res.locals.tempPassword = resetPw;
   }
+  if (req.body.student_group !== undefined) {
+    userService.updateStudentGroup(id, req.body.student_group);
+    req.audit('admin_change_group', user.username, { group: req.body.student_group });
+  }
   if (req.body.unlock) {
     userService.clearFailedLogins(id);
     req.audit('admin_unlock_user', user.username);
@@ -126,6 +139,74 @@ router.get('/overdue', (req, res) => {
 router.get('/audit', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   res.json({ entries: auditService.recent(limit) });
+});
+
+// ── Locations CRUD ───────────────────────────────────────────────────────────
+
+const locationSchema = z.object({
+  name:        z.string().min(1).max(200).transform(stripHtml),
+  building:    z.string().max(100).optional().nullable().transform(v => stripHtml(v || '') || null),
+  room:        z.string().max(100).optional().nullable().transform(v => stripHtml(v || '') || null),
+  description: z.string().max(500).optional().nullable().transform(v => stripHtml(v || '') || null),
+});
+
+router.get('/locations', (_req, res) => {
+  const rows = db.prepare(
+    "SELECT * FROM locations ORDER BY name"
+  ).all();
+  res.json({ locations: rows });
+});
+
+router.post('/locations', validate(locationSchema), (req, res) => {
+  const { name, building, room, description } = req.body;
+  try {
+    const info = db.prepare(`
+      INSERT INTO locations (name, building, room, description)
+      VALUES (?, ?, ?, ?)
+    `).run(name, building || null, room || null, description || null);
+    const loc = db.prepare('SELECT * FROM locations WHERE id = ?').get(info.lastInsertRowid);
+    req.audit('location_create', name);
+    res.status(201).json({ location: loc });
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'A location with that name already exists' });
+    }
+    throw err;
+  }
+});
+
+router.put('/locations/:id(\\d+)', validate(locationSchema.partial()), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const loc = db.prepare('SELECT * FROM locations WHERE id = ?').get(id);
+  if (!loc) return res.status(404).json({ error: 'Not found' });
+  const { name, building, room, description } = req.body;
+  try {
+    db.prepare(`
+      UPDATE locations SET
+        name        = COALESCE(?, name),
+        building    = ?,
+        room        = ?,
+        description = ?,
+        updated_at  = datetime('now')
+      WHERE id = ?
+    `).run(name ?? null, building ?? loc.building, room ?? loc.room, description ?? loc.description, id);
+    req.audit('location_update', name ?? loc.name);
+    res.json({ location: db.prepare('SELECT * FROM locations WHERE id = ?').get(id) });
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'A location with that name already exists' });
+    }
+    throw err;
+  }
+});
+
+router.delete('/locations/:id(\\d+)', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const loc = db.prepare('SELECT * FROM locations WHERE id = ?').get(id);
+  if (!loc) return res.status(404).json({ error: 'Not found' });
+  db.prepare('DELETE FROM locations WHERE id = ?').run(id);
+  req.audit('location_delete', loc.name);
+  res.json({ ok: true });
 });
 
 module.exports = router;
