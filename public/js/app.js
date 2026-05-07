@@ -85,10 +85,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Check session
   try {
-    const { user } = await api('/api/auth/me');
-    if (user) {
-      ME = user;
-      if (user.mustChangePw) { showChangePw(); return; }
+    const data = await api('/api/auth/me');
+    if (data.user) {
+      ME = data.user;
+      if (data.mustChangePw) { showChangePw(); return; }
       showApp();
     } else {
       showLogin();
