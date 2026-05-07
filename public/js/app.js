@@ -2014,15 +2014,32 @@ async function submitCreateUser() {
 }
 
 async function changeUserGroup(id, currentGroup) {
-  const choice = prompt(
-    `Change group for this user:\n  none = No Group\n  am = AM Students\n  pm = PM Students\n  allday = All Day\n  staff = Staff\n\nCurrent: ${currentGroup}\nEnter new group:`,
-    currentGroup || 'none'
-  );
-  if (!choice || choice.trim() === currentGroup) return;
-  const g = choice.trim().toLowerCase();
-  if (!['am', 'pm', 'allday', 'staff', 'none'].includes(g)) {
-    toast('Invalid group — use: am, pm, allday, staff, or none', 'error'); return;
-  }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Change Group</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Student Group</label>
+        <select id="groupSelect" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
+          <option value="none"  ${currentGroup === 'none'   ? 'selected' : ''}>No Group</option>
+          <option value="am"    ${currentGroup === 'am'     ? 'selected' : ''}>AM Students</option>
+          <option value="pm"    ${currentGroup === 'pm'     ? 'selected' : ''}>PM Students</option>
+          <option value="allday"${currentGroup === 'allday' ? 'selected' : ''}>All Day</option>
+          <option value="staff" ${currentGroup === 'staff'  ? 'selected' : ''}>Staff</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="confirmChangeUserGroup(${id})">Save</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function confirmChangeUserGroup(id) {
+  const g = document.getElementById('groupSelect')?.value;
+  if (!g) return;
   try {
     await api(`/api/admin/users/${id}`, { method: 'PUT', body: { student_group: g } });
     toast('Group updated', 'success');
