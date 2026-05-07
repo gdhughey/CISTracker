@@ -20,9 +20,10 @@ function genTempPassword() {
   const upper  = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   const lower  = 'abcdefghjkmnpqrstuvwxyz';
   const digits = '23456789';
-  const all    = upper + lower + digits;
+  const symbol = '!@#$';
+  const all    = upper + lower + digits + symbol;
   const pick   = (set) => set[crypto.randomBytes(1)[0] % set.length];
-  let pw = pick(upper) + pick(lower) + pick(digits);
+  let pw = pick(upper) + pick(lower) + pick(digits) + pick(symbol);
   for (let i = pw.length; i < 6; i++) pw += pick(all);
   return pw.split('').sort(() => crypto.randomBytes(1)[0] - 128).join('');
 }
