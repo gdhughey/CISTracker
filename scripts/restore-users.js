@@ -130,19 +130,24 @@ async function sendWelcomeEmail(u) {
 async function main() {
   runMigrations();
 
-  let created = 0, skipped = 0, failed = 0, emailed = 0, emailFailed = 0;
+  // ── Step 1: Delete all listed users if they exist ─────────────────────────
+  console.log('Wiping existing accounts...');
+  let wiped = 0;
+  for (const u of USERS) {
+    const existing = userService.getByUsername(u.username) || userService.getByEmail(u.email);
+    if (existing) {
+      userService.deleteUser(existing.id);
+      console.log(`DEL   ${u.username.padEnd(24)}`);
+      wiped++;
+    }
+  }
+  console.log(`Wiped ${wiped} account(s)\n`);
+
+  // ── Step 2: Re-create all users fresh ────────────────────────────────────
+  let created = 0, failed = 0, emailed = 0, emailFailed = 0;
 
   for (const u of USERS) {
     try {
-      const dupUser  = userService.getByUsername(u.username);
-      const dupEmail = userService.getByEmail(u.email);
-      if (dupUser || dupEmail) {
-        const why = dupUser ? 'username' : 'email';
-        console.log(`SKIP  ${u.username.padEnd(24)} (${why} already in use)`);
-        skipped++;
-        continue;
-      }
-
       const tempPw = genTempPassword();
       const created_user = await userService.createUser({
         username: u.username,
@@ -151,10 +156,8 @@ async function main() {
         role:     u.role,
         mustChangePw: 1,
       });
-      u.password = tempPw; // make available for email
-      if (u.group && u.group !== 'none') {
-        userService.updateStudentGroup(created_user.id, u.group);
-      }
+      u.password = tempPw;
+      userService.updateStudentGroup(created_user.id, u.group);
       created++;
       console.log(`OK    ${u.username.padEnd(24)} ${u.role.padEnd(5)} ${u.group}`);
 
@@ -176,7 +179,6 @@ async function main() {
   console.log('───────────────────────────────────────────');
   console.log(`Total:        ${USERS.length}`);
   console.log(`Created:      ${created}`);
-  console.log(`Skipped:      ${skipped}`);
   console.log(`Failed:       ${failed}`);
   if (SEND_EMAIL) {
     console.log(`Emails sent:  ${emailed}`);
