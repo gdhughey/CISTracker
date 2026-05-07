@@ -1524,27 +1524,94 @@ async function submitTicket() {
 //  USERS (admin)
 // ═══════════════════════════════════════════════════════════════════════
 
+let _allUsers = [];
+let _userRoleFilter = 'all';
+let _userGroupFilter = 'all';
+
+function getInitials(user) {
+  const u = user.username || '';
+  // Try common separators (dot, underscore, dash, space)
+  const parts = u.split(/[._\s-]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  // Try camelCase boundary (e.g. garrettH -> GH)
+  const camel = u.match(/^([a-z])([A-Z])/);
+  if (camel) return (camel[1] + camel[2]).toUpperCase();
+  // Fall back to first two letters of username
+  if (u.length >= 2) return u.slice(0, 2).toUpperCase();
+  return (u[0] || '?').toUpperCase();
+}
+
+function groupLabel(g) {
+  if (g === 'allday') return 'All Day';
+  if (g === 'staff')  return 'Staff';
+  if (g === 'am')     return 'AM';
+  if (g === 'pm')     return 'PM';
+  return '';
+}
+
 async function loadUsers() {
   const container = document.getElementById('usersList');
   if (!container) return;
   try {
     const { users } = await api('/api/admin/users');
-    container.innerHTML = users.map(u => `
-      <div class="user-row" onclick="openUserDetail(${u.id})">
-        <div class="avatar">${u.username[0].toUpperCase()}</div>
-        <div class="user-info">
-          <div class="user-name">${esc(u.username)}</div>
-          <div class="user-email">${esc(u.email || '—')}</div>
-        </div>
-        <span class="role-badge role-${u.role}">${u.role}</span>
-        ${u.student_group && u.student_group !== 'none'
-          ? `<span class="role-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">${u.student_group === 'allday' ? 'All Day' : u.student_group.toUpperCase()}</span>`
-          : ''}
-      </div>
-    `).join('');
+    _allUsers = users;
+    renderUsers();
   } catch {
     container.innerHTML = '<div class="empty-state"><p>Failed to load users</p></div>';
   }
+}
+
+function renderUsers() {
+  const container = document.getElementById('usersList');
+  if (!container) return;
+  const q = (document.getElementById('userSearchInput')?.value || '').trim().toLowerCase();
+  const filtered = _allUsers.filter(u => {
+    if (_userRoleFilter !== 'all' && u.role !== _userRoleFilter) return false;
+    if (_userGroupFilter !== 'all') {
+      const g = u.student_group || 'none';
+      if (g !== _userGroupFilter) return false;
+    }
+    if (q) {
+      const hay = `${u.username || ''} ${u.email || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  if (!filtered.length) {
+    container.innerHTML = '<div class="empty-state"><p>No users match your filters.</p></div>';
+    return;
+  }
+  container.innerHTML = filtered.map(u => `
+    <div class="user-row" onclick="openUserDetail(${u.id})">
+      <div class="avatar">${esc(getInitials(u))}</div>
+      <div class="user-info">
+        <div class="user-name">${esc(u.username)}</div>
+        <div class="user-email">${esc(u.email || '—')}</div>
+      </div>
+      <span class="role-badge role-${u.role}">${u.role}</span>
+      ${u.student_group && u.student_group !== 'none'
+        ? `<span class="role-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa">${groupLabel(u.student_group)}</span>`
+        : ''}
+    </div>
+  `).join('');
+}
+
+function setUserRoleFilter(role) {
+  _userRoleFilter = role;
+  document.querySelectorAll('#userRoleChips .chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.urole === role);
+  });
+  renderUsers();
+}
+
+function setUserGroupFilter(group) {
+  _userGroupFilter = group;
+  document.querySelectorAll('#userGroupChips .chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.ugroup === group);
+  });
+  renderUsers();
 }
 
 async function openUserDetail(id) {
@@ -1554,7 +1621,7 @@ async function openUserDetail(id) {
     const modal = document.getElementById('modalContent');
     modal.innerHTML = `
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-        <div class="avatar" style="width:40px;height:40px;font-size:16px">${u.username[0].toUpperCase()}</div>
+        <div class="avatar" style="width:40px;height:40px;font-size:16px">${esc(getInitials(u))}</div>
         <div>
           <div style="font-size:16px;font-weight:600">${esc(u.username)}</div>
           <div style="font-size:12px;color:var(--text-muted)">${esc(u.email || '—')}</div>
@@ -1614,7 +1681,7 @@ function showTempPassword(password, title) {
     <div style="display:flex;gap:8px;align-items:center;background:rgba(3,6,16,0.8);border:1px solid var(--border-input);border-radius:3px;padding:10px 14px;">
       <code id="tmpPwDisplay" style="flex:1;font-family:var(--mono);font-size:14px;font-weight:600;letter-spacing:0.12em;color:var(--accent);filter:blur(5px);user-select:all;transition:filter 0.2s">${esc(password)}</code>
       <button class="btn-outline btn-sm" onclick="toggleTmpPwVisibility()" id="tmpPwToggleBtn" title="Show/hide">👁</button>
-      <button class="btn-outline btn-sm" onclick="copyTmpPw(${JSON.stringify(password)})" title="Copy">⎘ Copy</button>
+      <button class="btn-outline btn-sm" onclick="copyTmpPw()" title="Copy">⎘ Copy</button>
     </div>
     <p style="font-size:11px;color:var(--text-muted);margin-top:8px;font-family:var(--mono)">Click the eye icon to reveal · User must change password on first login</p>
     <div class="form-actions" style="margin-top:20px">
@@ -1633,20 +1700,27 @@ function toggleTmpPwVisibility() {
   btn.textContent = hidden ? '🙈' : '👁';
 }
 
-function copyTmpPw(password) {
-  navigator.clipboard.writeText(password).then(() => {
-    toast('Password copied to clipboard', 'success');
-  }).catch(() => {
-    // fallback for non-HTTPS contexts
+function copyTmpPw() {
+  const el = document.getElementById('tmpPwDisplay');
+  if (!el) return;
+  const password = el.textContent;
+  const fallback = () => {
     const ta = document.createElement('textarea');
     ta.value = password;
     ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    document.execCommand('copy');
+    try { document.execCommand('copy'); } catch {}
     document.body.removeChild(ta);
     toast('Password copied to clipboard', 'success');
-  });
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(password)
+      .then(() => toast('Password copied to clipboard', 'success'))
+      .catch(fallback);
+  } else {
+    fallback();
+  }
 }
 
 function changeUserEmail(id, currentEmail) {
@@ -1696,10 +1770,11 @@ function openCreateUserModal() {
       <div class="form-group">
         <label>Student Group</label>
         <select id="newGroup" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
-          <option value="none">No Group (Admin / Staff)</option>
+          <option value="none">No Group</option>
           <option value="am">AM Students (morning only)</option>
           <option value="pm">PM Students (afternoon only)</option>
           <option value="allday">All Day Students</option>
+          <option value="staff">Staff</option>
         </select>
       </div>
       <div class="info-strip">A temporary password will be generated and shown to you. Give it to the user directly — they must change it on first login.</div>
@@ -1732,13 +1807,13 @@ async function submitCreateUser() {
 
 async function changeUserGroup(id, currentGroup) {
   const choice = prompt(
-    `Change group for this user:\n  none = No Group\n  am = AM Students\n  pm = PM Students\n  allday = All Day\n\nCurrent: ${currentGroup}\nEnter new group:`,
+    `Change group for this user:\n  none = No Group\n  am = AM Students\n  pm = PM Students\n  allday = All Day\n  staff = Staff\n\nCurrent: ${currentGroup}\nEnter new group:`,
     currentGroup || 'none'
   );
   if (!choice || choice.trim() === currentGroup) return;
   const g = choice.trim().toLowerCase();
-  if (!['am', 'pm', 'allday', 'none'].includes(g)) {
-    toast('Invalid group — use: am, pm, allday, or none', 'error'); return;
+  if (!['am', 'pm', 'allday', 'staff', 'none'].includes(g)) {
+    toast('Invalid group — use: am, pm, allday, staff, or none', 'error'); return;
   }
   try {
     await api(`/api/admin/users/${id}`, { method: 'PUT', body: { student_group: g } });

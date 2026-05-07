@@ -33,7 +33,7 @@ const router = express.Router();
 
 router.use(requireAuth, requireRole('admin'));
 
-const studentGroupEnum = z.enum(['am', 'pm', 'allday', 'none']);
+const studentGroupEnum = z.enum(['am', 'pm', 'allday', 'staff', 'none']);
 
 const createUserSchema = z.object({
   username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/),

@@ -239,6 +239,23 @@
           <h2 class="view-heading">Users</h2>
           <button class="btn-primary" onclick="openCreateUserModal()">+ Add User</button>
         </div>
+        <div class="search-box" style="max-width:100%;margin-bottom:12px">
+          <span class="search-icon">🔍</span>
+          <input id="userSearchInput" type="search" placeholder="Search by username or email…" oninput="renderUsers()">
+        </div>
+        <div class="cat-chips" id="userRoleChips">
+          <div class="chip active" data-urole="all" onclick="setUserRoleFilter('all')">All Roles</div>
+          <div class="chip" data-urole="admin" onclick="setUserRoleFilter('admin')">Admins</div>
+          <div class="chip" data-urole="user" onclick="setUserRoleFilter('user')">Users</div>
+        </div>
+        <div class="cat-chips" id="userGroupChips">
+          <div class="chip active" data-ugroup="all" onclick="setUserGroupFilter('all')">All Groups</div>
+          <div class="chip" data-ugroup="am" onclick="setUserGroupFilter('am')">AM</div>
+          <div class="chip" data-ugroup="pm" onclick="setUserGroupFilter('pm')">PM</div>
+          <div class="chip" data-ugroup="allday" onclick="setUserGroupFilter('allday')">All Day</div>
+          <div class="chip" data-ugroup="staff" onclick="setUserGroupFilter('staff')">Staff</div>
+          <div class="chip" data-ugroup="none" onclick="setUserGroupFilter('none')">No Group</div>
+        </div>
         <div id="usersList"></div>
       </div>
     </div>
