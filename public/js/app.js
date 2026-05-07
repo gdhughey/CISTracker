@@ -1624,6 +1624,31 @@ async function deleteTicket(id) {
   }
 }
 
+let _ticketAttachFile = null;
+
+function handleTicketFileSelect(file) {
+  if (!file) return;
+  _ticketAttachFile = file;
+  const preview = document.getElementById('ticketFilePreview');
+  const label = document.getElementById('ticketDropLabel');
+  if (!preview) return;
+  if (file.type.startsWith('image/')) {
+    const url = URL.createObjectURL(file);
+    preview.innerHTML = `<img src="${url}" style="max-height:120px;max-width:100%;border-radius:6px;object-fit:contain">`;
+  } else {
+    preview.innerHTML = `<div style="font-size:13px;color:var(--text)">🎬 ${esc(file.name)}</div>`;
+  }
+  preview.style.display = 'block';
+  if (label) label.textContent = '✓ ' + file.name + ' — click to replace';
+}
+
+function handleTicketFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('ticketDropZone').style.borderColor = '';
+  const file = e.dataTransfer?.files?.[0];
+  if (file) handleTicketFileSelect(file);
+}
+
 function openNewTicketModal() {
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -1642,7 +1667,11 @@ function openNewTicketModal() {
       <div class="form-group"><label>Description</label><textarea id="ticketDesc" rows="4" placeholder="Detailed description…"></textarea></div>
       <div class="form-group">
         <label>Attachment <span style="color:var(--text-muted);font-weight:400">(optional — image or video, max 25MB)</span></label>
-        <input type="file" id="ticketFile" accept="image/*,video/mp4,video/quicktime,video/webm" style="width:100%;padding:8px 0;color:var(--text)">
+        <div id="ticketDropZone" style="border:2px dashed var(--border-input);border-radius:10px;padding:16px;text-align:center;cursor:pointer;color:var(--text-muted);font-size:13px;transition:border-color 0.15s" onclick="document.getElementById('ticketFile').click()" ondragover="event.preventDefault();this.style.borderColor='var(--purple)'" ondragleave="this.style.borderColor=''" ondrop="handleTicketFileDrop(event)">
+          <div id="ticketFilePreview" style="display:none;margin-bottom:8px"></div>
+          <div id="ticketDropLabel">📋 Paste screenshot (Ctrl+V) · drag &amp; drop · or click to browse</div>
+        </div>
+        <input type="file" id="ticketFile" accept="image/*,video/mp4,video/quicktime,video/webm" style="display:none" onchange="handleTicketFileSelect(this.files[0])">
       </div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
@@ -1650,7 +1679,25 @@ function openNewTicketModal() {
       </div>
     </div>
   `;
+  _ticketAttachFile = null;
   document.getElementById('modalOverlay').classList.add('open');
+  // Listen for paste while modal is open
+  function onPaste(e) {
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    handleTicketFileSelect(item.getAsFile());
+  }
+  document.addEventListener('paste', onPaste);
+  // Clean up listener when modal closes
+  const overlay = document.getElementById('modalOverlay');
+  const observer = new MutationObserver(() => {
+    if (!overlay.classList.contains('open')) {
+      document.removeEventListener('paste', onPaste);
+      observer.disconnect();
+    }
+  });
+  observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
 }
 
 async function submitTicket() {
@@ -1665,10 +1712,10 @@ async function submitTicket() {
         description: document.getElementById('ticketDesc')?.value || '',
       },
     });
-    const fileInput = document.getElementById('ticketFile');
-    if (fileInput && fileInput.files.length > 0) {
+    const fileToUpload = _ticketAttachFile || (document.getElementById('ticketFile')?.files?.[0]);
+    if (fileToUpload) {
       const form = new FormData();
-      form.append('file', fileInput.files[0]);
+      form.append('file', fileToUpload);
       const csrfToken = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
       const resp = await fetch(`/api/tickets/${ticket.id}/attachments`, {
         method: 'POST',
