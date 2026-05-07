@@ -290,7 +290,10 @@
       <div class="admin-view">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
           <h2 class="view-heading">Users</h2>
-          <button class="btn-primary" onclick="openCreateUserModal()">+ Add User</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn-outline" onclick="openImportUsersModal()">⬆ Import CSV</button>
+            <button class="btn-primary" onclick="openCreateUserModal()">+ Add User</button>
+          </div>
         </div>
         <div class="search-box" style="max-width:100%;margin-bottom:12px">
           <span class="search-icon">🔍</span>

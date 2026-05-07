@@ -134,6 +134,66 @@ router.delete('/users/:id(\\d+)', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── CSV user import ──────────────────────────────────────────────────────────
+const multer  = require('multer');
+const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1 * 1024 * 1024 } });
+
+const VALID_ROLES_CSV  = new Set(['admin', 'user']);
+const VALID_GROUPS_CSV = new Set(['am', 'pm', 'allday', 'staff', 'none']);
+
+router.post('/users/import', csvUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const text = req.file.buffer.toString('utf8');
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return res.status(400).json({ error: 'CSV must have a header row and at least one data row' });
+
+  const header = lines[0].toLowerCase().split(',').map(h => h.trim());
+  const idx = {
+    username: header.indexOf('username'),
+    email:    header.indexOf('email'),
+    role:     header.indexOf('role'),
+    group:    header.indexOf('group'),
+  };
+  if (idx.username === -1 || idx.email === -1) {
+    return res.status(400).json({ error: 'CSV missing required columns: username, email' });
+  }
+
+  const results = { created: 0, skipped: 0, failed: [], rows: [] };
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(c => c.trim());
+    const username = cols[idx.username];
+    const email    = cols[idx.email];
+    if (!username || !email) { results.failed.push(`Row ${i + 1}: missing username or email`); continue; }
+
+    const role  = idx.role  !== -1 ? cols[idx.role]  : 'user';
+    const group = idx.group !== -1 ? cols[idx.group] : 'none';
+    const safeRole  = VALID_ROLES_CSV.has(role)   ? role  : 'user';
+    const safeGroup = VALID_GROUPS_CSV.has(group.toLowerCase()) ? group.toLowerCase() : 'none';
+
+    if (userService.getByUsername(username) || userService.getByEmail(email)) {
+      results.skipped++;
+      results.rows.push({ username, status: 'skipped' });
+      continue;
+    }
+
+    try {
+      const tempPw = genTempPassword();
+      const created = await userService.createUser({ username, email, password: tempPw, role: safeRole, mustChangePw: 1 });
+      userService.updateStudentGroup(created.id, safeGroup);
+      req.audit('admin_import_user', username, { role: safeRole, group: safeGroup });
+      emailService.sendWelcome(created, tempPw);
+      results.created++;
+      results.rows.push({ username, status: 'created' });
+    } catch (err) {
+      results.failed.push(`${username}: ${err.message}`);
+      results.rows.push({ username, status: 'failed' });
+    }
+  }
+
+  res.json(results);
+});
+
 router.get('/overdue', (req, res) => {
   const days = parseInt(req.query.days, 10) || 3;
   res.json({ items: equipmentService.getOverdue(days) });

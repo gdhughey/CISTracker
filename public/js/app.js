@@ -1961,6 +1961,64 @@ async function deleteUser(id) {
   } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
+function openImportUsersModal() {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Import Students from CSV</div>
+    <div class="modal-body">
+      <div class="info-strip" style="margin-bottom:12px">
+        CSV must have a header row with columns: <code>username, email, role, group</code><br>
+        Valid roles: <code>user</code>, <code>admin</code> &nbsp;|&nbsp; Valid groups: <code>am</code>, <code>pm</code>, <code>allday</code>, <code>staff</code>, <code>none</code><br>
+        Existing accounts are skipped. Welcome emails are sent automatically.
+      </div>
+      <div class="form-group">
+        <label>CSV File</label>
+        <input type="file" id="importCsvFile" accept=".csv,text/csv" style="width:100%;padding:8px 0;color:var(--text)">
+      </div>
+      <div id="importResults" style="display:none;margin-top:12px;font-size:13px;line-height:1.8"></div>
+      <div class="form-actions">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" id="importBtn" onclick="submitImportUsers()">Import</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function submitImportUsers() {
+  const fileInput = document.getElementById('importCsvFile');
+  if (!fileInput?.files?.length) { toast('Select a CSV file first', 'error'); return; }
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  try {
+    const csrfToken = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrf_token='))?.split('=')[1] || '';
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+    const resp = await fetch('/api/admin/users/import', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': decodeURIComponent(csrfToken) },
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) { toast(data.error || 'Import failed', 'error'); return; }
+    const resultsDiv = document.getElementById('importResults');
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = `
+      <div style="font-weight:600;margin-bottom:8px">Import complete</div>
+      <div style="color:var(--green)">✓ Created: ${data.created}</div>
+      <div style="color:var(--text-muted)">⊘ Skipped (already exist): ${data.skipped}</div>
+      ${data.failed.length ? `<div style="color:var(--red);margin-top:4px">✗ Failed:<br>${data.failed.map(f => esc(f)).join('<br>')}</div>` : ''}
+    `;
+    btn.textContent = 'Done';
+    loadUsers();
+  } catch (err) {
+    toast(err.message || 'Import failed', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Import';
+  }
+}
+
 function openCreateUserModal() {
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
