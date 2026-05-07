@@ -39,26 +39,6 @@ async function verifyPassword(user, password) {
   return bcrypt.compare(password, user.password_hash);
 }
 
-function isLocked(user) {
-  if (!user.locked_until) return false;
-  return new Date(user.locked_until) > new Date();
-}
-
-function recordFailedLogin(user) {
-  const failed = (user.failed_logins || 0) + 1;
-  let lockedUntil = null;
-  if (failed >= config.auth.maxFailedLogins) {
-    const until = new Date(Date.now() + config.auth.lockoutMinutes * 60_000);
-    lockedUntil = until.toISOString();
-  }
-  db.prepare(`
-    UPDATE users
-    SET failed_logins = ?, locked_until = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(failed, lockedUntil, user.id);
-  return { failed, lockedUntil };
-}
-
 function clearFailedLogins(userId) {
   db.prepare(`
     UPDATE users SET failed_logins = 0, locked_until = NULL, updated_at = datetime('now')
@@ -85,20 +65,6 @@ function setMfa(userId, secret, enabled) {
     UPDATE users SET mfa_secret = ?, mfa_enabled = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(secret, enabled ? 1 : 0, userId);
-}
-
-function setRecoveryToken(userId, hashedToken, expiresAt) {
-  db.prepare(`
-    UPDATE users SET recovery_token = ?, recovery_expires = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(hashedToken, expiresAt, userId);
-}
-
-function findByRecoveryToken(hashedToken) {
-  return db.prepare(`
-    SELECT * FROM users
-    WHERE recovery_token = ? AND recovery_expires > datetime('now')
-  `).get(hashedToken);
 }
 
 function listAll() {
@@ -171,14 +137,10 @@ module.exports = {
   getByEmail,
   createUser,
   verifyPassword,
-  isLocked,
-  recordFailedLogin,
   clearFailedLogins,
   setPassword,
   forcePwChange,
   setMfa,
-  setRecoveryToken,
-  findByRecoveryToken,
   listAll,
   deleteUser,
   updateRole,

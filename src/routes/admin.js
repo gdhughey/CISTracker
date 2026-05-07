@@ -10,13 +10,21 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const sessionService = require('../services/sessionService');
 
-function genTempPassword(len = 7) {
-  // Alphanumeric, no confusing chars (0/O, 1/l/I)
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-  const bytes = crypto.randomBytes(len);
-  let pw = '';
-  for (let i = 0; i < len; i++) pw += chars[bytes[i] % chars.length];
-  return pw;
+// Generates a strong 14-char temp password that meets the app's complexity
+// rules (uppercase, lowercase, digit, symbol, ≥10 chars). Mirrors the
+// approach in scripts/seed.js.
+function genTempPassword() {
+  const upper  = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower  = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const symbol = '!@#$%&*+-=?';
+  const all    = upper + lower + digits + symbol;
+  const pick   = (set) => set[crypto.randomBytes(1)[0] % set.length];
+  // Seed with one from each required class, then fill to 14 chars
+  let pw = pick(upper) + pick(lower) + pick(digits) + pick(symbol);
+  for (let i = pw.length; i < 14; i++) pw += pick(all);
+  // Shuffle so the required chars aren't always in the same positions
+  return pw.split('').sort(() => crypto.randomBytes(1)[0] - 128).join('');
 }
 
 const router = express.Router();
@@ -55,7 +63,7 @@ router.get('/users/:id(\\d+)', (req, res) => {
 router.post('/users', validate(createUserSchema), async (req, res) => {
   if (userService.getByUsername(req.body.username)) return res.status(409).json({ error: 'Username taken' });
   if (userService.getByEmail(req.body.email)) return res.status(409).json({ error: 'Email already registered' });
-  const tempPw = genTempPassword(7);
+  const tempPw = genTempPassword();
   const user = await userService.createUser({ ...req.body, password: tempPw, mustChangePw: 1 });
   req.audit('admin_create_user', req.body.username, { role: req.body.role });
   res.status(201).json({ user: userService.pickPublic(user), tempPassword: tempPw });
@@ -81,7 +89,7 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     req.audit('admin_change_email', user.username, { oldEmail: user.email, newEmail: req.body.email });
   }
   if (req.body.reset_password) {
-    const resetPw = genTempPassword(7);
+    const resetPw = genTempPassword();
     await userService.setPassword(id, resetPw);
     userService.forcePwChange(id);
     req.audit('admin_reset_password', user.username);

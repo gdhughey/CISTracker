@@ -101,7 +101,14 @@ function update(id, fields) {
 }
 
 function remove(id) {
-  db.prepare('DELETE FROM equipment WHERE id = ?').run(id);
+  const tx = db.transaction(() => {
+    // checkout_log.equipment_id is NOT NULL with no ON DELETE CASCADE, so we
+    // must clear it before removing the equipment or SQLite will throw a FK
+    // constraint error on any item that has checkout history.
+    db.prepare('DELETE FROM checkout_log WHERE equipment_id = ?').run(id);
+    db.prepare('DELETE FROM equipment WHERE id = ?').run(id);
+  });
+  tx();
 }
 
 // Atomic checkout — only succeeds if status is currently 'available'.
@@ -189,14 +196,20 @@ function getLog({ limit = 100, equipmentId, userId } = {}) {
 }
 
 function getOverdue(daysThreshold) {
+  // Use due_date (set at checkout time) rather than checked_out_at so that
+  // items with longer checkout durations aren't flagged before they're
+  // actually due. daysThreshold lets callers fetch items whose due date
+  // is within N days in the future as an early-warning ("due soon") list
+  // by passing a negative number; 0 means "past due right now".
   return db.prepare(`
     SELECT e.*, u.username AS checked_out_username, u.email AS checked_out_email,
-           CAST((julianday('now') - julianday(e.checked_out_at)) AS INTEGER) AS days_out
+           CAST(julianday('now') - julianday(e.due_date) AS INTEGER) AS days_overdue
     FROM equipment e
     JOIN users u ON u.id = e.checked_out_by
     WHERE e.status = 'checked_out'
-      AND julianday('now') - julianday(e.checked_out_at) >= ?
-    ORDER BY days_out DESC
+      AND e.due_date IS NOT NULL
+      AND julianday('now') - julianday(e.due_date) >= ?
+    ORDER BY days_overdue DESC
   `).all(daysThreshold);
 }
 
