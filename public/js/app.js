@@ -1961,6 +1961,19 @@ async function deleteUser(id) {
   } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
+function downloadCsvTemplate() {
+  const csv = [
+    'username,email,role,group',
+    'John_Smith,john.smith@students.cvtech.edu,user,am',
+    'Jane_Doe,jane.doe@students.cvtech.edu,user,pm',
+    'Alex_Johnson,alex.johnson@students.cvtech.edu,user,allday',
+  ].join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'students-template.csv';
+  a.click();
+}
+
 function openImportUsersModal() {
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -1970,6 +1983,9 @@ function openImportUsersModal() {
         CSV must have a header row with columns: <code>username, email, role, group</code><br>
         Valid roles: <code>user</code>, <code>admin</code> &nbsp;|&nbsp; Valid groups: <code>am</code>, <code>pm</code>, <code>allday</code>, <code>staff</code>, <code>none</code><br>
         Existing accounts are skipped. Welcome emails are sent automatically.
+      </div>
+      <div style="margin-bottom:12px">
+        <a href="#" onclick="downloadCsvTemplate();return false;" style="font-size:13px;color:var(--purple)">⬇ Download template CSV</a>
       </div>
       <div class="form-group">
         <label>CSV File</label>
