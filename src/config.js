@@ -47,7 +47,7 @@ const config = {
   auth: {
     maxFailedLogins: int(process.env.MAX_FAILED_LOGINS, 5),
     lockoutMinutes: int(process.env.LOCKOUT_MINUTES, 15),
-    passwordMinLength: int(process.env.PASSWORD_MIN_LENGTH, 10),
+    passwordMinLength: int(process.env.PASSWORD_MIN_LENGTH, 3),
     bcryptCost: int(process.env.BCRYPT_COST, 12),
   },
 
