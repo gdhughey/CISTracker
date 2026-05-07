@@ -1,12 +1,15 @@
 'use strict';
 //
-// Restore deleted accounts with fresh generated temp passwords.
-// Idempotent — skips users that already exist by username OR email.
+// Wipes ALL users except 'admin' and 'Bryceson_McDaniels', then
+// re-creates PM and AllDay accounts with fresh temp passwords.
 // Sends a welcome email via Resend if RESEND_API_KEY is set in .env.
 //
 // Usage:
 //   sudo node scripts/restore-users.js
 //
+
+// Usernames that will NEVER be deleted, regardless of what else is in the DB.
+const PROTECTED = new Set(['admin', 'Bryceson_McDaniels']);
 
 const crypto = require('crypto');
 const userService = require('../src/services/userService');
@@ -110,16 +113,18 @@ async function sendWelcomeEmail(u) {
 async function main() {
   runMigrations();
 
-  // ── Step 1: Delete all listed users if they exist ─────────────────────────
-  console.log('Wiping existing accounts...');
+  // ── Step 1: Delete every user except protected accounts ───────────────────
+  console.log(`Protected accounts (will not be touched): ${[...PROTECTED].join(', ')}\n`);
+  console.log('Wiping all non-protected accounts...');
   let wiped = 0;
-  for (const u of USERS) {
-    const existing = userService.getByUsername(u.username) || userService.getByEmail(u.email);
-    if (existing) {
-      userService.deleteUser(existing.id);
-      console.log(`DEL   ${u.username.padEnd(24)}`);
-      wiped++;
+  for (const u of userService.listAll()) {
+    if (PROTECTED.has(u.username)) {
+      console.log(`SKIP  ${u.username.padEnd(24)} (protected)`);
+      continue;
     }
+    userService.deleteUser(u.id);
+    console.log(`DEL   ${u.username.padEnd(24)}`);
+    wiped++;
   }
   console.log(`Wiped ${wiped} account(s)\n`);
 
