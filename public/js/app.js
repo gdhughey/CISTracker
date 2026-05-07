@@ -1649,6 +1649,13 @@ function handleTicketFileDrop(e) {
   if (file) handleTicketFileSelect(file);
 }
 
+function handleTicketPaste(e) {
+  const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  handleTicketFileSelect(item.getAsFile());
+}
+
 function openNewTicketModal() {
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -1667,7 +1674,7 @@ function openNewTicketModal() {
       <div class="form-group"><label>Description</label><textarea id="ticketDesc" rows="4" placeholder="Detailed description…"></textarea></div>
       <div class="form-group">
         <label>Attachment <span style="color:var(--text-muted);font-weight:400">(optional — image or video, max 25MB)</span></label>
-        <div id="ticketDropZone" style="border:2px dashed var(--border-input);border-radius:10px;padding:16px;text-align:center;cursor:pointer;color:var(--text-muted);font-size:13px;transition:border-color 0.15s" onclick="document.getElementById('ticketFile').click()" ondragover="event.preventDefault();this.style.borderColor='var(--purple)'" ondragleave="this.style.borderColor=''" ondrop="handleTicketFileDrop(event)">
+        <div id="ticketDropZone" tabindex="0" style="border:2px dashed var(--border-input);border-radius:10px;padding:16px;text-align:center;cursor:pointer;color:var(--text-muted);font-size:13px;transition:border-color 0.15s;outline:none" onclick="document.getElementById('ticketFile').click()" ondragover="event.preventDefault();this.style.borderColor='var(--purple)'" ondragleave="this.style.borderColor=''" ondrop="handleTicketFileDrop(event)" onpaste="handleTicketPaste(event)" onfocus="this.style.borderColor='var(--purple)'" onblur="this.style.borderColor=''">
           <div id="ticketFilePreview" style="display:none;margin-bottom:8px"></div>
           <div id="ticketDropLabel">📋 Paste screenshot (Ctrl+V) · drag &amp; drop · or click to browse</div>
         </div>
@@ -1681,23 +1688,8 @@ function openNewTicketModal() {
   `;
   _ticketAttachFile = null;
   document.getElementById('modalOverlay').classList.add('open');
-  // Listen for paste while modal is open
-  function onPaste(e) {
-    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
-    if (!item) return;
-    e.preventDefault();
-    handleTicketFileSelect(item.getAsFile());
-  }
-  document.addEventListener('paste', onPaste);
-  // Clean up listener when modal closes
-  const overlay = document.getElementById('modalOverlay');
-  const observer = new MutationObserver(() => {
-    if (!overlay.classList.contains('open')) {
-      document.removeEventListener('paste', onPaste);
-      observer.disconnect();
-    }
-  });
-  observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+  // Focus the drop zone so Ctrl+V works immediately
+  setTimeout(() => document.getElementById('ticketDropZone')?.focus(), 50);
 }
 
 async function submitTicket() {
