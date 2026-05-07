@@ -136,6 +136,21 @@ function updateStudentGroup(id, group) {
   `).run(group, id);
 }
 
+function setRecoveryToken(userId, token, expires) {
+  db.prepare(`
+    UPDATE users SET recovery_token = ?, recovery_expires = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(token, expires, userId);
+}
+
+function findByRecoveryToken(token) {
+  return db.prepare(`
+    SELECT * FROM users
+    WHERE recovery_token = ?
+      AND recovery_expires > datetime('now')
+  `).get(token) || null;
+}
+
 module.exports = {
   pickPublic,
   getById,
@@ -152,4 +167,6 @@ module.exports = {
   updateRole,
   updateEmail,
   updateStudentGroup,
+  setRecoveryToken,
+  findByRecoveryToken,
 };

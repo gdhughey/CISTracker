@@ -209,7 +209,7 @@ function getOverdue(daysThreshold) {
     WHERE e.status = 'checked_out'
       AND e.due_date IS NOT NULL
       AND julianday('now') - julianday(e.due_date) >= ?
-    ORDER BY days_overdue DESC
+    ORDER BY days_out DESC
   `).all(daysThreshold);
 }
 
