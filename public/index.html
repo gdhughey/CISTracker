@@ -127,6 +127,9 @@
         <div class="nav-item" data-view="overdue" onclick="switchView('overdue')">
           Overdue <span id="overdueBadge" class="badge hidden">0</span>
         </div>
+        <div class="nav-item" data-view="queue" onclick="switchView('queue')">
+          My Queue <span id="queueBadge" class="badge badge-purple hidden">0</span>
+        </div>
       </div>
       <div class="nav-section">
         <div class="nav-label">Support</div>
@@ -246,6 +249,15 @@
       <div style="padding:24px">
         <h2 class="view-heading">Overdue Items</h2>
         <div id="overdueList"></div>
+      </div>
+    </div>
+
+    <!-- ═══ MY QUEUE VIEW ═══ -->
+    <div id="view-queue" class="hidden">
+      <div style="padding:24px">
+        <h2 class="view-heading">My Queue</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">Items you're waiting for. You'll get an email when one becomes available.</p>
+        <div id="myQueueList"></div>
       </div>
     </div>
 

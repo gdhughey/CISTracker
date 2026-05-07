@@ -244,7 +244,7 @@ async function showApp() {
   // Load data
   initTableScroll();
   const adminLoads = ME.role === 'admin' ? [loadOverdueCount(), loadTicketCounts()] : [];
-  await Promise.all([loadItems(), ...adminLoads]);
+  await Promise.all([loadItems(), updateQueueBadge(), ...adminLoads]);
   switchView('inventory');
   // First-time onboarding tour — only fires once per user/browser
   maybeStartTour();
@@ -421,6 +421,7 @@ function switchView(view) {
     if (badge) badge.classList.add('hidden');
     markTicketsSeen();
   }
+  if (view === 'queue') loadMyQueue();
   if (view === 'users') loadUsers();
   if (view === 'locations') loadLocations();
   if (view === 'audit') loadAudit();
@@ -724,6 +725,7 @@ async function joinQueue(equipmentId) {
   try {
     const { position } = await api(`/api/queue/${equipmentId}/join`, { method: 'POST' });
     toast(`Joined queue at position #${position}`, 'purple');
+    updateQueueBadge();
     openDetail(equipmentId); // refresh
   } catch (err) {
     toast(err.error || 'Failed to join queue', 'error');
@@ -738,6 +740,60 @@ async function removeFromQueue(equipmentId, userId) {
   } catch (err) {
     toast(err.error || 'Failed', 'error');
   }
+}
+
+// ── My Queue view ──────────────────────────────────────────────────────
+async function loadMyQueue() {
+  const el = document.getElementById('myQueueList');
+  try {
+    const { queues } = await api('/api/queue/my/positions');
+    if (!queues || queues.length === 0) {
+      el.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⏳</div>
+          <div class="empty-title">You're not in any queues</div>
+          <div class="empty-sub">When an item you want is checked out, open it from the inventory and join its waitlist.</div>
+        </div>`;
+      return;
+    }
+    el.innerHTML = queues.map(q => `
+      <div class="queue-view-card">
+        <div class="queue-view-pos">#${q.position}</div>
+        <div class="queue-view-info">
+          <div class="queue-view-name">${esc(q.equipment_name)}</div>
+          <div class="queue-view-meta">${esc(q.barcode || '')}${q.barcode ? ' · ' : ''}Joined ${fmtDate(q.joined_at || q.created_at)}</div>
+        </div>
+        <button class="btn-outline btn-sm btn-red" onclick="leaveQueueView(${q.equipment_id})">Leave</button>
+      </div>
+    `).join('');
+  } catch {
+    el.innerHTML = '<div class="empty-state"><div class="empty-title">Failed to load queue</div></div>';
+  }
+}
+
+async function leaveQueueView(equipmentId) {
+  try {
+    await api(`/api/queue/${equipmentId}/leave`, { method: 'DELETE' });
+    toast('Left the queue', 'info');
+    await updateQueueBadge();
+    loadMyQueue();
+  } catch (err) {
+    toast(err.error || 'Failed to leave queue', 'error');
+  }
+}
+
+async function updateQueueBadge() {
+  try {
+    const { queues } = await api('/api/queue/my/positions');
+    const badge = document.getElementById('queueBadge');
+    if (!badge) return;
+    if (queues && queues.length > 0) {
+      badge.textContent = queues.length;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  } catch {}
 }
 
 // ── Checkout modal ─────────────────────────────────────────────────────
