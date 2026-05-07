@@ -1,0 +1,4 @@
+username,email,role,group
+First_Last,first.last@students.cvtech.edu,user,pm
+Another_Student,another.student@students.cvtech.edu,user,am
+New_Admin,new.admin@students.cvtech.edu,admin,allday
