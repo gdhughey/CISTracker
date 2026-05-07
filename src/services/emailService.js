@@ -2,6 +2,9 @@
 const { Resend } = require('resend');
 const config = require('../config');
 
+const esc = (s) => String(s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 let client = null;
 function getClient() {
   if (!client && config.resend.apiKey) client = new Resend(config.resend.apiKey);
@@ -52,13 +55,13 @@ async function sendWelcome(user, tempPassword) {
     to: user.email,
     subject: 'Your CISTracker account is ready',
     html: wrap(`
-      <p>Hi <strong style="color:#fff;">${user.username}</strong>,</p>
+      <p>Hi <strong style="color:#fff;">${esc(user.username)}</strong>,</p>
       <p>An admin has created a CISTracker account for you. Here are your login details:</p>
       <table cellpadding="0" cellspacing="0" style="background:#0f1117;border-radius:6px;padding:16px 20px;margin:20px 0;width:100%;box-sizing:border-box;">
         <tr><td style="color:#9ca3af;font-size:13px;padding-bottom:4px;">Username</td></tr>
-        <tr><td style="color:#fff;font-family:monospace;font-size:16px;padding-bottom:12px;">${user.username}</td></tr>
+        <tr><td style="color:#fff;font-family:monospace;font-size:16px;padding-bottom:12px;">${esc(user.username)}</td></tr>
         <tr><td style="color:#9ca3af;font-size:13px;padding-bottom:4px;">Temporary Password</td></tr>
-        <tr><td style="color:#fff;font-family:monospace;font-size:16px;">${tempPassword}</td></tr>
+        <tr><td style="color:#fff;font-family:monospace;font-size:16px;">${esc(tempPassword)}</td></tr>
       </table>
       <p>You will be asked to set a new password when you first sign in.</p>
       <p><a href="${config.appUrl}" style="display:inline-block;background:#3b82f6;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:600;">Sign In</a></p>
