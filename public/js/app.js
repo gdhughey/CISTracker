@@ -870,6 +870,7 @@ async function loadUserSelect() {
       return;
     }
     sel.innerHTML = users.map(u => `<option value="${u.id}">${esc(u.username)} (${u.role})</option>`).join('');
+    sel.value = ME.id;
   } catch (err) {
     const sel = document.getElementById('coBorrower');
     if (sel) sel.innerHTML = '<option value="">Failed to load users</option>';
