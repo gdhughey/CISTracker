@@ -1,66 +1,77 @@
 'use strict';
 //
-// Restore deleted accounts with their original temp passwords.
+// Restore deleted accounts with fresh generated temp passwords.
 // Idempotent — skips users that already exist by username OR email.
 // Sends a welcome email via Resend if RESEND_API_KEY is set in .env.
 //
 // Usage:
-//   sudo -u cistracker RESEND_API_KEY=... node scripts/restore-users.js
-//   (or just `node scripts/restore-users.js` to create users without email)
+//   sudo node scripts/restore-users.js
 //
 
+const crypto = require('crypto');
 const userService = require('../src/services/userService');
 const { runMigrations } = require('../src/db/migrate');
 
+function genTempPassword() {
+  const upper  = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower  = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const all    = upper + lower + digits;
+  const pick   = (set) => set[crypto.randomBytes(1)[0] % set.length];
+  let pw = pick(upper) + pick(lower) + pick(digits);
+  for (let i = pw.length; i < 8; i++) pw += pick(all);
+  return pw.split('').sort(() => crypto.randomBytes(1)[0] - 128).join('');
+}
+
 const USERS = [
   // ── PM ────────────────────────────────────────────────────────────────────
-  { username: 'Chase_Dubois',          email: 'chase.dubois@students.cvtech.edu',          password: 'qUBSLyN', role: 'admin', group: 'pm' },
-  { username: 'Brendan_Traffanstedt',  email: 'brendan.traffanstedt@students.cvtech.edu',  password: 'rT2Euc4', role: 'admin', group: 'pm' },
+  { username: 'Chase_Dubois',          email: 'chase.dubois@students.cvtech.edu',          role: 'admin', group: 'pm' },
+  { username: 'Brendan_Traffanstedt',  email: 'brendan.traffanstedt@students.cvtech.edu',  role: 'admin', group: 'pm' },
 
-  { username: 'Kyle_Brown',            email: 'kyle.brown@students.cvtech.edu',            password: '7BLvc85', role: 'user',  group: 'pm' },
-  { username: 'Izacz_Delmarter',       email: 'izacz.delmarter@students.cvtech.edu',       password: 'dCScBx3', role: 'user',  group: 'pm' },
-  { username: 'Mason_DeSpain',         email: 'mason.despain@students.cvtech.edu',         password: 'Jq43FUj', role: 'user',  group: 'pm' },
-  { username: 'Cale_Hansing',          email: 'cale.hansing@students.cvtech.edu',          password: '3h2sVP4', role: 'user',  group: 'pm' },
-  { username: 'Taitum_Higdon',         email: 'taitum.higdon@students.cvtech.edu',         password: 'KG7SM58', role: 'user',  group: 'pm' },
-  { username: 'Cameron_Hill',          email: 'cameron.hill@students.cvtech.edu',          password: '7WMpUtb', role: 'user',  group: 'pm' },
-  { username: 'Campbell_Hill',         email: 'campbell.hill@student.cvtech.edu',          password: 'BnjPsnj', role: 'user',  group: 'pm' },
-  { username: 'Noah_Neaves',           email: 'noah.neaves@students.cvtech.edu',           password: 'FbQPTKU', role: 'user',  group: 'pm' },
-  { username: 'Michael_Patterson',     email: 'michael.patterson@students.cvtech.edu',     password: 'sae8gM4', role: 'user',  group: 'pm' },
-  { username: 'Devon_Richardson',      email: 'devon.richardson@students.cvtech.edu',      password: 'hLpfBkH', role: 'user',  group: 'pm' },
-  { username: 'Christain_Sanchez',     email: 'christain.sanchez@students.cvtech.edu',     password: 'GCPbrdj', role: 'user',  group: 'pm' },
-  { username: 'Gavin_Satten',          email: 'gavin.satten@students.cvtech.edu',          password: '9VyRJgr', role: 'user',  group: 'pm' },
-  { username: 'Nathan_Washam',         email: 'nathan.washam@students.cvtech.edu',         password: 'TZLBaNa', role: 'user',  group: 'pm' },
-  { username: 'Jackson_Zuelsdorf',     email: 'jackson.zuelsdorf@students.cvtech.edu',     password: 'kppJMa5', role: 'user',  group: 'pm' },
-  { username: 'Iestin_Lane',           email: 'iestin.lane@students.cvtech.edu',           password: 'YCHBUsN', role: 'user',  group: 'pm' },
+  { username: 'Kyle_Brown',            email: 'kyle.brown@students.cvtech.edu',            role: 'user',  group: 'pm' },
+  { username: 'Izacz_Delmarter',       email: 'izacz.delmarter@students.cvtech.edu',       role: 'user',  group: 'pm' },
+  { username: 'Mason_DeSpain',         email: 'mason.despain@students.cvtech.edu',         role: 'user',  group: 'pm' },
+  { username: 'Cale_Hansing',          email: 'cale.hansing@students.cvtech.edu',          role: 'user',  group: 'pm' },
+  { username: 'Taitum_Higdon',         email: 'taitum.higdon@students.cvtech.edu',         role: 'user',  group: 'pm' },
+  { username: 'Cameron_Hill',          email: 'cameron.hill@students.cvtech.edu',          role: 'user',  group: 'pm' },
+  { username: 'Campbell_Hill',         email: 'campbell.hill@student.cvtech.edu',          role: 'user',  group: 'pm' },
+  { username: 'Noah_Neaves',           email: 'noah.neaves@students.cvtech.edu',           role: 'user',  group: 'pm' },
+  { username: 'Michael_Patterson',     email: 'michael.patterson@students.cvtech.edu',     role: 'user',  group: 'pm' },
+  { username: 'Devon_Richardson',      email: 'devon.richardson@students.cvtech.edu',      role: 'user',  group: 'pm' },
+  { username: 'Christain_Sanchez',     email: 'christain.sanchez@students.cvtech.edu',     role: 'user',  group: 'pm' },
+  { username: 'Gavin_Satten',          email: 'gavin.satten@students.cvtech.edu',          role: 'user',  group: 'pm' },
+  { username: 'Nathan_Washam',         email: 'nathan.washam@students.cvtech.edu',         role: 'user',  group: 'pm' },
+  { username: 'Jackson_Zuelsdorf',     email: 'jackson.zuelsdorf@students.cvtech.edu',     role: 'user',  group: 'pm' },
+  { username: 'Iestin_Lane',           email: 'iestin.lane@students.cvtech.edu',           role: 'user',  group: 'pm' },
 
   // ── AM ────────────────────────────────────────────────────────────────────
-  { username: 'Carsen_Renegar',        email: 'carsen.renegar@students.cvtech.edu',        password: 'pMk3cEq', role: 'admin', group: 'am' },
+  { username: 'Carsen_Renegar',        email: 'carsen.renegar@students.cvtech.edu',        role: 'admin', group: 'am' },
 
-  { username: 'Simeon_Angelov',        email: 'simeon.angelov@students.cvtech.edu',        password: '5kU9Hqe', role: 'user',  group: 'am' },
-  { username: 'Zayden_Arney',          email: 'zayden.arney@students.cvtech.edu',          password: 'Cj3Yngg', role: 'user',  group: 'am' },
-  { username: 'Isaiah_Boice',          email: 'isaiah.boice@students.cvtech.edu',          password: 'RDw3hnK', role: 'user',  group: 'am' },
-  { username: 'Mai_Brouhard',          email: 'mai.brouhard@students.cvtech.edu',          password: 'MPPJNaV', role: 'user',  group: 'am' },
-  { username: 'Rylen_Chamberlain',     email: 'rylen.chamberlain@students.cvtech.edu',     password: '5LUKAkT', role: 'user',  group: 'am' },
-  { username: 'Alyssa_Deakins',        email: 'alyssa.deakins@students.cvtech.edu',        password: 'PttYVzk', role: 'user',  group: 'am' },
-  { username: 'Jacob_Faerber',         email: 'jacob.faerber@students.cvtech.edu',         password: '9qka4hf', role: 'user',  group: 'am' },
-  { username: 'Robert_Genzler',        email: 'robert.genzler@students.cvtech.edu',        password: 'jnp3Tt4', role: 'user',  group: 'am' },
-  { username: 'Huy_Huynh',             email: 'huy.huynh@students.cvtech.edu',             password: 'mF6S3Kz', role: 'user',  group: 'am' },
-  { username: 'Devon_James',           email: 'devon.james@students.cvtech.edu',           password: 'VJCKjHV', role: 'user',  group: 'am' },
-  { username: 'Luke_Labus',            email: 'luke.labus@students.cvtech.edu',            password: '8kEJuR3', role: 'user',  group: 'am' },
-  { username: 'Eric_Pouncy',           email: 'eric.pouncy@students.cvtech.edu',           password: 'KpQLQxN', role: 'user',  group: 'am' },
-  { username: 'Grant_Rayburn',         email: 'grant.rayburn@students.cvtech.edu',         password: 'FAtjjtg', role: 'user',  group: 'am' },
-  { username: 'Cooper_Remy',           email: 'cooper.remy@students.cvtech.edu',           password: 'MRYxy8H', role: 'user',  group: 'am' },
-  { username: 'Cole_Washington',       email: 'cole.washington@students.cvtech.edu',       password: 'HM6A2Yr', role: 'user',  group: 'am' },
-  { username: 'Braxton_Wood',          email: 'braxton.wood@students.cvtech.edu',          password: 'ts4LZPW', role: 'user',  group: 'am' },
+  { username: 'Simeon_Angelov',        email: 'simeon.angelov@students.cvtech.edu',        role: 'user',  group: 'am' },
+  { username: 'Zayden_Arney',          email: 'zayden.arney@students.cvtech.edu',          role: 'user',  group: 'am' },
+  { username: 'Isaiah_Boice',          email: 'isaiah.boice@students.cvtech.edu',          role: 'user',  group: 'am' },
+  { username: 'Mai_Brouhard',          email: 'mai.brouhard@students.cvtech.edu',          role: 'user',  group: 'am' },
+  { username: 'Rylen_Chamberlain',     email: 'rylen.chamberlain@students.cvtech.edu',     role: 'user',  group: 'am' },
+  { username: 'Alyssa_Deakins',        email: 'alyssa.deakins@students.cvtech.edu',        role: 'user',  group: 'am' },
+  { username: 'Jacob_Faerber',         email: 'jacob.faerber@students.cvtech.edu',         role: 'user',  group: 'am' },
+  { username: 'Robert_Genzler',        email: 'robert.genzler@students.cvtech.edu',        role: 'user',  group: 'am' },
+  { username: 'Huy_Huynh',             email: 'huy.huynh@students.cvtech.edu',             role: 'user',  group: 'am' },
+  { username: 'Devon_James',           email: 'devon.james@students.cvtech.edu',           role: 'user',  group: 'am' },
+  { username: 'Luke_Labus',            email: 'luke.labus@students.cvtech.edu',            role: 'user',  group: 'am' },
+  { username: 'Eric_Pouncy',           email: 'eric.pouncy@students.cvtech.edu',           role: 'user',  group: 'am' },
+  { username: 'Grant_Rayburn',         email: 'grant.rayburn@students.cvtech.edu',         role: 'user',  group: 'am' },
+  { username: 'Cooper_Remy',           email: 'cooper.remy@students.cvtech.edu',           role: 'user',  group: 'am' },
+  { username: 'Cole_Washington',       email: 'cole.washington@students.cvtech.edu',       role: 'user',  group: 'am' },
+  { username: 'Braxton_Wood',          email: 'braxton.wood@students.cvtech.edu',          role: 'user',  group: 'am' },
 
   // ── All Day ───────────────────────────────────────────────────────────────
-  { username: 'Garrett_Hughey',        email: 'garrett.hughey@students.cvtech.edu',        password: 'QEyFst5', role: 'admin', group: 'allday' },
-  { username: 'Bryceson_McDaniels',    email: 'bryceson.mcdaniels@students.cvtech.edu',    password: '3xuPkmZ', role: 'admin', group: 'allday' },
-  { username: 'Jackson_Reeves',        email: 'jackson.reeves@students.cvtech.edu',        password: 'speVcwh', role: 'admin', group: 'allday' },
+  { username: 'Garrett_Hughey',        email: 'garrett.hughey@students.cvtech.edu',        role: 'admin', group: 'allday' },
+  { username: 'Bryceson_McDaniels',    email: 'bryceson.mcdaniels@students.cvtech.edu',    role: 'admin', group: 'allday' },
+  { username: 'Jackson_Reeves',        email: 'jackson.reeves@students.cvtech.edu',        role: 'admin', group: 'allday' },
 
-  { username: 'Kyra_Lindsey',          email: 'kyra.lindsey@students.cvtech.edu',          password: 'LAzWYdX', role: 'user',  group: 'allday' },
-  { username: 'Gianna_Crawford',       email: 'gianna.crawford@students.cvtech.edu',       password: 'PMhJNne', role: 'user',  group: 'allday' },
-  { username: 'Clarence_Woodberry',    email: 'clarence.woodberry@students.cvtech.edu',    password: 'MxLWF3S', role: 'user',  group: 'allday' },
+  { username: 'Kyra_Lindsey',          email: 'kyra.lindsey@students.cvtech.edu',          role: 'user',  group: 'allday' },
+  { username: 'Gianna_Crawford',       email: 'gianna.crawford@students.cvtech.edu',       role: 'user',  group: 'allday' },
+  { username: 'Clarence_Woodberry',    email: 'clarence.woodberry@students.cvtech.edu',    role: 'user',  group: 'allday' },
 ];
 
 const APP_URL  = process.env.APP_URL || 'https://cistracker.net';
@@ -132,13 +143,15 @@ async function main() {
         continue;
       }
 
+      const tempPw = genTempPassword();
       const created_user = await userService.createUser({
         username: u.username,
         email:    u.email,
-        password: u.password,
+        password: tempPw,
         role:     u.role,
         mustChangePw: 1,
       });
+      u.password = tempPw; // make available for email
       if (u.group && u.group !== 'none') {
         userService.updateStudentGroup(created_user.id, u.group);
       }
