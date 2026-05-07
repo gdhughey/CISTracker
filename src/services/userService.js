@@ -70,7 +70,7 @@ function setMfa(userId, secret, enabled) {
 function listAll() {
   return db.prepare(`
     SELECT id, username, email, role, mfa_enabled, must_change_pw, locked_until,
-           failed_logins, created_at, updated_at
+           failed_logins, student_group, created_at, updated_at
     FROM users
     ORDER BY username
   `).all();
