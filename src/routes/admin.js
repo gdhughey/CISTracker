@@ -175,7 +175,7 @@ router.post('/locations', validate(locationSchema), (req, res) => {
   }
 });
 
-router.put('/locations/:id(\\d+)', validate(locationSchema.partial()), (req, res) => {
+router.put('/locations/:id(\\d+)', validate(locationSchema), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const loc = db.prepare('SELECT * FROM locations WHERE id = ?').get(id);
   if (!loc) return res.status(404).json({ error: 'Not found' });
@@ -183,14 +183,14 @@ router.put('/locations/:id(\\d+)', validate(locationSchema.partial()), (req, res
   try {
     db.prepare(`
       UPDATE locations SET
-        name        = COALESCE(?, name),
+        name        = ?,
         building    = ?,
         room        = ?,
         description = ?,
         updated_at  = datetime('now')
       WHERE id = ?
-    `).run(name ?? null, building ?? loc.building, room ?? loc.room, description ?? loc.description, id);
-    req.audit('location_update', name ?? loc.name);
+    `).run(name, building ?? null, room ?? null, description ?? null, id);
+    req.audit('location_update', name);
     res.json({ location: db.prepare('SELECT * FROM locations WHERE id = ?').get(id) });
   } catch (err) {
     if (err.message && err.message.includes('UNIQUE')) {

@@ -102,9 +102,9 @@ function update(id, fields) {
 
 function remove(id) {
   const tx = db.transaction(() => {
-    // checkout_log.equipment_id is NOT NULL with no ON DELETE CASCADE, so we
-    // must clear it before removing the equipment or SQLite will throw a FK
-    // constraint error on any item that has checkout history.
+    // Clear FK references before deleting — both columns are NOT NULL / no CASCADE.
+    // tickets.equipment_id is nullable so NULL is cleaner than deleting the ticket.
+    db.prepare('UPDATE tickets SET equipment_id = NULL WHERE equipment_id = ?').run(id);
     db.prepare('DELETE FROM checkout_log WHERE equipment_id = ?').run(id);
     db.prepare('DELETE FROM equipment WHERE id = ?').run(id);
   });
@@ -203,7 +203,7 @@ function getOverdue(daysThreshold) {
   // by passing a negative number; 0 means "past due right now".
   return db.prepare(`
     SELECT e.*, u.username AS checked_out_username, u.email AS checked_out_email,
-           CAST(julianday('now') - julianday(e.due_date) AS INTEGER) AS days_overdue
+           CAST(julianday('now') - julianday(e.due_date) AS INTEGER) AS days_out
     FROM equipment e
     JOIN users u ON u.id = e.checked_out_by
     WHERE e.status = 'checked_out'

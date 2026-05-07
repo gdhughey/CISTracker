@@ -1223,7 +1223,7 @@ async function handleScannedCode(code) {
 
 async function loadOverdueCount() {
   try {
-    const { items } = await api('/api/admin/overdue?days=3');
+    const { items } = await api('/api/admin/overdue?days=0');
     const badge = document.getElementById('overdueBadge');
     if (items && items.length > 0) {
       badge.textContent = items.length;
@@ -1240,7 +1240,7 @@ async function loadOverdue() {
     let items;
     if (ME.role === 'admin') {
       // Admin: fetch from server so we get days_out calculated server-side
-      const data = await api('/api/admin/overdue?days=3');
+      const data = await api('/api/admin/overdue?days=0');
       items = (data.items || []).map(item => ({
         ...item,
         days_out: item.days_out,
@@ -1249,7 +1249,7 @@ async function loadOverdue() {
       // Non-admin: derive from the already-loaded ITEMS list
       items = ITEMS.filter(i => getItemStatus(i) === 'overdue').map(i => ({
         ...i,
-        days_out: daysAgo(i.checked_out_at),
+        days_out: daysAgo(i.due_date),
       }));
     }
     if (!items || items.length === 0) {
