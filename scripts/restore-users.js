@@ -51,7 +51,7 @@ const USERS = [
   // ── All Day ───────────────────────────────────────────────────────────────
   { username: 'Garrett_Hughey',        email: 'garrett.hughey@students.cvtech.edu',        role: 'admin', group: 'allday' },
   { username: 'Bryceson_McDaniels',    email: 'bryceson.mcdaniels@students.cvtech.edu',    role: 'admin', group: 'allday' },
-  { username: 'Jackson_Reeves',        email: 'jackson.reeves@students.cvtech.edu',        role: 'admin', group: 'allday' },
+  { username: 'Jackson_Reeves',        email: 'jackson.reeves@cvtechonline.net',           role: 'admin', group: 'allday' },
 
   { username: 'Kyra_Lindsey',          email: 'kyra.lindsey@students.cvtech.edu',          role: 'user',  group: 'allday' },
   { username: 'Gianna_Crawford',       email: 'gianna.crawford@students.cvtech.edu',       role: 'user',  group: 'allday' },
