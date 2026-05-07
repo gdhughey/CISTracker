@@ -37,7 +37,6 @@ The DB filename is `cyberlab.db` for legacy reasons (renaming would orphan the p
 - **CSRF**: double-submit cookie pattern (`csrf_token` cookie + `X-CSRF-Token` header)
 - **Headers**: `helmet` with strict CSP (allows `unpkg.com` for CDN scripts)
 - **QR scanner**: `@zxing/browser` from CDN (NOT jsQR — that broke iOS Safari camera after 1 sec)
-- **Email**: Resend (transactional + ticket forwarding). NOT nodemailer (we explicitly don't depend on it; deleting it cleared the high-severity tar/node-pre-gyp CVE chain)
 - **Reverse proxy / TLS**: nginx on port 443 with mkcert local CA cert; Windows DNS override resolves `cistracker.net` to the LAN IP
 - **Remote access**: Tailscale (SSH on port 2222, replaces Cloudflare SSH tunnel)
 - **Process supervisor**: systemd
@@ -82,7 +81,7 @@ Frontend is **vanilla JS, no framework, no build step**. `public/js/app.js` is a
 │   │   ├── audit.js                   # attaches req.audit() to every request
 │   │   └── error.js                   # 404 + 500 handlers
 │   ├── routes/
-│   │   ├── auth.js                    # login, logout, register, mfa-*, change-password, forgot-password, reset-password
+│   │   ├── auth.js                    # login, logout, register, mfa-*, change-password
 │   │   ├── equipment.js               # inventory CRUD, lookup, label, checkout/checkin (admin can pass for_user_id for kiosk)
 │   │   ├── admin.js                   # /api/admin/users (CRUD + email change), /api/admin/audit, /api/admin/overdue
 │   │   ├── queue.js                   # waitlist for already-checked-out items
@@ -95,8 +94,6 @@ Frontend is **vanilla JS, no framework, no build step**. `public/js/app.js` is a
 │   │   ├── ticketService.js
 │   │   ├── queueService.js
 │   │   ├── auditService.js
-│   │   ├── reminderService.js         # node-cron daily overdue reminders
-│   │   ├── emailService.js            # Resend wrappers; one-and-only outbound mail surface
 │   │   ├── passkeyService.js          # SQLite layer for the passkeys table
 │   │   └── mfaService.js              # speakeasy TOTP + qrcode
 │   └── utils/
@@ -253,9 +250,6 @@ APP_URL=https://cistracker.net
 TLS_ENABLED=true         # toggles HSTS + upgrade-insecure-requests in CSP
 DB_PATH=./data/cyberlab.db
 SEED_ADMIN_PASSWORD=     # leave empty to auto-generate on first seed
-RESEND_API_KEY=
-RESEND_SUPPORT_FORWARD=  # where ticket creation emails go
-RESEND_DROPPED_FORWARD=  # where "ticket dropped without resolution" alerts go
 ```
 
 ---

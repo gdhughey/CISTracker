@@ -227,7 +227,7 @@ DB_PATH=./data/cyberlab.db
 SESSION_SECRET=${secret}
 TLS_ENABLED=${tls_enabled}
 APP_URL=${app_url}
-SEED_ADMIN_PASSWORD=Password1
+SEED_ADMIN_PASSWORD=
 EOF
     log "Wrote new ${env_path}"
   else

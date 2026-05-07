@@ -349,13 +349,26 @@ install_tailscale() {
     || warn "Tailscale install failed — install manually later if you want remote SSH"
 }
 
+configure_firewall() {
+  if command -v ufw >/dev/null 2>&1; then
+    log "Configuring UFW firewall rules (only takes effect if ufw is enabled)"
+    ufw allow 'Nginx Full' >/dev/null 2>&1 || true
+    # Block direct access to Node.js port — nginx is the only entry point
+    ufw deny 3000/tcp >/dev/null 2>&1 || true
+  fi
+}
+
 configure_ssh_port() {
   [[ -n "${SSH_EXTRA_PORT}" ]] || return
   log "Setting SSH port to ${SSH_EXTRA_PORT}"
   local sshd_config="/etc/ssh/sshd_config"
   sed -i '/^Port /d' "${sshd_config}"
   echo "Port ${SSH_EXTRA_PORT}" >> "${sshd_config}"
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow "${SSH_EXTRA_PORT}/tcp" >/dev/null 2>&1 || true
+  fi
   systemctl restart ssh
+  log "sshd listening on port ${SSH_EXTRA_PORT} only (port 22 removed)"
 }
 
 print_summary() {
@@ -406,6 +419,7 @@ main() {
   setup_tls
   run_migrations_and_seed
   configure_nginx
+  configure_firewall
   configure_ssh_port
   create_systemd_service
   install_tailscale
