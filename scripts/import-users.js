@@ -37,7 +37,7 @@ function genTempPassword() {
   const all    = upper + lower + digits;
   const pick   = (set) => set[crypto.randomBytes(1)[0] % set.length];
   let pw = pick(upper) + pick(lower) + pick(digits);
-  for (let i = pw.length; i < 8; i++) pw += pick(all);
+  for (let i = pw.length; i < 6; i++) pw += pick(all);
   return pw.split('').sort(() => crypto.randomBytes(1)[0] - 128).join('');
 }
 
