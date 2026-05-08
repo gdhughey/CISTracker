@@ -858,6 +858,11 @@ function updateDurationLabel(days) {
   const dueStr = due.toLocaleDateString('en-US', { month:'short', day:'numeric' });
   const el = document.getElementById('durationLabel');
   if (el) el.textContent = `Duration — ${days} day${days !== 1 ? 's' : ''} (due ${dueStr})`;
+  const slider = document.getElementById('coDuration');
+  if (slider) {
+    const pct = ((days - 1) / 29) * 100;
+    slider.style.background = `linear-gradient(to right, #6366f1 0%, #8b5cf6 ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`;
+  }
 }
 
 async function loadUserSelect() {
