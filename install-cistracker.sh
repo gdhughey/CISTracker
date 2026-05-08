@@ -704,6 +704,37 @@ print_summary() {
     echo "  3. ssh -p ${SSH_EXTRA_PORT} ${SUDO_USER:-root}@<tailscale-ip>  (from anywhere with Tailscale)"
     echo
   fi
+
+  echo "════════════════════════════════════════════════════════════"
+  echo "  MANUAL STEPS — do these after the installer finishes"
+  echo "════════════════════════════════════════════════════════════"
+  echo
+  if [[ -n "${CF_GLOBAL_API_KEY}" ]] || [[ -n "${CF_API_TOKEN}" ]]; then
+    echo "1. Cloudflare SSL mode (one-time, if not already set):"
+    echo "   → dash.cloudflare.com → cistracker.net → SSL/TLS → Overview"
+    echo "   → Set mode to: Full (Strict)"
+    echo
+    echo "2. Verify certbot auto-renewal is scheduled:"
+    echo "   sudo systemctl status certbot.timer"
+    echo "   (should show 'active (waiting)' — runs twice daily)"
+    echo
+    echo "3. Test renewal without actually renewing:"
+    echo "   sudo certbot renew --dry-run"
+    echo "   (should complete with no errors)"
+    echo
+  fi
+  echo "4. Re-import your users (lost with the RAID):"
+  echo "   Option A — CSV import in the app:"
+  echo "   → Log in as admin → Admin panel → Import Users → upload your CSV"
+  echo
+  echo "   Option B — command line (if you have a users.csv backup):"
+  echo "   sudo -u ${APP_USER} node ${APP_DIR}/scripts/import-users.js /path/to/users.csv"
+  echo
+  echo "5. Send welcome emails to users after importing:"
+  echo "   → Admin panel → Users → select all → Send Welcome Email"
+  echo "   (this resends temp passwords so users can log in)"
+  echo
+  echo "════════════════════════════════════════════════════════════"
 }
 
 main() {
