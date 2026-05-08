@@ -526,7 +526,7 @@ CF_IPV6_RANGES="
 configure_nginx() {
   log "Configuring Nginx reverse proxy"
 
-  if [[ -n "${STATIC_IP}" ]]; then
+  if [[ -n "${STATIC_IP}" ]] && [[ "${SKIP_CERTBOT}" != "1" ]]; then
     # Decide cert paths based on which TLS path ran
     local cert_pem key_pem
     if [[ -n "${CF_GLOBAL_API_KEY}" ]] || [[ -n "${CF_API_TOKEN}" ]]; then
