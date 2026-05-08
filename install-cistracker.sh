@@ -44,7 +44,8 @@ set -euo pipefail
 #   STATIC_IP        Server's IP address (public or LAN, required for HTTPS)
 #   STATIC_NETMASK   CIDR prefix length (default: 16)
 #   GATEWAY          LAN default gateway (default: 10.0.255.1)
-#   DNS_SERVER       LAN DNS server IP (default: 10.2.201.4)
+#   DNS_SERVER       Primary DNS server IP (default: 10.0.2.1)
+#   DNS_SERVER_2     Secondary DNS server IP (default: 10.2.201.4, set to "" to omit)
 #   DOMAIN           App domain name (default: cistracker.net)
 #   SSH_EXTRA_PORT   Extra SSH port for Tailscale access (default: 2222)
 #   SKIP_TAILSCALE   Set to 1 to skip Tailscale install (default: 0)
@@ -62,10 +63,11 @@ CF_API_TOKEN="${CF_API_TOKEN:-}"                        # Cloudflare scoped API 
 CF_EMAIL="${CF_EMAIL:-gdhughey0726@gmail.com}"          # Cloudflare account email (used with global key)
 CF_GLOBAL_API_KEY="${CF_GLOBAL_API_KEY:-}"              # Cloudflare Global API Key
 CERT_EMAIL="${CERT_EMAIL:-}"                            # Let's Encrypt account email (defaults to admin@DOMAIN)
-STATIC_IP="${STATIC_IP:-}"
-STATIC_NETMASK="${STATIC_NETMASK:-16}"   # /16 = 255.255.0.0 — change to 24 for typical /24 LANs
-GATEWAY="${GATEWAY:-10.0.255.1}"         # site-specific — set via env var if different
-DNS_SERVER="${DNS_SERVER:-10.2.201.4}"   # site-specific — set via env var if different
+STATIC_IP="${STATIC_IP:-10.0.2.127}"
+STATIC_NETMASK="${STATIC_NETMASK:-24}"
+GATEWAY="${GATEWAY:-10.0.255.1}"
+DNS_SERVER="${DNS_SERVER:-10.0.2.1}"
+DNS_SERVER_2="${DNS_SERVER_2:-10.2.201.4}"
 DOMAIN="${DOMAIN:-cistracker.net}"
 SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
@@ -93,6 +95,9 @@ configure_static_ip() {
   iface="$(ip -o link show | awk '$2 != "lo:" {print $2}' | head -1 | tr -d ':')"
 
   mkdir -p /etc/netplan
+  local dns_list="${DNS_SERVER}"
+  [[ -n "${DNS_SERVER_2}" ]] && dns_list="${DNS_SERVER}, ${DNS_SERVER_2}"
+
   cat > /etc/netplan/00-installer-config.yaml <<NETPLAN
 network:
   version: 2
@@ -104,7 +109,7 @@ network:
         - to: default
           via: ${GATEWAY}
       nameservers:
-        addresses: [${DNS_SERVER}]
+        addresses: [${dns_list}]
 NETPLAN
 
   netplan apply
