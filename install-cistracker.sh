@@ -49,7 +49,6 @@ set -euo pipefail
 #   DOMAIN           App domain name (default: cistracker.net)
 #   SSH_EXTRA_PORT   Extra SSH port for Tailscale access (default: 2222)
 #   SKIP_TAILSCALE   Set to 1 to skip Tailscale install (default: 0)
-#   SKIP_CERTBOT     Set to 1 to skip certbot/TLS entirely (useful when Let's Encrypt is down)
 #   MKCERT_VERSION   mkcert binary version used for LAN-only fallback (default: v1.4.4)
 
 APP_NAME="cistracker"
@@ -72,7 +71,7 @@ DNS_SERVER_2="${DNS_SERVER_2:-10.2.201.4}"
 DOMAIN="${DOMAIN:-cistracker.net}"
 SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
-SKIP_CERTBOT="${SKIP_CERTBOT:-0}"
+CERTBOT_OK=0   # set to 1 if certbot succeeds; controls nginx cert path
 MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"  # used only when CF_API_TOKEN is absent
 
 log() {
@@ -411,7 +410,7 @@ EOF
 
   # --keep-until-expiring makes this idempotent — skips renewal if cert is
   # still valid, re-issues if it's within 30 days of expiry.
-  certbot certonly \
+  if certbot certonly \
     --dns-cloudflare \
     --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
     --dns-cloudflare-propagation-seconds 30 \
@@ -419,13 +418,19 @@ EOF
     --email "${email}" \
     --agree-tos \
     --non-interactive \
-    --keep-until-expiring
-
-  log "Certificate issued:"
-  log "  Chain:  /etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
-  log "  Key:    /etc/letsencrypt/live/${DOMAIN}/privkey.pem"
-  log "Auto-renewal: certbot installs a systemd timer (certbot.timer) — verify with:"
-  log "  systemctl status certbot.timer"
+    --keep-until-expiring; then
+    CERTBOT_OK=1
+    log "Certificate issued:"
+    log "  Chain:  /etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    log "  Key:    /etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+    log "Auto-renewal: certbot installs a systemd timer (certbot.timer) — verify with:"
+    log "  systemctl status certbot.timer"
+  else
+    warn "certbot failed (Let's Encrypt may be down). Continuing with HTTP-only nginx."
+    warn "Re-run certbot once Let's Encrypt is back:"
+    warn "  sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini --dns-cloudflare-propagation-seconds 30 --domain ${DOMAIN} --email ${email} --agree-tos --non-interactive"
+    warn "Then: sudo systemctl reload nginx"
+  fi
 }
 
 # ── TLS: mkcert self-signed fallback (LAN-only, no Cloudflare token) ────────
@@ -470,11 +475,6 @@ setup_mkcert_cert() {
 # ── Dispatcher ───────────────────────────────────────────────────────────────
 
 setup_tls() {
-  if [[ "${SKIP_CERTBOT}" == "1" ]]; then
-    log "SKIP_CERTBOT=1 — skipping TLS setup (run certbot manually when Let's Encrypt is back up)"
-    return
-  fi
-
   if [[ -z "${STATIC_IP}" ]]; then
     log "No STATIC_IP set — skipping TLS setup"
     return
@@ -526,7 +526,7 @@ CF_IPV6_RANGES="
 configure_nginx() {
   log "Configuring Nginx reverse proxy"
 
-  if [[ -n "${STATIC_IP}" ]] && [[ "${SKIP_CERTBOT}" != "1" ]]; then
+  if [[ -n "${STATIC_IP}" ]] && [[ "${CERTBOT_OK}" == "1" ]]; then
     # Decide cert paths based on which TLS path ran
     local cert_pem key_pem
     if [[ -n "${CF_GLOBAL_API_KEY}" ]] || [[ -n "${CF_API_TOKEN}" ]]; then
