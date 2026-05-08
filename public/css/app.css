@@ -153,9 +153,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 /* ── Main content ── */
 .main-content {
   flex: 1; overflow-y: auto; display: flex; flex-direction: column;
-  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-attachment: local;
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(99,102,241,0.07) 0%, transparent 70%);
 }
 
 /* ── Top bar ── */
