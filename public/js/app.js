@@ -829,10 +829,12 @@ function openCheckoutModal(id) {
       </div>
       <div class="form-group">
         <label id="durationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
-        <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}"
-          style="width:100%;accent-color:var(--accent);cursor:pointer;margin:6px 0"
-          oninput="updateDurationLabel(this.value)">
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:2px">
+        <div class="slider-wrap">
+          <div class="slider-tooltip" id="coTooltip">${defaultDays}d</div>
+          <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}"
+            oninput="updateDurationLabel(this.value)">
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px">
           <span>1d</span><span>7d</span><span>14d</span><span>30d</span>
         </div>
       </div>
@@ -862,6 +864,13 @@ function updateDurationLabel(days) {
   if (slider) {
     const pct = ((days - 1) / 29) * 100;
     slider.style.background = `linear-gradient(to right, #6366f1 0%, #8b5cf6 ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`;
+    const tooltip = document.getElementById('coTooltip');
+    if (tooltip) {
+      const thumbW = 22;
+      const offset = thumbW / 2 - (pct / 100) * thumbW;
+      tooltip.style.left = `calc(${pct}% + ${offset}px)`;
+      tooltip.textContent = days + 'd';
+    }
   }
 }
 
