@@ -21,18 +21,26 @@ set -euo pipefail
 #
 # This script is idempotent. It is safe to re-run on a partially installed host.
 #
-# Usage (with Cloudflare — recommended for cistracker.net):
-#   sudo CF_API_TOKEN=<token> STATIC_IP=<server-public-ip> bash install-cistracker.sh
+# Usage (with Cloudflare Global API Key — simplest):
+#   sudo CF_GLOBAL_API_KEY=<key> bash install-cistracker.sh
 #
-#   The Cloudflare API token needs Zone → DNS → Edit permission for cistracker.net.
+#   Find your Global API Key at: https://dash.cloudflare.com/profile/api-tokens
+#   → "Global API Key" → View
+#
+# Usage (with scoped API token — more secure):
+#   sudo CF_API_TOKEN=<token> bash install-cistracker.sh
+#
+#   Scoped token needs Zone → DNS → Edit permission for cistracker.net.
 #   Create one at: https://dash.cloudflare.com/profile/api-tokens
 #
 # Usage (LAN-only, no Cloudflare):
 #   sudo STATIC_IP=10.0.2.10 bash install-cistracker.sh
 #
 # All options (pass as env vars):
-#   CF_API_TOKEN     Cloudflare API token (Zone:DNS:Edit) — enables Let's Encrypt DNS-01
-#   CERT_EMAIL       Email for Let's Encrypt account (default: admin@<DOMAIN>)
+#   CF_GLOBAL_API_KEY  Cloudflare Global API Key — enables Let's Encrypt DNS-01 (simplest)
+#   CF_EMAIL           Cloudflare account email (default: gdhughey0726@gmail.com)
+#   CF_API_TOKEN       Cloudflare scoped API token (Zone:DNS:Edit) — alternative to global key
+#   CERT_EMAIL         Email for Let's Encrypt account (default: admin@<DOMAIN>)
 #   STATIC_IP        Server's IP address (public or LAN, required for HTTPS)
 #   STATIC_NETMASK   CIDR prefix length (default: 16)
 #   GATEWAY          LAN default gateway (default: 10.0.255.1)
@@ -50,8 +58,10 @@ APP_PORT="${APP_PORT:-3000}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 NPM_PRIMARY_REGISTRY="${NPM_PRIMARY_REGISTRY:-https://registry.npmjs.org/}"
 NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}"
-CF_API_TOKEN="${CF_API_TOKEN:-}"          # Cloudflare API token (Zone:DNS:Edit)
-CERT_EMAIL="${CERT_EMAIL:-}"             # Let's Encrypt account email
+CF_API_TOKEN="${CF_API_TOKEN:-}"                        # Cloudflare scoped API token (Zone:DNS:Edit)
+CF_EMAIL="${CF_EMAIL:-gdhughey0726@gmail.com}"          # Cloudflare account email (used with global key)
+CF_GLOBAL_API_KEY="${CF_GLOBAL_API_KEY:-}"              # Cloudflare Global API Key
+CERT_EMAIL="${CERT_EMAIL:-}"                            # Let's Encrypt account email (defaults to admin@DOMAIN)
 STATIC_IP="${STATIC_IP:-}"
 STATIC_NETMASK="${STATIC_NETMASK:-16}"   # /16 = 255.255.0.0 — change to 24 for typical /24 LANs
 GATEWAY="${GATEWAY:-10.0.255.1}"         # site-specific — set via env var if different
