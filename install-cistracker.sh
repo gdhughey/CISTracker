@@ -384,9 +384,20 @@ setup_letsencrypt_cf() {
 
   # Credentials file — readable only by root
   mkdir -p /etc/letsencrypt
-  cat > /etc/letsencrypt/cloudflare.ini <<EOF
+
+  if [[ -n "${CF_GLOBAL_API_KEY}" ]]; then
+    cat > /etc/letsencrypt/cloudflare.ini <<EOF
+dns_cloudflare_email = ${CF_EMAIL}
+dns_cloudflare_api_key = ${CF_GLOBAL_API_KEY}
+EOF
+    log "Using Cloudflare Global API Key for DNS-01 challenge"
+  else
+    cat > /etc/letsencrypt/cloudflare.ini <<EOF
 dns_cloudflare_api_token = ${CF_API_TOKEN}
 EOF
+    log "Using Cloudflare scoped API token for DNS-01 challenge"
+  fi
+
   chmod 600 /etc/letsencrypt/cloudflare.ini
 
   local email="${CERT_EMAIL:-admin@${DOMAIN}}"
@@ -457,11 +468,11 @@ setup_tls() {
     return
   fi
 
-  if [[ -n "${CF_API_TOKEN}" ]]; then
+  if [[ -n "${CF_GLOBAL_API_KEY}" ]] || [[ -n "${CF_API_TOKEN}" ]]; then
     install_certbot
     setup_letsencrypt_cf
   else
-    warn "CF_API_TOKEN not set — falling back to mkcert self-signed cert (LAN-only)."
+    warn "CF_GLOBAL_API_KEY and CF_API_TOKEN not set — falling back to mkcert self-signed cert (LAN-only)."
     warn "Cloudflare proxy requires a real cert. Set CF_API_TOKEN to fix this."
     install_mkcert
     setup_mkcert_cert
@@ -506,7 +517,7 @@ configure_nginx() {
   if [[ -n "${STATIC_IP}" ]]; then
     # Decide cert paths based on which TLS path ran
     local cert_pem key_pem
-    if [[ -n "${CF_API_TOKEN}" ]]; then
+    if [[ -n "${CF_GLOBAL_API_KEY}" ]] || [[ -n "${CF_API_TOKEN}" ]]; then
       cert_pem="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
       key_pem="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
     else
