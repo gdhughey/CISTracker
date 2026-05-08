@@ -851,6 +851,7 @@ function openCheckoutModal(id) {
   `;
   document.getElementById('modalOverlay').classList.add('open');
   if (isAdmin) loadUserSelect();
+  requestAnimationFrame(() => updateDurationLabel(defaultDays));
 }
 
 function updateDurationLabel(days) {
