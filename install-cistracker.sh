@@ -473,7 +473,7 @@ setup_tls() {
     setup_letsencrypt_cf
   else
     warn "CF_GLOBAL_API_KEY and CF_API_TOKEN not set — falling back to mkcert self-signed cert (LAN-only)."
-    warn "Cloudflare proxy requires a real cert. Set CF_API_TOKEN to fix this."
+    warn "Cloudflare proxy requires a real cert. Set CF_GLOBAL_API_KEY (or CF_API_TOKEN) to fix this."
     install_mkcert
     setup_mkcert_cert
   fi
