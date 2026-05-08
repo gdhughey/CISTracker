@@ -670,7 +670,7 @@ print_summary() {
     echo "  https://${DOMAIN}"
     echo
 
-    if [[ -n "${CF_API_TOKEN}" ]]; then
+    if [[ -n "${CF_GLOBAL_API_KEY}" ]] || [[ -n "${CF_API_TOKEN}" ]]; then
       echo "SSL: Let's Encrypt (trusted everywhere)"
       echo "  Cert: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
       echo "  Auto-renewal: systemctl status certbot.timer"
@@ -680,14 +680,15 @@ print_summary() {
       echo
     else
       echo "SSL: mkcert self-signed (LAN-only — not trusted by Cloudflare)"
-      echo "  CA root: /etc/ssl/cistracker/rootCA.crt"
-      echo "  Distribute via Group Policy to trust on LAN machines."
       echo
-      echo "  From a Windows machine:"
-      echo "    scp ${SUDO_USER:-root}@${lan_ip}:/etc/ssl/cistracker/rootCA.crt ."
-      echo "  Then import into:"
-      echo "    Computer Configuration → Policies → Windows Settings → Security Settings"
-      echo "    → Public Key Policies → Trusted Root Certification Authorities → Import"
+      echo "To enable HTTPS with a trusted Let's Encrypt cert, re-run with your"
+      echo "Cloudflare Global API Key:"
+      echo
+      echo "  curl -fsSL https://raw.githubusercontent.com/gdhughey/CISTracker/main/install-cistracker.sh \\"
+      echo "    | sudo CF_GLOBAL_API_KEY=<your-key> bash"
+      echo
+      echo "  Get your key at: https://dash.cloudflare.com/profile/api-tokens"
+      echo "  (Global API Key → View)"
       echo
     fi
   else
