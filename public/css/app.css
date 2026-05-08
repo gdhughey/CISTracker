@@ -608,6 +608,31 @@ td { padding: 12px 16px; vertical-align: middle; }
   to   { transform: translateX(-50%) translateY(0); opacity: 1; }
 }
 
+/* ── Range slider ── */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+  background: linear-gradient(to right, #6366f1 0%, #8b5cf6 50%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.12) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  box-shadow: 0 0 10px rgba(99,102,241,0.7);
+  cursor: pointer; transition: box-shadow 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 16px rgba(99,102,241,0.95);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px; height: 18px; border-radius: 50%; border: none;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  box-shadow: 0 0 10px rgba(99,102,241,0.7); cursor: pointer;
+}
+input[type="range"]::-moz-range-track {
+  height: 4px; border-radius: 2px; background: rgba(255,255,255,0.12);
+}
+
 /* ── Login page ── */
 .login-page {
   height: 100vh; display: flex; align-items: center; justify-content: center;
