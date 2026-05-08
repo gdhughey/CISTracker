@@ -93,6 +93,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   width: 34px; height: 34px; border-radius: 10px; object-fit: cover;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
+.login-logo-img {
+  width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+}
 .logo-text {
   font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: -0.01em;
 }
