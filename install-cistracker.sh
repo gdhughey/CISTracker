@@ -49,6 +49,7 @@ set -euo pipefail
 #   DOMAIN           App domain name (default: cistracker.net)
 #   SSH_EXTRA_PORT   Extra SSH port for Tailscale access (default: 2222)
 #   SKIP_TAILSCALE   Set to 1 to skip Tailscale install (default: 0)
+#   SKIP_CERTBOT     Set to 1 to skip certbot/TLS entirely (useful when Let's Encrypt is down)
 #   MKCERT_VERSION   mkcert binary version used for LAN-only fallback (default: v1.4.4)
 
 APP_NAME="cistracker"
@@ -71,6 +72,7 @@ DNS_SERVER_2="${DNS_SERVER_2:-10.2.201.4}"
 DOMAIN="${DOMAIN:-cistracker.net}"
 SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
+SKIP_CERTBOT="${SKIP_CERTBOT:-0}"
 MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"  # used only when CF_API_TOKEN is absent
 
 log() {
@@ -468,6 +470,11 @@ setup_mkcert_cert() {
 # ── Dispatcher ───────────────────────────────────────────────────────────────
 
 setup_tls() {
+  if [[ "${SKIP_CERTBOT}" == "1" ]]; then
+    log "SKIP_CERTBOT=1 — skipping TLS setup (run certbot manually when Let's Encrypt is back up)"
+    return
+  fi
+
   if [[ -z "${STATIC_IP}" ]]; then
     log "No STATIC_IP set — skipping TLS setup"
     return
