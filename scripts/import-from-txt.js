@@ -112,9 +112,11 @@ async function sendWelcomeEmail(u) {
 }
 
 async function main() {
-  const filePath = process.argv[2];
+  const args = process.argv.slice(2);
+  const resendOnly = args.includes('--resend-emails');
+  const filePath = args.find(a => !a.startsWith('--'));
   if (!filePath || !fs.existsSync(filePath)) {
-    console.error('Usage: sudo node scripts/import-from-txt.js "/path/to/CIS Tracker Project.txt"');
+    console.error('Usage: sudo node scripts/import-from-txt.js "/path/to/file.txt" [--resend-emails]');
     process.exit(1);
   }
 
@@ -128,8 +130,19 @@ async function main() {
   const toEmail = [];
 
   for (const u of users) {
-    if (userService.getByUsername(u.username) || userService.getByEmail(u.email)) {
-      console.log(`SKIP  ${u.username.padEnd(28)} already exists`);
+    const existing = userService.getByUsername(u.username) || userService.getByEmail(u.email);
+    if (existing) {
+      if (resendOnly) {
+        // Queue email resend with a new temp password
+        const tempPw = genTempPassword();
+        await userService.setPassword(existing.id, tempPw);
+        userService.forcePwChange(existing.id);
+        u.password = tempPw;
+        toEmail.push(u);
+        console.log(`RESEND ${u.username.padEnd(28)} queued`);
+      } else {
+        console.log(`SKIP  ${u.username.padEnd(28)} already exists`);
+      }
       skipped++;
       continue;
     }
@@ -152,15 +165,17 @@ async function main() {
 
   let emailed = 0, emailFailed = 0;
   if (SEND_EMAIL && toEmail.length) {
-    console.log(`\nSending ${toEmail.length} welcome emails...`);
-    const results = await Promise.allSettled(toEmail.map(u => sendWelcomeEmail(u)));
-    for (let i = 0; i < results.length; i++) {
-      if (results[i].status === 'fulfilled') {
+    console.log(`\nSending ${toEmail.length} welcome emails (rate-limited)...`);
+    for (const u of toEmail) {
+      try {
+        await sendWelcomeEmail(u);
+        console.log(`  emailed ${u.username}`);
         emailed++;
-      } else {
-        console.warn(`  email failed for ${toEmail[i].username}: ${results[i].reason?.message}`);
+      } catch (err) {
+        console.warn(`  email failed for ${u.username}: ${err.message}`);
         emailFailed++;
       }
+      await new Promise(r => setTimeout(r, 300)); // stay under 5/sec
     }
   }
 
