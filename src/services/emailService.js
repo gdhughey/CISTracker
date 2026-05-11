@@ -36,14 +36,16 @@ function wrap(content) {
 </html>`;
 }
 
-async function send({ to, subject, html }) {
+async function send({ to, subject, html, cc }) {
   const resend = getClient();
   if (!resend) {
     console.warn('[email] RESEND_API_KEY not set — skipping email to', to);
     return;
   }
   try {
-    await resend.emails.send({ from: config.resend.from, to, subject, html });
+    const payload = { from: config.resend.from, to, subject, html };
+    if (cc && cc.length) payload.cc = cc;
+    await resend.emails.send(payload);
   } catch (err) {
     console.warn('[email] Failed to send to', to, '—', err.message);
   }
@@ -103,6 +105,7 @@ async function sendEmailChanged(newEmail, username) {
 async function sendQueueNotification(user, equipmentName) {
   await send({
     to: user.email,
+    cc: config.resend.adminEmails,
     subject: 'Your waitlisted item is now available',
     html: wrap(`
       <p>Hi <strong style="color:#fff;">${user.username}</strong>,</p>
@@ -148,6 +151,7 @@ async function sendTicketConfirmation(user, ticket) {
     : '';
   await send({
     to: user.email,
+    cc: config.resend.adminEmails,
     subject: `We received your support ticket #${ticket.id}`,
     html: wrap(`
       <p>Hi <strong style="color:#fff;">${user.username}</strong>,</p>
@@ -170,6 +174,7 @@ async function sendTicketStatusUpdate(user, ticket) {
   const color = statusColors[ticket.status] || '#6b7280';
   await send({
     to: user.email,
+    cc: config.resend.adminEmails,
     subject: `Your ticket #${ticket.id} has been updated`,
     html: wrap(`
       <p>Hi <strong style="color:#fff;">${user.username}</strong>,</p>
