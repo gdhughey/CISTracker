@@ -111,12 +111,10 @@ setSingle('Cisco 3560 switch', 'FOC1245Z3FT');
 // Single-SN networking items
 setSingle('NetGear VPN Firewall',    '1BU4187X0124B');
 setSingle('Microsoft LifeCam Studio Webcam', '258601971594');
-setSingle('hp optical drive',        '6RGS829484');
 setSingle('TRENDnet kvm switch',     'UN16158030253');
-setSingle('Dell Computer',           'KA141321');
-setSingle('Windows XP Laptop',       '6516181');
 setSingle('ChromeCast',              '4926101PJK38');
-setSingle('Switching Adapter',       '0T1321');
+// NOTE: 'hp optical drive', 'Dell Computer', 'Windows XP Laptop', 'Switching Adapter'
+// not found in equipment table — skipped
 
 // ═══════════════════════════════════════════════════════════════════════
 // SOUTH SHELVES — HP monitors, keyboards, mice, peripherals
@@ -131,92 +129,75 @@ addUnits('HP LV1911 monitor', [
 
 setSingle('Samsung SyncMaster S20B350', 'Z4W8HCLC603657J');
 
-addUnits('Keyboard', [
-  // Lenovo
-  {sn:'1649665',notes:'Lenovo'},{sn:'0611445',notes:'Lenovo'},{sn:'1873841',notes:'Lenovo'},
-  {sn:'1695757',notes:'Lenovo'},{sn:'3779193',notes:'Lenovo'},{sn:'1795818',notes:'Lenovo'},
-  {sn:'1378441',notes:'Lenovo'},{sn:'1010675',notes:'Lenovo'},{sn:'1101546',notes:'Lenovo'},
-  {sn:'0001248',notes:'Lenovo'},{sn:'0507266',notes:'Lenovo'},{sn:'0803688',notes:'Lenovo'},
-  {sn:'2138188',notes:'Lenovo'},{sn:'1951281',notes:'Lenovo'},{sn:'3981146',notes:'Lenovo'},
-  {sn:'1352931',notes:'Lenovo'},{sn:'1333654',notes:'Lenovo'},{sn:'3481922',notes:'Lenovo'},
-  {sn:'0091719',notes:'Lenovo'},{sn:'0897832',notes:'Lenovo'},{sn:'01102585',notes:'Lenovo'},
-  {sn:'1669029',notes:'Lenovo'},{sn:'1813242',notes:'Lenovo'},{sn:'01165833',notes:'Lenovo'},
-  {sn:'1951319',notes:'Lenovo'},{sn:'3727240',notes:'Lenovo'},
-  // Dell
-  {sn:'0081N8-LO300-295-G2HO-A02',notes:'Dell'},{sn:'0RKR0N-71616-689-22IB-A03',notes:'Dell'},
-  {sn:'0081N8-LO300-295-G2HL-A02',notes:'Dell'},{sn:'0081N8-LO300-29C-0AFK-A01',notes:'Dell'},
-  {sn:'0081N8-LO300-295-G0SB-A02',notes:'Dell'},{sn:'0RKR0N-LO300-79S-0SIE-A03',notes:'Dell'},
-  {sn:'0081N8-LO300-295-0BTB-A01',notes:'Dell'},{sn:'0RKR0N-71616-689-21IX-A03',notes:'Dell'},
-  {sn:'0RKR0N-71616-67S-02TF-A03',notes:'Dell'},{sn:'0081N8-LO300-295-G2HN-A02',notes:'Dell'},
-  {sn:'0RKR0N-71616-689-22CQ-A03',notes:'Dell'},{sn:'0RKR0N-71616-689-24QL-A03',notes:'Dell'},
-  {sn:'0081N8-LO300-295-G0TT-A02',notes:'Dell'},{sn:'0RKR0N-71616-67U-0HLS-A03',notes:'Dell'},
-  {sn:'0081N8-LO300-295-G2HT-A02',notes:'Dell'},{sn:'0081N8-LO300-295-G2HH-A02',notes:'Dell'},
-  {sn:'0081N8-LO300-295-G2HZ-A02',notes:'Dell'},
-  {sn:'C124500214',notes:'Key Tronic, PS2 connector'},
+addUnits('Keyboard Lenovo', [
+  {sn:'1649665'},{sn:'0611445'},{sn:'1873841'},{sn:'1695757'},{sn:'3779193'},{sn:'1795818'},
+  {sn:'1378441'},{sn:'1010675'},{sn:'1101546'},{sn:'0001248'},{sn:'0507266'},{sn:'0803688'},
+  {sn:'2138188'},{sn:'1951281'},{sn:'3981146'},{sn:'1352931'},{sn:'1333654'},{sn:'3481922'},
+  {sn:'0091719'},{sn:'0897832'},{sn:'01102585'},{sn:'1669029'},{sn:'1813242'},{sn:'01165833'},
+  {sn:'1951319'},{sn:'3727240'},
+]);
+
+addUnits('Keyboard Dell', [
+  {sn:'0081N8-LO300-295-G2HO-A02'},{sn:'0RKR0N-71616-689-22IB-A03'},
+  {sn:'0081N8-LO300-295-G2HL-A02'},{sn:'0081N8-LO300-29C-0AFK-A01'},
+  {sn:'0081N8-LO300-295-G0SB-A02'},{sn:'0RKR0N-LO300-79S-0SIE-A03'},
+  {sn:'0081N8-LO300-295-0BTB-A01'},{sn:'0RKR0N-71616-689-21IX-A03'},
+  {sn:'0RKR0N-71616-67S-02TF-A03'},{sn:'0081N8-LO300-295-G2HN-A02'},
+  {sn:'0RKR0N-71616-689-22CQ-A03'},{sn:'0RKR0N-71616-689-24QL-A03'},
+  {sn:'0081N8-LO300-295-G0TT-A02'},{sn:'0RKR0N-71616-67U-0HLS-A03'},
+  {sn:'0081N8-LO300-295-G2HT-A02'},{sn:'0081N8-LO300-295-G2HH-A02'},
+  {sn:'0081N8-LO300-295-G2HZ-A02'},
+]);
+
+// Key Tronic PS2 keyboard → Keyboard (unmarked)
+addUnits('Keyboard (unmarked)', [
+  {sn:'C124500214',notes:'Key Tronic PS2'},
   {sn:'IMJS013121009810',notes:'No brand'},
 ]);
 
-addUnits('Mouse', [
-  {sn:'009NK2-73826-682-07V7',notes:'Dell'},{sn:'065K5F-LO300-2AH-0I3N',notes:'Dell'},
-  {sn:'0DV0RH-LO300-79T-058M',notes:'Dell'},{sn:'009NK2-73826-67U-0D6Q',notes:'Dell'},
-  {sn:'009NK2-73826-686-1TLS',notes:'Dell'},{sn:'009NK2-73826-686-1U2R',notes:'Dell'},
-  {sn:'009NK2-73826-686-1UON',notes:'Dell'},{sn:'0DV0RH-L030?-70Y-T012A',notes:'Dell'},
-  {sn:'065K5F-LO300-2AH-0J0P',notes:'Dell'},{sn:'HC7470C0CEV',notes:'Dell'},
-  {sn:'HC8200B0XKH',notes:'Dell'},{sn:'CN-065KSF-LO300-2AH-0HXP',notes:'Dell'},
-  {sn:'111157-109283',notes:'Gear Head'},
-  {sn:'FATSK0JUJZCFJO',notes:'HP'},
-  {sn:'1151002747',notes:'Key Tronic PS2'},{sn:'1151002741',notes:'Key Tronic PS2'},
-  {sn:'1151000568',notes:'Key Tronic'},{sn:'1151000040',notes:'Key Tronic'},
-  {sn:'1151002642',notes:'Key Tronic'},
-  {sn:'1310HS02LFG8',notes:'Logitech'},{sn:'810-001243',notes:'Logitech'},{sn:'831087-A000',notes:'Logitech'},
-  {sn:'120402213',notes:'SYX Systemax'},{sn:'120402229',notes:'SYX Systemax'},
-  {sn:'120402027',notes:'SYX Systemax'},{sn:'120402220',notes:'SYX Systemax'},
-  {sn:'120402227',notes:'SYX Systemax'},{sn:'120402284',notes:'SYX Systemax'},
-  {sn:'120402246',notes:'SYX Systemax'},{sn:'120402209',notes:'SYX Systemax'},
-  {sn:'120402035',notes:'SYX Systemax'},{sn:'120402235',notes:'SYX Systemax'},
-  {sn:'120402297',notes:'SYX Systemax'},
+addUnits('Mouse Dell', [
+  {sn:'009NK2-73826-682-07V7'},{sn:'065K5F-LO300-2AH-0I3N'},
+  {sn:'0DV0RH-LO300-79T-058M'},{sn:'009NK2-73826-67U-0D6Q'},
+  {sn:'009NK2-73826-686-1TLS'},{sn:'009NK2-73826-686-1U2R'},
+  {sn:'009NK2-73826-686-1UON'},{sn:'0DV0RH-L030?-70Y-T012A'},
+  {sn:'065K5F-LO300-2AH-0J0P'},{sn:'HC7470C0CEV'},
+  {sn:'HC8200B0XKH'},{sn:'CN-065KSF-LO300-2AH-0HXP'},
 ]);
+
+addUnits('Mouse Key Tronic (PS2)', [
+  {sn:'1151002747'},{sn:'1151002741'},
+]);
+
+addUnits('Mouse Key Tronic', [
+  {sn:'1151000568'},{sn:'1151000040'},{sn:'1151002642'},
+]);
+
+addUnits('Mouse Logitech', [
+  {sn:'1310HS02LFG8'},{sn:'810-001243'},{sn:'831087-A000'},
+]);
+
+addUnits('Mouse SYX Systemax', [
+  {sn:'120402213'},{sn:'120402229'},{sn:'120402027'},{sn:'120402220'},
+  {sn:'120402227'},{sn:'120402284'},{sn:'120402246'},{sn:'120402209'},
+  {sn:'120402035'},{sn:'120402235'},{sn:'120402297'},
+]);
+
+// Gear Head (111157-109283) and HP (FATSK0JUJZCFJO) mice have no matching DB item — skipped
 
 // South shelves — individual laptops/desktops
 setSingle('Dell Laptop',            '7ZX4102');
 setSingle('DELL Inspiron 11 300 series 3137', '25Y4102');
 setSingle('TRENDnet TK-803R',       'UN16158030218');
-setSingle('IDE floppy-disk drive',  'CN-05U692-69802-39Q-027D');
-setSingle('DELL 65W LAPTOP AC ADAPTER', 'CN-06TM1C-72438-64J-1A0D-A05');
-setSingle('AC ADAPTER',             '232X0462C01');
-setSingle('HP Compaq Power supply case holder', 'S1-457651');
-setSingle('Spare DVD drive',        '410125-200');
-setSingle('Switch/Catalyst 2950 Series', '9113790');
+setSingle('AC Adapter',              '232X0462C01');
+setSingle('HP Compaq Spare Case',   'S1-457651');
+// IDE floppy-disk drive, Spare DVD drive, Switch/Catalyst 2950 Series — not in DB, skipped
 
 addUnits('Dell Laptop charger 65w', [
   {sn:'OHN662-47890-78P-A5EV'},{sn:'OHN662-47890-88K-A4HT'},
 ]);
 setSingle('Dell Laptop charger 90w', '09T215-71615-56H-0463');
 
-// Optical drives (South Shelves)
-addUnits('optic disc drive', [
-  {sn:'Drw-24b1st-n28',notes:'Asus'},{sn:'Drw-24b1st-n28',notes:'Asus'},{sn:'Drw-24b1st-n28',notes:'Asus'},
-  {sn:'405hcft023483',notes:'LG'},{sn:'405hcpy023728',notes:'LG'},
-  {sn:'2M8303507368 3743524602',notes:'Lite-on'},
-  {sn:'B9HCBP2086799',notes:'HP'},{sn:'934CG009259',notes:'HP'},
-  {sn:'R93E68ED302XKB',notes:'Superwritemaster'},{sn:'018CD061637',notes:'HP'},
-  {sn:'6rws210931',notes:'HP'},{sn:'6rgs829593',notes:'HP'},{sn:'6rgs829502',notes:'HP'},
-  {sn:'6rgs829747',notes:'HP'},{sn:'6rgs815581',notes:'HP'},
-  {sn:'344945005430',notes:'HP'},{sn:'286852416656',notes:'HP'},{sn:'286852419253',notes:'HP'},
-  {sn:'6rds365527',notes:'HP'},{sn:'68bs964261',notes:'HP'},{sn:'947ch002785',notes:'HP'},
-  {sn:'934cg006925',notes:'HP'},{sn:'244935016794',notes:'HP'},{sn:'344935009602',notes:'HP'},
-  {sn:'405hcrn023726',notes:'LG'},
-]);
-
-// CD drives (south shelves)
-addUnits('CD drive', [
-  {sn:'95e-00qw',notes:'Dell'},{sn:'08J15V-HLCOO-95E-00QY-A03',notes:'Dell'},
-  {sn:'08J15V-HLCOO-95E-0008-A03',notes:'Dell'},{sn:'08J15V-HLC00-95E-0006-A03',notes:'Dell'},
-  {sn:'08J15V-HLCOO-95E-0000-A03',notes:'Dell'},{sn:'08J15V - HLCOO-95E-00QV-A03',notes:'Dell'},
-  {sn:'95e-00qr',notes:'Dell'},{sn:'6F8313402054',notes:'Liteon'},
-  {sn:'95e-00qy',notes:'Dell'},{sn:'D6D0AD009942',notes:'Asus'},
-  {sn:'95e-00qx',notes:'Dell'},{sn:'511hlnp049503',notes:'LG'},{sn:'511hlux049502',notes:'LG'},
-]);
+// Optical / CD drives from South Shelves — no generic optical-drive item in DB, skipped
 
 // NIC cards
 addUnits('NIC Card', [
@@ -276,15 +257,19 @@ addUnits('MSI NVIDIA GEFORCE GT 710 2GB DDR3', [
   {sn:'602-V809-Z758T1906001768'},
 ]);
 
-addUnits('MSI RADEON HD 6450', [
+// V212 board = R6450-MD1GD3/LP (1GB); V809-1020 board = R6450-2GD3H/LP (2GB)
+addUnits('MSI Radeon HD 6450 (R6450-MD1GD3/LP)', [
   {sn:'602-V212-510B1707000871'},{sn:'602-V212-510B1707000865'},
-  {sn:'602-V809-1020SD1807000152'},{sn:'602-V809-1020SD1807000268'},
-  {sn:'602-V809-1020SD1807000574'},{sn:'602-V809-1020SD1807000155'},
-  {sn:'602-V809-1020SD1807000270'},{sn:'602-V212-510B1707001324'},
+  {sn:'602-V212-510B1707001324'},{sn:'602-V809-1020SD1807000152'},
+]);
+
+addUnits('MSI Radeon HD 6450 (R6450-2GD3H/LP)', [
+  {sn:'602-V809-1020SD1807000268'},{sn:'602-V809-1020SD1807000574'},
+  {sn:'602-V809-1020SD1807000155'},{sn:'602-V809-1020SD1807000270'},
   {sn:'602-V809-1020SD1807000153'},{sn:'602-V809-1020SD1807000572'},
 ]);
 
-addUnits('VisionTek 5570', [
+addUnits('VisionTek 5570 1GB PCIe', [
   {sn:'VG419020000090'},{sn:'VG319060000055'},{sn:'VG419020001'},
   {sn:'VG319050000291'},{sn:'VG319060000105'},{sn:'VG418120000891'},
 ]);
@@ -406,7 +391,7 @@ addUnits('TRANSCEND SSD370S', [
   {sn:'C43451-0128'},{sn:'C43451-0105'},{sn:'C43451-0222'},{sn:'C43451-0201'},
 ]);
 
-addUnits('WD BLUE', [
+addUnits('WD Blue SSD', [
   {sn:'171804423656'},{sn:'171804421752'},{sn:'174539804730'},{sn:'174539806979'},
   {sn:'174539805989'},{sn:'174539802053'},{sn:'171804433583'},{sn:'174539802390'},
   {sn:'174539802128'},{sn:'WXA1A33K1180'},{sn:'WXE1E13DZXV8'},{sn:'WXE1E13DMDK6'},
@@ -415,23 +400,19 @@ addUnits('WD BLUE', [
 
 addUnits('WD Scorpio', [
   {sn:'WXC408068178'},{sn:'WXC108351091'},{sn:'WXEX08RYL523'},{sn:'WXE608NY7457'},
-]);
-
-addUnits('WD SCORPIO BLUE', [
+  // WD Scorpio Blue variant — same item family
   {sn:'WXR0E99VHA64'},{sn:'WX91A4132501'},{sn:'WXBAA1174774'},
   {sn:'WX31A33P4817'},{sn:'WX51A43L0956'},
 ]);
 
-addUnits('Western Digital', [
+addUnits('Western Digital HDD', [
   {sn:'WCAP93139635'},{sn:'WMAP94426242'},{sn:'WMAP9F144021'},{sn:'WCAT16558817'},
   {sn:'WCAPZ2087351'},{sn:'WCAPZ1747683'},{sn:'WMAP9E126561'},{sn:'WMA8H4060345'},
-]);
-
-addUnits('Western Digital Blue', [
+  // Western Digital Blue variant
   {sn:'WCAV3F316410'},{sn:'WCAV3F317433'},
 ]);
 
-addUnits('Seagate', [
+addUnits('Seagate HDD', [
   {sn:'5NH1BD71'},{sn:'5LY4PSA8'},{sn:'5LY78KSB'},{sn:'5VC1DA7'},{sn:'5LY79M7Z'},
   {sn:'5RX8AAHT'},{sn:'9RXN9S46'},{sn:'9RX4GHV3'},{sn:'9RX18G3V'},{sn:'9RX6BZX6'},
   {sn:'9RXNDBGP'},{sn:'6VY12W8Q'},{sn:'5YD4YXQ5'},{sn:'9RX5W1EF'},{sn:'9RX4J68F'},
@@ -439,14 +420,14 @@ addUnits('Seagate', [
   {sn:'9VY1C85T'},
 ]);
 
-addUnits('Hitachi', [
+addUnits('Hitachi HDD', [
   {sn:'080510DP0B30DQGVJ5TP'},{sn:'SGHYE3GB'},{sn:'KGDWP2BE'},{sn:'SB22DBKGFLHGRN'},
   {sn:'JQ3B012K'},{sn:'MM2VJZEC'},{sn:'MM2PV1WC'},{sn:'MM1TU6UA'},{sn:'MM33W52C'},
   {sn:'HV1YBTDA'},{sn:'HV2ZD5JH'},{sn:'JQ3D9LPK'},{sn:'HV0AT2XE'},{sn:'JQ2BYWNH'},
   {sn:'JQ271XLK'},
 ]);
 
-addUnits('Toshiba', [
+addUnits('Toshiba Hard Drive', [
   {sn:'779QT4CNT'},{sn:'961Y2296S'},{sn:'95065293T'},{sn:'32Q0T0JJT'},{sn:'72JEC0X7T'},
   {sn:'32Q0T0JKT'},{sn:'18ESTCJ5T'},{sn:'188CTEI9T'},{sn:'Y7L0T09GT'},{sn:'22F3C1DJT'},
   {sn:'MQ01ABD050'},{sn:'570MT02FT'},{sn:'424UC1H1T'},{sn:'832ESZYFS'},{sn:'832ES02DS'},
@@ -457,13 +438,13 @@ addUnits('Toshiba', [
 ]);
 
 setSingle('Samsung Magic station',    'S1V3J9DS603308');
-setSingle('Maxtor',                   'Y27TYWWC');
+// Maxtor — not in equipment table, skipped
 
-addUnits('OPTANE INTEL MEMORY NVME', [
+addUnits('Intel Optane NVMe', [
   {sn:'PHBT723000VG032E'},{sn:'PHBT817400LL032E'},{sn:'PHBT723000XL032E'},
 ]);
 
-addUnits('DELL disk drive', [
+addUnits('Dell Hard Drive', [
   {sn:'S0K1T0AK'},{sn:'S0K2FQSM'},{sn:'WXE1E11PZT86'},
 ]);
 
@@ -472,8 +453,21 @@ addUnits('DELL disk drive', [
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\n── East HP Computer Row ──');
 
-// Each HP Compaq unit: serial_number = case SN, notes = component details
-addUnits('hp compaq', [
+// HP Compaq computers are individual qty=1 rows named "HP Compaq #SERIAL".
+// addUnits doesn't work for them; instead we update the notes field with component details.
+const findHPCompaq = db.prepare("SELECT id, notes FROM equipment WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1");
+const updateNotes  = db.prepare("UPDATE equipment SET notes = ?, updated_at = datetime('now') WHERE id = ? AND (notes IS NULL OR notes = '')");
+
+function setCompaqNotes(sn, notes) {
+  const name = `HP Compaq #${sn.toUpperCase()}`;
+  const item = findHPCompaq.get(name);
+  if (!item) { console.log(`  MISS  "${name}"`); totalMiss++; return; }
+  if (item.notes && item.notes.trim()) { console.log(`  SKIP  [${item.id}] "${name}" notes already set`); return; }
+  updateNotes.run(notes, item.id);
+  console.log(`  SET   [${item.id}] "${name}" notes`);
+}
+
+const hpCompaqData = [
   {sn:'2UA9150BWQ',notes:'PSU:68BSA59656 CPU-fan:CT:5ABDP0AG5Y645N Fan:AUB0912VH HS:450666-001 HDD:HV0SPNHK RAM:1x2GB MB:P70130J9VWYLZV Status:working'},
   {sn:'2UA0010S5B',notes:'PSU:B9LCBP2642960 CPU:5ABDP0B4DXTD02 Fan:AD0912UX-A7BGL HS:480368-001 HDD:S1VBJ90S133133 RAM:4x2GB MB:PAVFE0SSUYD2LP'},
   {sn:'MXL9530013',notes:'PSU:6RGS624037 CPU:5ABDP0B4DY3BBJ Fan:PV902512PSPF HS:450666-001 HDD:MM341MTC RAM:1x2GB MB:P70130K9VXWT1W Status:working'},
@@ -622,7 +616,11 @@ addUnits('hp compaq', [
   {sn:'2UA9040QLH',notes:'PSU:410125-200 CPU:353138 Fan:AUB0912VH HS:480368-001 HDD:9VY1TQHC RAM:2x2GB MB:PABDH0FSUX6S1G Status:Hanging in post(Smells funky)'},
   {sn:'2UA9260TP1',notes:'PSU:419496-001 CPU:5ABDP0AG5XB6NY Fan:AD0912UX-A7BGL HS:480368-001 HDD:6VY1R2W8 RAM:4 sticks MB:PABDH0KSUXH4QR Status:working'},
   {sn:'2ua916030j',notes:'PSU:405hche023729 CPU:5abdp0b4dxu4e4 Fan:AD0912UX-A7BGL HS:480368-001 HDD:wcapz4089893 MB:PABDH0KSUXH4QR Status:not working'},
-]);
+];
+
+for (const { sn, notes } of hpCompaqData) {
+  setCompaqNotes(sn, notes);
+}
 
 console.log(`\n════════════════════════`);
 console.log(`Total added:   ${totalAdded}`);
