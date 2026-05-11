@@ -505,19 +505,28 @@ function buildFilters() {
       ).join('');
   }
 
-  // Location chips — from managed locations table
+  // Location chips — from managed locations table + free-text fallback for unmatched items
   const locContainer = document.getElementById('locChips');
   if (locContainer) {
     const usedLocIds = new Set(ITEMS.map(i => i.location_id).filter(Boolean));
-    const usedLocs = LOCATIONS_LIST.filter(l => usedLocIds.has(l.id));
-    if (usedLocs.length <= 1) {
+    const managedLocs = LOCATIONS_LIST.filter(l => usedLocIds.has(l.id));
+    const managedNames = new Set(managedLocs.map(l => l.name.toLowerCase()));
+    // Include free-text locations for items not linked to a managed location
+    const freeTextNames = [...new Set(
+      ITEMS.map(i => i.location).filter(s => s && !managedNames.has(s.toLowerCase()))
+    )].sort();
+    const allLocNames = [
+      ...managedLocs.map(l => l.name),
+      ...freeTextNames,
+    ];
+    if (allLocNames.length <= 1) {
       locContainer.closest?.('.filter-row')?.classList.add('hidden');
     } else {
       locContainer.closest?.('.filter-row')?.classList.remove('hidden');
       locContainer.innerHTML =
         `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
-        usedLocs.map(l =>
-          `<button class="chip${locFilter === l.name ? ' active' : ''}" onclick="setLocFilter(${JSON.stringify(l.name)})">${esc(l.name)}</button>`
+        allLocNames.map(name =>
+          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter(${JSON.stringify(name)})">${esc(name)}</button>`
         ).join('');
     }
   }
