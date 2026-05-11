@@ -274,18 +274,30 @@
       </div>
     </div>
 
-    <!-- ���══ TICKETS VIEW ═══ -->
+    <!-- ═══ TICKETS VIEW ═══ -->
     <div id="view-tickets" class="hidden">
       <div class="tickets-view" id="ticketsContainer">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 class="view-heading">Support Tickets</h2>
+          <h2 class="view-heading">IT Tickets</h2>
           <button class="btn-primary" onclick="openNewTicketModal()">+ New Ticket</button>
         </div>
-        <div class="status-chips" style="margin-bottom:16px" id="ticketStatusChips">
-          <div class="chip active" data-tstatus="all" onclick="setTicketFilter('all')">All</div>
-          <div class="chip" data-tstatus="open" onclick="setTicketFilter('open')">Open</div>
-          <div class="chip" data-tstatus="in_progress" onclick="setTicketFilter('in_progress')">In Progress</div>
-          <div class="chip" data-tstatus="resolved" onclick="setTicketFilter('resolved')">Resolved</div>
+        <div class="svc-stats" id="ticketStats">
+          <div class="svc-stat-card stat-all active" onclick="setTicketFilter('all')">
+            <div class="svc-stat-label">All</div>
+            <div class="svc-stat-value" id="tStatAll">0</div>
+          </div>
+          <div class="svc-stat-card stat-open" onclick="setTicketFilter('open')">
+            <div class="svc-stat-label">Open</div>
+            <div class="svc-stat-value" id="tStatOpen">0</div>
+          </div>
+          <div class="svc-stat-card stat-inprogress" onclick="setTicketFilter('in_progress')">
+            <div class="svc-stat-label">In Progress</div>
+            <div class="svc-stat-value" id="tStatInProgress">0</div>
+          </div>
+          <div class="svc-stat-card stat-resolved" onclick="setTicketFilter('resolved')">
+            <div class="svc-stat-label">Resolved</div>
+            <div class="svc-stat-value" id="tStatResolved">0</div>
+          </div>
         </div>
         <div class="ticket-list" id="ticketList"></div>
       </div>
@@ -388,6 +400,7 @@
         <button class="btn-primary btn-sm" onclick="startNewAudit()">+ Start Audit</button>
       </div>
       <div id="auditSessionArea"></div>
+      <div id="auditHistoryList"></div>
       <div id="auditHistoryList"></div>
     </div>
 

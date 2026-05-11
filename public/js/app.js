@@ -14,6 +14,7 @@ let statusFilter = 'all';
 let catFilter = 'All';
 let locFilter = 'All';
 let ticketFilter = 'all';
+let _allTickets  = [];
 let _pendingPrint = null; // label queued for printing from add-item modal
 
 // Inventory rendering — show rows in batches to avoid blocking the main thread
@@ -1633,24 +1634,56 @@ async function loadTickets() {
   const container = document.getElementById('ticketList');
   try {
     const { tickets } = await api('/api/tickets');
-    const filtered = ticketFilter === 'all' ? tickets : tickets.filter(t => t.status === ticketFilter);
-    if (!filtered || filtered.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="icon">🎫</div><h3>No tickets</h3><p>All clear!</p></div>';
+    _allTickets = tickets || [];
+
+    // Update stat counters
+    const counts = { all: _allTickets.length, open: 0, in_progress: 0, resolved: 0 };
+    _allTickets.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+    const tStatAll        = document.getElementById('tStatAll');
+    const tStatOpen       = document.getElementById('tStatOpen');
+    const tStatInProgress = document.getElementById('tStatInProgress');
+    const tStatResolved   = document.getElementById('tStatResolved');
+    if (tStatAll)        tStatAll.textContent        = counts.all;
+    if (tStatOpen)       tStatOpen.textContent       = counts.open;
+    if (tStatInProgress) tStatInProgress.textContent = counts.in_progress;
+    if (tStatResolved)   tStatResolved.textContent   = counts.resolved;
+
+    const filtered = ticketFilter === 'all' ? _allTickets : _allTickets.filter(t => t.status === ticketFilter);
+    if (!filtered.length) {
+      const emptyLabels = {
+        all:         ['No IT tickets yet.',      'Submit a request using the + New Ticket button above.'],
+        open:        ['No open tickets.',         'All caught up!'],
+        in_progress: ['Nothing in progress.',     'Open tickets that are being worked on appear here.'],
+        resolved:    ['No resolved tickets.',     'Resolved tickets will appear here.'],
+      };
+      const [title, sub] = emptyLabels[ticketFilter] || emptyLabels.all;
+      container.innerHTML = `
+        <div class="svc-empty">
+          <div class="svc-empty-icon">🖥️</div>
+          <div class="svc-empty-title">${title}</div>
+          <div class="svc-empty-sub">${sub}</div>
+        </div>`;
       return;
     }
     container.innerHTML = filtered.map(t => `
-      <div class="ticket-card" onclick="openTicket(${t.id})">
-        <div class="ticket-top">
-          <span class="ticket-id">#${t.id}</span>
-          <span class="ticket-subject">${esc(t.subject)}</span>
-          <div class="priority-dot priority-${t.priority}" title="${t.priority}"></div>
+      <div class="ticket-card prio-${t.status}" onclick="openTicket(${t.id})">
+        <div>
+          <div class="ticket-top">
+            <span class="ticket-id">#${t.id}</span>
+            <span class="ticket-subject">${esc(t.subject)}</span>
+            <div class="priority-dot priority-${t.priority}" title="${t.priority}"></div>
+          </div>
+          <div class="ticket-bottom">
+            <span>${esc(t.reporter_username)}</span>
+            <span class="stc-meta-dot">·</span>
+            <span>${fmtDate(t.created_at)}</span>
+            ${t.assigned_username ? `<span class="stc-meta-dot">·</span><span style="color:${t.assigned_to === ME?.id ? 'var(--green)' : 'var(--accent)'}">👤 ${esc(t.assigned_username)}</span>` : ''}
+            ${t.comment_count > 0 ? `<span class="stc-meta-dot">·</span><span>💬 ${t.comment_count}</span>` : ''}
+          </div>
         </div>
-        <div class="ticket-bottom">
+        <div class="ticket-card-right">
           <span class="ticket-status ${t.status}">${t.status.replace('_', ' ')}</span>
-          <span>${esc(t.reporter_username)}</span>
-          <span>${fmtDate(t.created_at)}</span>
-          ${t.assigned_username ? `<span style="color:${t.assigned_to === ME.id ? 'var(--green)' : 'var(--purple)'}">👤 ${esc(t.assigned_username)}</span>` : '<span style="color:var(--text-muted)">unassigned</span>'}
-          ${t.comment_count > 0 ? `<span>💬 ${t.comment_count}</span>` : ''}
+          <span class="stc-ticket-num">#${t.id}</span>
         </div>
       </div>
     `).join('');
@@ -1661,9 +1694,8 @@ async function loadTickets() {
 
 function setTicketFilter(f) {
   ticketFilter = f;
-  document.querySelectorAll('#ticketStatusChips .chip').forEach(el => {
-    el.classList.toggle('active', el.dataset.tstatus === f);
-  });
+  document.querySelectorAll('#ticketStats .svc-stat-card').forEach(el =>
+    el.classList.toggle('active', el.getAttribute('onclick').includes(`'${f}'`)));
   loadTickets();
 }
 
@@ -2844,18 +2876,31 @@ async function loadAuditView() {
       await refreshActiveAudit();
     } else {
       _activeAuditId = null;
-      sessionEl.innerHTML = '<div class="empty-state"><p>No open audit. Click <strong>+ Start Audit</strong> to begin.</p></div>';
+      sessionEl.innerHTML = `
+        <div class="svc-empty">
+          <div class="svc-empty-icon">📋</div>
+          <div class="svc-empty-title">No active audit</div>
+          <div class="svc-empty-sub">Click <strong>+ Start Audit</strong> to begin counting inventory and comparing against system quantities.</div>
+        </div>`;
     }
 
     const closed = audits.filter(a => a.status === 'closed');
     historyEl.innerHTML = closed.length ? `
-      <h3 style="font-size:14px;font-weight:600;color:var(--text-sec);margin:20px 0 8px">Past Audits</h3>
+      <div class="audit-section-heading">Past Audits</div>
       ${closed.map(a => `
-        <div class="user-row" onclick="openAuditHistory(${a.id})" style="cursor:pointer">
-          <div class="user-info">
-            <div class="user-name">Audit #${a.id}</div>
-            <div class="user-email">${fmtDate(a.created_at)} · ${a.entry_count} entries · by ${esc(a.created_by_username)}</div>
+        <div class="audit-history-card" onclick="openAuditHistory(${a.id})">
+          <div class="audit-history-icon">📋</div>
+          <div>
+            <div class="audit-history-title">Audit #${a.id}</div>
+            <div class="audit-history-meta">
+              <span>${esc(a.created_by_username)}</span>
+              <span class="stc-meta-dot">·</span>
+              <span>${fmtDate(a.created_at)}</span>
+              <span class="stc-meta-dot">·</span>
+              <span>${a.entry_count} entr${a.entry_count === 1 ? 'y' : 'ies'}</span>
+            </div>
           </div>
+          <span class="audit-history-num">#${a.id}</span>
         </div>`).join('')}` : '';
   } catch {
     historyEl.innerHTML = '<div class="empty-state"><p>Failed to load audits</p></div>';
