@@ -791,8 +791,9 @@ async function openDetail(id) {
       <div class="meta-row"><span class="label">Serial</span><span class="value" style="font-family:var(--mono);font-size:12px">${esc(item.serial_number || '—')}</span></div>
       <div class="meta-row"><span class="label">Category</span><span class="value">${esc(item.category || '—')}</span></div>
       ${item.quantity > 1 ? `<div class="meta-row"><span class="label">Quantity</span><span class="value" style="color:var(--accent);font-weight:600">${item.quantity}</span></div>` : ''}
-      ${item.quantity > 1 ? `<div style="padding:4px 0 0">${availBar(item)}</div>` : ''}
-      ${item.quantity > 1 ? `<div class="meta-row" style="align-items:flex-start"><span class="label" style="padding-top:2px">Units</span><span class="value" style="width:100%"><span id="unitsList-${item.id}" style="color:var(--text-muted);font-size:12px">Loading…</span></span></div>` : ''}
+      ${item.quantity > 1 ? `<div class="meta-row"><span class="label">Available</span><span class="value" style="font-family:var(--sans)">${availPill(item)}</span></div>` : ''}
+      ${item.quantity > 1 ? `<div style="padding:2px 0 8px">${availBar(item)}</div>` : ''}
+      ${item.quantity > 1 ? `<div style="padding-top:4px"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px">Units</div><div id="unitsList-${item.id}" style="color:var(--text-muted);font-size:12px">Loading…</div></div>` : ''}
       <div class="meta-row"><span class="label">Type</span><span class="value">${esc(item.type || '—')}</span></div>
       <div class="meta-row"><span class="label">Location</span><span class="value">${esc(item.location || '—')}</span></div>
       ${st !== 'available' ? `
@@ -861,17 +862,22 @@ function renderUnits(equipmentId, units) {
       ${units.length === 0
         ? `<span style="color:var(--text-muted);font-size:12px">No individual units recorded.</span>`
         : units.map(u => {
-            const label    = u.barcode || u.serial_number || ('Unit #' + u.id);
-            const noteVal  = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
-            const display  = [u.serial_number || '—', u.barcode ? ' · ' + u.barcode : '', u.notes ? ` <span style="color:var(--text-muted);font-family:var(--sans)">${esc(u.notes)}</span>` : ''].join('');
+            const label   = u.barcode || u.serial_number || ('Unit #' + u.id);
+            const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
             return `
-              <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);background:var(--bg-base);border:1px solid var(--border);border-radius:6px;padding:4px 8px">
-                <span style="flex:1;color:var(--text)">${display}</span>
-                ${hasAvail ? `<button class="btn-outline btn-sm" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},${JSON.stringify(noteVal)},${JSON.stringify(label)})">Check Out</button>` : ''}
-                ${isAdminUser ? `
-                  <button class="btn-outline btn-sm" style="padding:2px 6px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
-                  <button class="btn-outline btn-sm btn-red" style="padding:2px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
-                ` : ''}
+              <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:8px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px;padding:7px 10px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:12px;font-weight:600;font-family:var(--mono);color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(u.barcode || '—')}</div>
+                  ${u.serial_number ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">SN: ${esc(u.serial_number)}</div>` : ''}
+                  ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--sans);margin-top:1px">${esc(u.notes)}</div>` : ''}
+                </div>
+                <div style="display:flex;gap:4px;flex-shrink:0;align-items:center">
+                  ${hasAvail ? `<button class="btn-outline btn-sm btn-green" style="padding:3px 8px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},${JSON.stringify(noteVal)},${JSON.stringify(label)})">Check Out</button>` : ''}
+                  ${isAdminUser ? `
+                    <button class="btn-outline btn-sm" style="padding:3px 6px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
+                    <button class="btn-outline btn-sm btn-red" style="padding:3px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
+                  ` : ''}
+                </div>
               </div>`;
           }).join('')}
       ${isAdminUser ? `
