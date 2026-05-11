@@ -619,9 +619,10 @@ function renderBatch() {
     }
     tr.innerHTML = `
       <td class="cell-id">${esc(item.barcode || 'CIS-' + String(item.id).padStart(6,'0'))}</td>
-      <td><div class="cell-name">${esc(item.name)}${item.quantity > 1 ? ` <span style="background:var(--accent-soft);color:var(--accent);border-radius:99px;font-size:11px;font-weight:600;padding:1px 7px;margin-left:4px">×${item.quantity}</span>` : ''}</div>${subLine}${queueLine}</td>
+      <td><div class="cell-name">${esc(item.name)}</div>${subLine}${queueLine}</td>
       <td>${esc(item.category || '—')}</td>
       <td>${esc(item.location || '—')}</td>
+      <td style="text-align:center;font-weight:600;color:${item.quantity > 1 ? 'var(--accent)' : 'var(--text-muted)'}">${item.quantity > 1 ? item.quantity : '1'}</td>
       <td><span class="status-badge status-${st}"><span class="dot"></span>${statusLabel}</span></td>
       <td>
         ${st === 'available'
