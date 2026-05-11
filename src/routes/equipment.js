@@ -130,6 +130,38 @@ router.delete('/:id(\\d+)', requireRole('admin'), (req, res) => {
   res.json({ ok: true });
 });
 
+const batchCheckoutSchema = z.object({
+  equipment_ids: z.array(z.number().int().positive()).min(1).max(50),
+  notes: z.string().max(500).optional().transform(v => stripHtml(v || '')),
+  for_user_id: z.number().int().positive().optional(),
+  duration_days: z.number().int().min(1).max(30).optional().default(7),
+});
+
+router.post('/batch-checkout', validate(batchCheckoutSchema), (req, res, next) => {
+  try {
+    let borrower = { id: req.user.id, username: req.user.username };
+    if (req.body.for_user_id && req.body.for_user_id !== req.user.id) {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Only admins can check out on behalf of another user' });
+      }
+      const target = require('../services/userService').getById(req.body.for_user_id);
+      if (!target) return res.status(404).json({ error: 'Selected user not found' });
+      borrower = { id: target.id, username: target.username };
+    }
+    const results = equipmentService.batchCheckout(
+      req.body.equipment_ids,
+      borrower.id,
+      borrower.username,
+      req.body.notes,
+      'Manual',
+      req.user.id,
+      req.body.duration_days,
+    );
+    req.audit('batch_checkout', null, { count: results.filter(r => r.success).length, for_user: borrower.username });
+    res.json({ results });
+  } catch (err) { next(err); }
+});
+
 router.post('/:id(\\d+)/checkout', validate(checkoutSchema), (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);

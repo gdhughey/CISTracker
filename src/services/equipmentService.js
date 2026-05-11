@@ -221,12 +221,25 @@ function getCheckoutsForUser(userId) {
   `).all(userId);
 }
 
+function batchCheckout(equipmentIds, userId, username, notes, source, performedById, durationDays) {
+  const results = [];
+  for (const id of equipmentIds) {
+    try {
+      const item = checkout(id, userId, username, notes, source, performedById, durationDays);
+      results.push({ id, success: true, item });
+    } catch (err) {
+      results.push({ id, success: false, error: err.message });
+    }
+  }
+  return results;
+}
+
 function clearLog() {
   db.prepare('DELETE FROM checkout_log').run();
 }
 
 module.exports = {
   listAll, getById, create, update, remove, findByIdentifier,
-  checkout, checkin, getLog, clearLog, getOverdue, getCheckoutsForUser,
+  checkout, checkin, batchCheckout, getLog, clearLog, getOverdue, getCheckoutsForUser,
   nextAssetId,
 };

@@ -22,6 +22,9 @@ const RENDER_BATCH = 150;
 let renderVisible = []; // filtered item list (not yet all in DOM)
 let renderShown = 0;    // how many rows are currently rendered
 
+// Mass checkout cart
+const _cart = new Set(); // Set of equipment IDs
+
 // ── UTC helper ─────────────────────────────────────────────────────────
 function utc(d) {
   if (!d) return new Date(NaN);
@@ -627,7 +630,7 @@ function renderBatch() {
       <td><span class="status-badge status-${st}"><span class="dot"></span>${statusLabel}</span></td>
       <td>
         ${st === 'available'
-          ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Check Out</button>`
+          ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Check Out</button><button class="btn-cart${_cart.has(item.id) ? ' in-cart' : ''}" id="cartBtn-${item.id}" title="${_cart.has(item.id) ? 'Remove from cart' : 'Add to cart'}" onclick="event.stopPropagation();toggleCart(${item.id})">🛒</button>`
           : `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return</button>`}
       </td>
     `;
@@ -3427,6 +3430,199 @@ async function openAuditHistory(id) {
       </div>`;
     document.getElementById('modalOverlay').classList.add('open');
   } catch { toast('Failed to load audit', 'error'); }
+}
+
+// ── Mass Checkout Cart ──────────────────────────────────────────────
+
+function toggleCart(id) {
+  if (_cart.has(id)) {
+    _cart.delete(id);
+  } else {
+    const item = ITEMS.find(i => i.id === id);
+    if (!item || getItemStatus(item) !== 'available') { toast('Item is not available', 'error'); return; }
+    _cart.add(id);
+  }
+  // Update button state in DOM if already rendered
+  const btn = document.getElementById(`cartBtn-${id}`);
+  if (btn) {
+    btn.classList.toggle('in-cart', _cart.has(id));
+    btn.title = _cart.has(id) ? 'Remove from cart' : 'Add to cart';
+  }
+  updateCartFab();
+}
+
+function updateCartFab() {
+  const fab = document.getElementById('cartFab');
+  const badge = document.getElementById('cartBadge');
+  if (!fab) return;
+  const n = _cart.size;
+  badge.textContent = n;
+  fab.classList.toggle('hidden', n === 0);
+}
+
+async function openCartModal() {
+  if (_cart.size === 0) return;
+  const ids = [..._cart];
+  const cartItems = ids.map(id => ITEMS.find(i => i.id === id)).filter(Boolean);
+
+  const modal = document.getElementById('modalContent');
+  const isAdmin = ME.role === 'admin';
+  const defaultDays = 7;
+  const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
+  const defaultDueStr = defaultDue.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+      <div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Mass Checkout</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text)">${cartItems.length} item${cartItems.length !== 1 ? 's' : ''} selected</div>
+      </div>
+      <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px" onclick="closeModal()">×</button>
+    </div>
+
+    <div class="cart-item-list" id="cartItemList">
+      ${cartItems.map(item => `
+        <div class="cart-item-row" id="cartRow-${item.id}">
+          <div style="flex:1">
+            <div class="cart-item-name">${esc(item.name)}</div>
+            <div class="cart-item-id">${esc(item.barcode || 'ID-' + item.id)}</div>
+          </div>
+          <button class="cart-remove-btn" onclick="cartRemoveItem(${item.id})" title="Remove">✕</button>
+        </div>
+      `).join('')}
+    </div>
+
+    <div id="cartCheckoutForm">
+      ${isAdmin ? `
+        <div class="form-group">
+          <label class="form-label">Borrower</label>
+          <select id="cartBorrower" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
+            <option value="">Loading users…</option>
+          </select>
+        </div>
+      ` : `
+        <div class="form-group">
+          <label class="form-label">Borrower</label>
+          <div style="padding:10px 12px;border-radius:9px;background:var(--bg-surface);border:1px solid var(--border-input);color:var(--text-sec);font-size:13px">${esc(ME.username)}</div>
+        </div>
+      `}
+      <div class="form-group">
+        <label class="form-label" id="cartDurationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
+        <div class="slider-wrap">
+          <div class="slider-tooltip" id="cartTooltip">${defaultDays}d</div>
+          <input id="cartDuration" type="range" min="1" max="30" value="${defaultDays}" oninput="updateCartDurationLabel(this.value)">
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px"><span>1d</span><span>7d</span><span>14d</span><span>30d</span></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes (optional)</label>
+        <input id="cartNotes" type="text" maxlength="500" placeholder="Add a note…" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px;box-sizing:border-box">
+      </div>
+      <div class="form-actions">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" id="cartSubmitBtn" onclick="confirmBatchCheckout()">Checkout ${cartItems.length} Item${cartItems.length !== 1 ? 's' : ''} →</button>
+      </div>
+    </div>
+
+    <div id="cartSuccess" class="hidden" style="text-align:center;padding:24px 0">
+      <div class="success-icon">✓</div>
+      <div style="font-size:17px;font-weight:600">Checked Out!</div>
+      <div id="cartSuccessMsg" style="font-size:13px;color:var(--text-muted);margin-top:6px"></div>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  if (isAdmin) loadCartUserSelect();
+  requestAnimationFrame(() => updateCartDurationLabel(defaultDays));
+}
+
+function cartRemoveItem(id) {
+  _cart.delete(id);
+  const row = document.getElementById(`cartRow-${id}`);
+  if (row) row.remove();
+  const btn = document.getElementById(`cartBtn-${id}`);
+  if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
+  updateCartFab();
+  const remaining = document.querySelectorAll('#cartItemList .cart-item-row').length;
+  if (remaining === 0) { closeModal(); return; }
+  const submitBtn = document.getElementById('cartSubmitBtn');
+  if (submitBtn) submitBtn.textContent = `Checkout ${remaining} Item${remaining !== 1 ? 's' : ''} →`;
+}
+
+async function loadCartUserSelect() {
+  try {
+    const { users } = await api('/api/admin/users');
+    const sel = document.getElementById('cartBorrower');
+    if (!sel) return;
+    sel.innerHTML = users.map(u => `<option value="${u.id}">${esc(u.username)} (${u.role})</option>`).join('');
+    sel.value = ME.id;
+  } catch {
+    const sel = document.getElementById('cartBorrower');
+    if (sel) sel.innerHTML = '<option value="">Failed to load users</option>';
+  }
+}
+
+function updateCartDurationLabel(days) {
+  days = parseInt(days, 10);
+  const due = new Date(); due.setDate(due.getDate() + days);
+  const dueStr = due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const el = document.getElementById('cartDurationLabel');
+  if (el) el.textContent = `Duration — ${days} day${days !== 1 ? 's' : ''} (due ${dueStr})`;
+  const slider = document.getElementById('cartDuration');
+  if (slider) {
+    const pct = ((days - 1) / 29) * 100;
+    slider.style.background = `linear-gradient(to right, #6366f1 0%, #8b5cf6 ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`;
+    const tooltip = document.getElementById('cartTooltip');
+    if (tooltip) {
+      const thumbW = 22;
+      tooltip.style.left = `calc(${pct}% + ${thumbW / 2 - (pct / 100) * thumbW}px)`;
+      tooltip.textContent = days + 'd';
+    }
+  }
+}
+
+async function confirmBatchCheckout() {
+  const ids = [..._cart];
+  if (!ids.length) return;
+  const days = parseInt(document.getElementById('cartDuration')?.value || '7', 10);
+  const notes = (document.getElementById('cartNotes')?.value || '').trim();
+  const body = { equipment_ids: ids, duration_days: days, notes };
+  if (ME.role === 'admin') {
+    const sel = document.getElementById('cartBorrower');
+    if (sel && sel.value) body.for_user_id = parseInt(sel.value, 10);
+  }
+  const submitBtn = document.getElementById('cartSubmitBtn');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Processing…'; }
+  try {
+    const { results } = await api('/api/equipment/batch-checkout', { method: 'POST', body });
+    const succeeded = results.filter(r => r.success).length;
+    const failed    = results.filter(r => !r.success);
+    // Clear cart for successfully checked-out items
+    for (const r of results) {
+      if (r.success) {
+        _cart.delete(r.id);
+        const btn = document.getElementById(`cartBtn-${r.id}`);
+        if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
+      }
+    }
+    updateCartFab();
+    // Show success state
+    document.getElementById('cartCheckoutForm').classList.add('hidden');
+    const cartItemList = document.getElementById('cartItemList');
+    if (cartItemList) cartItemList.style.display = 'none';
+    const successEl = document.getElementById('cartSuccess');
+    successEl.classList.remove('hidden');
+    let msg = `${succeeded} item${succeeded !== 1 ? 's' : ''} checked out successfully.`;
+    if (failed.length) msg += ` ${failed.length} item${failed.length !== 1 ? 's' : ''} could not be checked out.`;
+    document.getElementById('cartSuccessMsg').textContent = msg;
+    if (failed.length) {
+      const names = failed.map(r => { const it = ITEMS.find(i => i.id === r.id); return it ? it.name : `ID ${r.id}`; });
+      toast(`Failed: ${names.join(', ')}`, 'error');
+    }
+    setTimeout(() => { closeModal(); loadItems(); closeDetail(); }, 1800);
+  } catch (err) {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = `Checkout ${ids.length} Items →`; }
+    toast(err.error || 'Batch checkout failed', 'error');
+  }
 }
 
 // Helper — read the CSRF cookie set by the server (httpOnly:false on this one)
