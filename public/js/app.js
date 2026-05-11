@@ -508,7 +508,7 @@ function buildFilters() {
     catContainer.innerHTML =
       `<button class="chip${catFilter === 'All' ? ' active' : ''}" onclick="setCatFilter('All')">All</button>` +
       CATEGORIES.map(c =>
-        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter(${JSON.stringify(c.name)})">${esc(c.name)}</button>`
+        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter('${c.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(c.name)}</button>`
       ).join('');
   }
 
@@ -533,7 +533,7 @@ function buildFilters() {
       locContainer.innerHTML =
         `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
         allLocNames.map(name =>
-          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter(${JSON.stringify(name)})">${esc(name)}</button>`
+          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter('${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(name)}</button>`
         ).join('');
     }
   }
