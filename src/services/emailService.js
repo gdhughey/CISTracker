@@ -184,6 +184,46 @@ async function sendTicketStatusUpdate(user, ticket) {
   });
 }
 
+async function notifyAdminsServiceTicket(ticket, requesterUsername) {
+  const db = require('../db/connection');
+  const admins = db.prepare("SELECT email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email != ''").all();
+  if (!admins.length) return;
+  const typeLabel = { add_item: 'Add Item', quantity_change: 'Quantity Change', other: 'Other' }[ticket.type] || ticket.type;
+  const payload = typeof ticket.payload === 'string' ? JSON.parse(ticket.payload) : ticket.payload;
+  const summary = Object.entries(payload)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
+  await Promise.allSettled(admins.map(({ email }) =>
+    send({
+      to: email,
+      subject: `[CISTracker] New Service Ticket #${ticket.id}: ${typeLabel}`,
+      html: wrap(`
+        <p>A new service ticket has been submitted.</p>
+        <table cellpadding="0" cellspacing="0" style="background:#0f1117;border-radius:6px;padding:16px 20px;margin:20px 0;width:100%;box-sizing:border-box;">
+          <tr><td style="color:#9ca3af;font-size:13px;padding-bottom:4px;">Ticket #${ticket.id}</td></tr>
+          <tr><td style="color:#fff;font-size:15px;font-weight:600;padding-bottom:4px;">${esc(typeLabel)}</td></tr>
+          <tr><td style="color:#9ca3af;font-size:13px;padding-top:8px;">Requested by: <strong style="color:#fff;">${esc(requesterUsername)}</strong></td></tr>
+        </table>
+        <pre style="background:#0f1117;border-radius:6px;padding:14px 18px;font-size:13px;color:#d1d5db;white-space:pre-wrap;word-break:break-all;">${esc(summary)}</pre>
+        <p><a href="${config.appUrl}" style="display:inline-block;background:#3b82f6;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:600;">Review in CISTracker</a></p>
+      `),
+    })
+  ));
+}
+
+async function notifyNewAdmin(email, username) {
+  if (!email) return;
+  await send({
+    to: email,
+    subject: '[CISTracker] You have been granted admin access',
+    html: wrap(`
+      <p>Hi <strong style="color:#fff;">${esc(username)}</strong>,</p>
+      <p>Your CISTracker account has been promoted to administrator. You will now receive email notifications for new service tickets.</p>
+      <p><a href="${config.appUrl}" style="display:inline-block;background:#3b82f6;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:600;">Log in to CISTracker</a></p>
+    `),
+  });
+}
+
 module.exports = {
   sendWelcome,
   sendPasswordReset,
@@ -192,4 +232,6 @@ module.exports = {
   sendOverdueReminder,
   sendTicketConfirmation,
   sendTicketStatusUpdate,
+  notifyAdminsServiceTicket,
+  notifyNewAdmin,
 };

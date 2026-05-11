@@ -88,6 +88,11 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
     req.audit('admin_change_role', user.username, { newRole: req.body.role });
     // Kill their sessions so the role change takes effect immediately
     sessionService.destroyAllForUser(id);
+    if (req.body.role === 'admin' && user.role !== 'admin') {
+      try {
+        emailService.notifyNewAdmin(user.email, user.username);
+      } catch { /* non-blocking */ }
+    }
   }
   if (req.body.email && req.body.email !== user.email) {
     // Reject if another account already owns this email
