@@ -611,7 +611,11 @@ function renderItems() {
   renderVisible = [];
   for (const item of ITEMS) {
     const st = getItemStatus(item);
-    if (statusFilter !== 'all' && st !== statusFilter) continue;
+    if (statusFilter !== 'all') {
+      // Bulk items with some units out should appear under the "Out" filter
+      const isPartiallyOut = (item.quantity || 1) > 1 && (item.checked_out_count || 0) > 0;
+      if (st !== statusFilter && !(statusFilter === 'checked_out' && isPartiallyOut)) continue;
+    }
     if (catFilter !== 'All' && item.category !== catFilter) continue;
     if (locFilter !== 'All') {
       const loc = LOCATIONS_LIST.find(l => l.name === locFilter);
