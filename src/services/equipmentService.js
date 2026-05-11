@@ -11,7 +11,9 @@ function listAll({ status, checkedOutBy } = {}) {
   }
   const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
   return db.prepare(`
-    SELECT e.*, u.username AS checked_out_username
+    SELECT e.*,
+           u.username AS checked_out_username,
+           max(0, e.quantity - e.checked_out_count) AS available_count
     FROM equipment e
     LEFT JOIN users u ON u.id = e.checked_out_by
     ${where}
@@ -40,7 +42,9 @@ function nextAssetId() {
 
 function getById(id) {
   return db.prepare(`
-    SELECT e.*, u.username AS checked_out_username
+    SELECT e.*,
+           u.username AS checked_out_username,
+           max(0, e.quantity - e.checked_out_count) AS available_count
     FROM equipment e
     LEFT JOIN users u ON u.id = e.checked_out_by
     WHERE e.id = ?
@@ -118,22 +122,35 @@ function remove(id) {
 // = borrower username, so audits show who actually scanned/clicked.
 function checkout(equipmentId, userId, username, notes = '', source = 'Manual', performedById = null, durationDays = 7) {
   const actorId = performedById || userId;
-  // Calculate due date: today + durationDays (stored as YYYY-MM-DD UTC)
   const due = new Date();
   due.setUTCDate(due.getUTCDate() + Math.max(1, Math.min(30, durationDays || 7)));
   const dueDate = due.toISOString().slice(0, 10);
   const tx = db.transaction(() => {
     const eq = db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
     if (!eq) throw Object.assign(new Error('Equipment not found'), { status: 404 });
-    if (eq.status !== 'available') {
-      throw Object.assign(new Error('Equipment is already checked out'), { status: 409 });
+
+    if ((eq.quantity || 1) > 1) {
+      // Bulk item — take one unit; status stays 'available' until all units are out
+      const available = (eq.quantity || 1) - (eq.checked_out_count || 0);
+      if (available <= 0) throw Object.assign(new Error('No units available'), { status: 409 });
+      const newCount = (eq.checked_out_count || 0) + 1;
+      db.prepare(`
+        UPDATE equipment
+        SET checked_out_count = ?,
+            status = CASE WHEN ? >= quantity THEN 'checked_out' ELSE 'available' END,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(newCount, newCount, equipmentId);
+    } else {
+      // Single item — original behaviour
+      if (eq.status !== 'available') throw Object.assign(new Error('Equipment is already checked out'), { status: 409 });
+      db.prepare(`
+        UPDATE equipment
+        SET status = 'checked_out', checked_out_by = ?, checked_out_at = datetime('now'),
+            due_date = ?, checked_out_count = 1, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(userId, dueDate, equipmentId);
     }
-    db.prepare(`
-      UPDATE equipment
-      SET status = 'checked_out', checked_out_by = ?, checked_out_at = datetime('now'),
-          due_date = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(userId, dueDate, equipmentId);
     db.prepare(`
       INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
       VALUES (?, 'checkout', ?, ?, ?, ?)
@@ -151,23 +168,35 @@ function checkin(equipmentId, actingUser, notes = '', source = 'Manual') {
   const tx = db.transaction(() => {
     const eq = db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
     if (!eq) throw Object.assign(new Error('Equipment not found'), { status: 404 });
-    if (eq.status !== 'checked_out') {
-      throw Object.assign(new Error('Equipment is not checked out'), { status: 409 });
+
+    if ((eq.quantity || 1) > 1) {
+      // Bulk item — return one unit
+      if ((eq.checked_out_count || 0) <= 0) throw Object.assign(new Error('No units are currently checked out'), { status: 409 });
+      const newCount = (eq.checked_out_count || 0) - 1;
+      db.prepare(`
+        UPDATE equipment
+        SET checked_out_count = ?,
+            status = 'available',
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(newCount, equipmentId);
+    } else {
+      // Single item — original behaviour
+      if (eq.status !== 'checked_out') throw Object.assign(new Error('Equipment is not checked out'), { status: 409 });
+      if (actingUser.role !== 'admin' && eq.checked_out_by !== actingUser.id) {
+        throw Object.assign(new Error('You did not check this item out'), { status: 403 });
+      }
+      db.prepare(`
+        UPDATE equipment
+        SET status = 'available', checked_out_by = NULL, checked_out_at = NULL,
+            due_date = NULL, checked_out_count = 0, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(equipmentId);
     }
-    if (actingUser.role !== 'admin' && eq.checked_out_by !== actingUser.id) {
-      throw Object.assign(new Error('You did not check this item out'), { status: 403 });
-    }
-    db.prepare(`
-      UPDATE equipment
-      SET status = 'available', checked_out_by = NULL, checked_out_at = NULL,
-          due_date = NULL, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(equipmentId);
     db.prepare(`
       INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
       VALUES (?, 'checkin', ?, ?, ?, ?)
     `).run(equipmentId, actingUser.id, actingUser.username, notes, source);
-    // Pop next person from the waitlist (if any)
     try {
       const queueService = require('./queueService');
       nextInQueue = queueService.popNext(equipmentId);

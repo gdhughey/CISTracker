@@ -476,17 +476,26 @@ async function loadItems() {
 
 function computeStats(items) {
   items = items || ITEMS;
-  let available = 0, out = 0, overdue = 0;
+  let total = 0, available = 0, out = 0, overdue = 0;
   for (const item of items) {
-    const st = getItemStatus(item);
-    if (st === 'available') available++;
-    else if (st === 'overdue') overdue++;
-    else if (st === 'checked_out') out++;
+    const qty = item.quantity || 1;
+    const coCount = item.checked_out_count || 0;
+    const avail = Math.max(0, qty - coCount);
+    total += qty;
+    if (qty > 1) {
+      available += avail;
+      out += coCount;
+    } else {
+      const st = getItemStatus(item);
+      if (st === 'available') available++;
+      else if (st === 'overdue') overdue++;
+      else if (st === 'checked_out') out++;
+    }
   }
-  document.getElementById('statTotal').textContent = items.length;
-  document.getElementById('statAvailable').textContent = available;
-  document.getElementById('statOut').textContent = out;
-  document.getElementById('statOverdue').textContent = overdue;
+  document.getElementById('statTotal').textContent = total.toLocaleString();
+  document.getElementById('statAvailable').textContent = available.toLocaleString();
+  document.getElementById('statOut').textContent = out.toLocaleString();
+  document.getElementById('statOverdue').textContent = overdue.toLocaleString();
 }
 
 function setCatFilter(c) {
@@ -557,6 +566,29 @@ function getItemStatus(item) {
   return item.status === 'checked_out' ? 'checked_out' : item.status;
 }
 
+// Returns HTML for an availability pill for bulk (qty>1) items.
+// tier: green ≥67%, amber 34–66%, red ≤33%
+function availPill(item) {
+  const qty = item.quantity || 1;
+  const out = item.checked_out_count || 0;
+  const avail = Math.max(0, qty - out);
+  const pct = qty > 0 ? avail / qty : 1;
+  const tier = pct >= 0.67 ? 'green' : pct >= 0.34 ? 'amber' : 'red';
+  return `<span class="avail-pill ap-${tier}"><span class="dot"></span>${avail} / ${qty} avail</span>`;
+}
+
+// Returns availability bar HTML for the detail panel.
+function availBar(item) {
+  const qty = item.quantity || 1;
+  const out = item.checked_out_count || 0;
+  const avail = Math.max(0, qty - out);
+  const pct = qty > 0 ? Math.round((avail / qty) * 100) : 100;
+  const tier = pct >= 67 ? 'green' : pct >= 34 ? 'amber' : 'red';
+  return `
+    <div class="avail-bar-wrap"><div class="avail-bar-fill ab-${tier}" style="width:${pct}%"></div></div>
+    <div class="avail-bar-label"><strong>${avail}</strong> of <strong>${qty}</strong> units available · <strong>${out}</strong> currently out</div>`;
+}
+
 function fmtDue(due_date) {
   if (!due_date) return '';
   const d = new Date(due_date + 'T12:00:00Z');
@@ -614,6 +646,8 @@ function renderBatch() {
     const st = getItemStatus(item);
     const tr = document.createElement('tr');
     tr.onclick = () => openDetail(item.id);
+    const isBulk = (item.quantity || 1) > 1;
+    const coCount = item.checked_out_count || 0;
     const statusLabel = st === 'available' ? 'Available' : st === 'checked_out' ? 'Checked Out' : 'Overdue';
     let subLine = '';
     if (st !== 'available' && item.checked_out_username) {
@@ -624,18 +658,34 @@ function renderBatch() {
     if (item.queue_length > 0) {
       queueLine = `<div class="cell-queue">⏳ ${item.queue_length} in queue</div>`;
     }
+    // For bulk items, show "X / Y avail" pill instead of plain status badge
+    const statusCell = isBulk
+      ? availPill(item)
+      : `<span class="status-badge status-${st}"><span class="dot"></span>${statusLabel}</span>`;
+    // For bulk items: "Take 1" if any available; "Return 1" if any checked out
+    const availNow = isBulk ? Math.max(0, (item.quantity || 1) - coCount) : 0;
+    let actionCell;
+    if (isBulk) {
+      const takeBtn  = availNow > 0
+        ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Take 1</button>`
+        : '';
+      const retBtn   = coCount > 0
+        ? `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return 1</button>`
+        : '';
+      actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">${takeBtn}${retBtn}</div>`;
+    } else {
+      actionCell = st === 'available'
+        ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Check Out</button><button class="btn-cart${_cart.has(item.id) ? ' in-cart' : ''}" id="cartBtn-${item.id}" title="${_cart.has(item.id) ? 'Remove from cart' : 'Add to cart'}" onclick="event.stopPropagation();toggleCart(${item.id})">🛒</button>`
+        : `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return</button>`;
+    }
     tr.innerHTML = `
       <td class="cell-id">${esc(item.barcode || 'CIS-' + String(item.id).padStart(6,'0'))}</td>
       <td><div class="cell-name">${esc(item.name)}</div>${subLine}${queueLine}</td>
       <td>${esc(item.category || '—')}</td>
       <td>${esc(item.location || '—')}</td>
-      <td style="text-align:center;font-weight:600;color:${item.quantity > 1 ? 'var(--accent)' : 'var(--text-muted)'}">${item.quantity > 1 ? item.quantity : '1'}</td>
-      <td><span class="status-badge status-${st}"><span class="dot"></span>${statusLabel}</span></td>
-      <td>
-        ${st === 'available'
-          ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Check Out</button><button class="btn-cart${_cart.has(item.id) ? ' in-cart' : ''}" id="cartBtn-${item.id}" title="${_cart.has(item.id) ? 'Remove from cart' : 'Add to cart'}" onclick="event.stopPropagation();toggleCart(${item.id})">🛒</button>`
-          : `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return</button>`}
-      </td>
+      <td style="text-align:center;font-weight:600;color:${isBulk ? 'var(--accent)' : 'var(--text-muted)'}">${item.quantity > 1 ? item.quantity : '1'}</td>
+      <td>${statusCell}</td>
+      <td>${actionCell}</td>
     `;
     frag.appendChild(tr);
   }
@@ -741,6 +791,7 @@ async function openDetail(id) {
       <div class="meta-row"><span class="label">Serial</span><span class="value" style="font-family:var(--mono);font-size:12px">${esc(item.serial_number || '—')}</span></div>
       <div class="meta-row"><span class="label">Category</span><span class="value">${esc(item.category || '—')}</span></div>
       ${item.quantity > 1 ? `<div class="meta-row"><span class="label">Quantity</span><span class="value" style="color:var(--accent);font-weight:600">${item.quantity}</span></div>` : ''}
+      ${item.quantity > 1 ? `<div style="padding:4px 0 0">${availBar(item)}</div>` : ''}
       ${item.quantity > 1 ? `<div class="meta-row" style="align-items:flex-start"><span class="label" style="padding-top:2px">Units</span><span class="value" style="width:100%"><span id="unitsList-${item.id}" style="color:var(--text-muted);font-size:12px">Loading…</span></span></div>` : ''}
       <div class="meta-row"><span class="label">Type</span><span class="value">${esc(item.type || '—')}</span></div>
       <div class="meta-row"><span class="label">Location</span><span class="value">${esc(item.location || '—')}</span></div>
@@ -751,9 +802,18 @@ async function openDetail(id) {
       ` : ''}
     </div>
     <div class="detail-action">
-      ${st === 'available'
-        ? `<button class="btn-primary" onclick="openCheckoutModal(${id})">Check Out This Item</button>`
-        : `<button class="btn-outline btn-green" style="width:100%;justify-content:center" onclick="openReturnModal(${id})">Return This Item</button>`}
+      ${(item.quantity || 1) > 1
+        ? (() => {
+            const _avail = Math.max(0, (item.quantity || 1) - (item.checked_out_count || 0));
+            const _out   = item.checked_out_count || 0;
+            return [
+              _avail > 0 ? `<button class="btn-primary" style="flex:1" onclick="openCheckoutModal(${id})">Take 1</button>` : '',
+              _out   > 0 ? `<button class="btn-outline btn-green" style="flex:1;justify-content:center" onclick="openReturnModal(${id})">Return 1</button>` : '',
+            ].join('');
+          })()
+        : st === 'available'
+          ? `<button class="btn-primary" onclick="openCheckoutModal(${id})">Check Out This Item</button>`
+          : `<button class="btn-outline btn-green" style="width:100%;justify-content:center" onclick="openReturnModal(${id})">Return This Item</button>`}
     </div>
     ${queueHtml}
     ${historyHtml}
@@ -957,6 +1017,68 @@ async function openCheckoutModal(id) {
   const item = ITEMS.find(i => i.id === id);
   if (!item) return;
 
+  // Bulk item fast-path: skip unit-select; show simplified "Take 1" modal
+  if ((item.quantity || 1) > 1) {
+    const avail = Math.max(0, (item.quantity || 1) - (item.checked_out_count || 0));
+    if (avail <= 0) { toast('No units available', 'error'); return; }
+    const willRemain = avail - 1;
+    const pct = Math.round((willRemain / (item.quantity || 1)) * 100);
+    const tier = pct >= 67 ? 'green' : pct >= 34 ? 'amber' : 'red';
+    const isAdmin = ME.role === 'admin';
+    const defaultDays = 7;
+    const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
+    const defaultDueStr = defaultDue.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+    const modal = document.getElementById('modalContent');
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <span style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase">Take 1 Unit</span>
+        <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-name">${esc(item.name)}</div>
+      <div class="modal-id" style="margin-bottom:14px">${esc(item.barcode || 'ID-' + item.id)}</div>
+      <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">After this checkout</div>
+        <div class="avail-bar-wrap" style="margin-top:4px;margin-bottom:6px"><div class="avail-bar-fill ab-${tier}" style="width:${pct}%"></div></div>
+        <div style="font-size:13px;color:var(--text)"><strong style="color:var(--${tier === 'green' ? 'green' : tier === 'amber' ? 'amber' : 'red'})">${willRemain}</strong> of <strong>${item.quantity}</strong> will remain available</div>
+      </div>
+      <div class="modal-body" id="coStep1">
+        ${isAdmin ? `
+          <div class="form-group">
+            <label>Borrower</label>
+            <select id="coBorrower" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
+              <option value="">Loading users…</option>
+            </select>
+          </div>
+        ` : `
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Checking out to <strong style="color:var(--text)">${esc(ME.username)}</strong></div>
+        `}
+        <div class="form-group">
+          <label id="durationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
+          <div class="slider-wrap">
+            <div class="slider-tooltip" id="coTooltip">${defaultDays}d</div>
+            <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}" oninput="updateDurationLabel(this.value)">
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px">
+            <span>1d</span><span>7d</span><span>14d</span><span>30d</span>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn-outline" onclick="closeModal()">Cancel</button>
+          <button class="btn-primary" id="bulkCoBtn" onclick="confirmCheckout(${id})">Take 1</button>
+        </div>
+      </div>
+      <div id="coSuccess" class="hidden" style="text-align:center;padding:24px 0">
+        <div class="success-icon">✓</div>
+        <div style="font-size:17px;font-weight:600">Checked Out!</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-top:6px">${esc(item.name)}</div>
+      </div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    if (isAdmin) loadUserSelect();
+    requestAnimationFrame(() => updateDurationLabel(defaultDays));
+    return;
+  }
+
   let unitSelectHtml = '';
 
   if (item.model_id) {
@@ -1091,7 +1213,49 @@ async function confirmCheckout(id) {
 function openReturnModal(id) {
   const item = ITEMS.find(i => i.id === id);
   if (!item) return;
+  const isBulk = (item.quantity || 1) > 1;
   const modal = document.getElementById('modalContent');
+
+  if (isBulk) {
+    // Bulk return: no single borrower to show; just confirm returning 1 unit
+    const out = item.checked_out_count || 0;
+    if (out <= 0) { toast('No units are currently checked out', 'error'); return; }
+    const willRemain = out - 1;
+    const willAvail = Math.max(0, (item.quantity || 1) - willRemain);
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div class="modal-title">Return 1 Unit</div>
+          <div class="modal-name">${esc(item.name)}</div>
+          <div class="modal-id">${esc(item.barcode || 'ID-' + item.id)}</div>
+        </div>
+        <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="summary-card">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Current stock status</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px">
+            <span style="color:var(--amber)">${out}</span> unit${out !== 1 ? 's' : ''} out · <span style="color:var(--green)">${Math.max(0, (item.quantity||1) - out)}</span> available
+          </div>
+          <div style="font-size:12px;color:var(--text-muted)">After return → <strong style="color:var(--green)">${willAvail}</strong> available</div>
+        </div>
+        ${item.queue_length > 0 ? `<div class="info-strip" style="background:var(--purple-soft);border-color:rgba(167,139,250,0.2);color:var(--purple)">📣 ${item.queue_length} person(s) in queue — next will be notified</div>` : ''}
+        <div class="form-actions">
+          <button class="btn-outline" onclick="closeModal()">Cancel</button>
+          <button class="btn-outline btn-green" style="flex:2" id="bulkRetBtn" onclick="confirmReturn(${id})">Confirm Return</button>
+        </div>
+      </div>
+      <div id="retSuccess" class="hidden" style="text-align:center;padding:24px 0">
+        <div class="success-icon">✓</div>
+        <div style="font-size:17px;font-weight:600">Returned!</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-top:6px">${esc(item.name)}</div>
+        <div id="retQueueMsg" class="hidden" style="margin-top:8px;font-size:13px;color:var(--purple)"></div>
+      </div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    return;
+  }
+
   modal.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div>

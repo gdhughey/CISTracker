@@ -355,6 +355,40 @@ td { padding: 12px 16px; vertical-align: middle; }
 .detail-action { padding: 18px 22px; }
 .detail-action .btn-primary, .detail-action .btn-outline { width: 100%; justify-content: center; }
 
+/* Availability pill (bulk qty>1 items) */
+.avail-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; font-family: var(--mono);
+  white-space: nowrap;
+}
+.avail-pill.ap-green { background: var(--green-soft);  color: var(--green);  border: 1px solid rgba(16,212,160,0.2); }
+.avail-pill.ap-amber { background: var(--amber-soft);  color: var(--amber);  border: 1px solid rgba(245,158,11,0.2); }
+.avail-pill.ap-red   { background: var(--red-soft);    color: var(--red);    border: 1px solid rgba(240,74,90,0.2); }
+.avail-pill .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.avail-pill.ap-green .dot { background: var(--green); }
+.avail-pill.ap-amber .dot { background: var(--amber); }
+.avail-pill.ap-red   .dot { background: var(--red); }
+
+/* Availability bar (detail panel) */
+.avail-bar-wrap {
+  margin: 12px 0 4px;
+  background: var(--bg-surface);
+  border-radius: 6px; overflow: hidden;
+  height: 6px; border: 1px solid var(--border);
+}
+.avail-bar-fill {
+  height: 100%; border-radius: 6px;
+  transition: width 0.4s ease;
+}
+.avail-bar-fill.ab-green { background: var(--green); }
+.avail-bar-fill.ab-amber { background: var(--amber); }
+.avail-bar-fill.ab-red   { background: var(--red); }
+.avail-bar-label {
+  font-size: 12px; color: var(--text-muted); margin-bottom: 14px;
+}
+.avail-bar-label strong { color: var(--text); }
+
 /* Queue section */
 .queue-section { padding: 18px 22px; border-bottom: 1px solid var(--border); }
 .queue-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
