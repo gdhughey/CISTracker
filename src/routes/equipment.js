@@ -10,13 +10,15 @@ const { stripHtml } = require('../utils/sanitize');
 const router = express.Router();
 
 const createSchema = z.object({
-  name: z.string().min(1).max(200).transform(stripHtml),
-  type: z.string().max(100).optional().transform(v => stripHtml(v || '')),
+  name:          z.string().min(1).max(200).transform(stripHtml),
+  type:          z.string().max(100).optional().transform(v => stripHtml(v || '')),
   serial_number: z.string().max(100).optional().transform(v => stripHtml(v || '')),
-  barcode: z.string().max(100).optional().transform(v => stripHtml(v || '')),
-  category: z.string().max(100).optional().transform(v => stripHtml(v || '')),
-  location: z.string().max(200).optional().transform(v => stripHtml(v || '')),
-  notes: z.string().max(2000).optional().transform(v => stripHtml(v || '')),
+  barcode:       z.string().max(100).optional().transform(v => stripHtml(v || '')),
+  category:      z.string().max(100).optional().transform(v => stripHtml(v || '')),
+  location:      z.string().max(200).optional().transform(v => stripHtml(v || '')),
+  location_id:   z.number().int().positive().optional().nullable(),
+  model_id:      z.number().int().positive().optional().nullable(),
+  notes:         z.string().max(2000).optional().transform(v => stripHtml(v || '')),
 });
 
 const updateSchema = createSchema.partial();
@@ -55,7 +57,8 @@ router.get('/', (req, res) => {
 router.get('/log', requireRole('admin'), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   const equipmentId = req.query.equipment_id ? parseInt(req.query.equipment_id, 10) : undefined;
-  res.json({ entries: equipmentService.getLog({ limit, equipmentId }) });
+  const userId      = req.query.user_id      ? parseInt(req.query.user_id, 10)      : undefined;
+  res.json({ entries: equipmentService.getLog({ limit, equipmentId, userId }) });
 });
 
 router.delete('/log', requireRole('admin'), (req, res) => {
