@@ -67,7 +67,7 @@ function findByIdentifier({ barcode, serial_number }) {
   `).get(...params) || null;
 }
 
-function create({ name, type, serial_number, barcode, category, location, image_path, notes }) {
+function create({ name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes }) {
   // Server-side dedupe: if a barcode or serial number is supplied and an
   // equipment row already exists with that identifier, return that row
   // instead of creating a duplicate. This prevents the checkout flow from
@@ -77,14 +77,14 @@ function create({ name, type, serial_number, barcode, category, location, image_
   const existing = findByIdentifier({ barcode, serial_number });
   if (existing) return existing;
   const info = db.prepare(`
-    INSERT INTO equipment (name, type, serial_number, barcode, category, location, image_path, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, type || '', serial_number || '', barcode || '', category || '', location || '', image_path || null, notes || '');
+    INSERT INTO equipment (name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, type || '', serial_number || '', barcode || '', category || '', location || '', location_id || null, model_id || null, image_path || null, notes || '');
   return getById(info.lastInsertRowid);
 }
 
 function update(id, fields) {
-  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'location', 'notes', 'image_path'];
+  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'location', 'location_id', 'model_id', 'notes', 'image_path'];
   const sets = [];
   const params = [];
   for (const key of allowed) {
@@ -178,17 +178,17 @@ function checkin(equipmentId, actingUser, notes = '', source = 'Manual') {
 }
 
 function getLog({ limit = 100, equipmentId, userId } = {}) {
-  let where = '';
-  const params = [];
   const conds = [];
+  const params = [];
   if (equipmentId) { conds.push('cl.equipment_id = ?'); params.push(equipmentId); }
-  if (userId) { conds.push('cl.performed_by = ?'); params.push(userId); }
-  if (conds.length) where = 'WHERE ' + conds.join(' AND ');
-  params.push(limit);
+  if (userId)      { conds.push('cl.performed_by = ?'); params.push(userId); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  params.push(Math.min(limit, 500));
   return db.prepare(`
-    SELECT cl.*, e.name AS equipment_name, e.serial_number
+    SELECT cl.*, e.name AS equipment_name, u.username AS performed_by_username
     FROM checkout_log cl
     LEFT JOIN equipment e ON e.id = cl.equipment_id
+    LEFT JOIN users u ON u.id = cl.performed_by
     ${where}
     ORDER BY cl.created_at DESC
     LIMIT ?
