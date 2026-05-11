@@ -1053,10 +1053,18 @@ function openAddItemModal() {
         </select>
         <input id="addCatNew" class="form-input" placeholder="Or type a new category name" style="margin-top:6px">
       </div>
-      <div class="form-group"><label class="form-label">Serial Number</label>
-        <input id="addSerial" class="form-input" placeholder="Optional"></div>
-      <div class="form-group"><label class="form-label">Asset ID / Barcode</label>
-        <input id="addBarcode" class="form-input" placeholder="Optional"></div>
+      <div class="form-group"><label class="form-label">Quantity</label>
+        <input id="addQty" class="form-input" type="number" min="1" max="10000" value="1" placeholder="1" oninput="onAddQtyChange()"></div>
+      <div id="addSingleUnit">
+        <div class="form-group"><label class="form-label">Serial Number</label>
+          <input id="addSerial" class="form-input" placeholder="Optional"></div>
+        <div class="form-group"><label class="form-label">Asset ID / Barcode</label>
+          <input id="addBarcode" class="form-input" placeholder="Optional"></div>
+      </div>
+      <div id="addMultiUnits" class="hidden">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Enter serial &amp; barcode for each unit — leave blank for units you don't have that info for yet.</div>
+        <div id="addUnitRows"></div>
+      </div>
       <div class="form-group"><label class="form-label">Location</label>
         <select id="addLocId" class="form-input">
           <option value="">— None —</option>
@@ -1074,6 +1082,38 @@ function openAddItemModal() {
   document.getElementById('modalOverlay').classList.add('open');
 }
 
+function onAddQtyChange() {
+  const qty = parseInt(document.getElementById('addQty')?.value, 10) || 1;
+  const single = document.getElementById('addSingleUnit');
+  const multi  = document.getElementById('addMultiUnits');
+  const rows   = document.getElementById('addUnitRows');
+  if (qty > 1) {
+    single?.classList.add('hidden');
+    multi?.classList.remove('hidden');
+    // Build/update unit rows — preserve existing values
+    const existing = rows ? [...rows.querySelectorAll('.unit-row')] : [];
+    const currentCount = existing.length;
+    if (rows) {
+      if (qty > currentCount) {
+        for (let i = currentCount; i < qty; i++) {
+          const div = document.createElement('div');
+          div.className = 'unit-row';
+          div.style.cssText = 'display:grid;grid-template-columns:32px 1fr 1fr;gap:6px;align-items:center;margin-bottom:6px';
+          div.innerHTML = `<span style="font-size:12px;color:var(--text-muted);text-align:right">${i+1}</span>
+            <input class="form-input unit-serial" placeholder="Serial #" style="font-size:13px">
+            <input class="form-input unit-barcode" placeholder="Asset ID / Barcode" style="font-size:13px">`;
+          rows.appendChild(div);
+        }
+      } else {
+        while (rows.children.length > qty) rows.removeChild(rows.lastChild);
+      }
+    }
+  } else {
+    single?.classList.remove('hidden');
+    multi?.classList.add('hidden');
+  }
+}
+
 async function submitAddItem() {
   const name = document.getElementById('addName')?.value.trim();
   if (!name) { toast('Name is required', 'error'); return; }
@@ -1084,58 +1124,98 @@ async function submitAddItem() {
   const locIdVal  = document.getElementById('addLocId')?.value;
   const location_id = locIdVal ? parseInt(locIdVal, 10) : null;
   const locName   = location_id ? (LOCATIONS_LIST.find(l => l.id === location_id)?.name || '') : '';
+  const qty       = Math.max(1, parseInt(document.getElementById('addQty')?.value, 10) || 1);
 
-  const payload = {
+  // Collect per-unit serial/barcode if multi-unit mode
+  let units = null;
+  if (qty > 1) {
+    const unitRows = document.querySelectorAll('#addUnitRows .unit-row');
+    const collected = [...unitRows].map(r => ({
+      serial_number: r.querySelector('.unit-serial')?.value.trim() || '',
+      barcode:       r.querySelector('.unit-barcode')?.value.trim() || '',
+    }));
+    const hasAny = collected.some(u => u.serial_number || u.barcode);
+    if (hasAny) units = collected;
+  }
+
+  const basePayload = {
     name,
     category,
-    serial_number: document.getElementById('addSerial')?.value.trim() || '',
-    barcode:       document.getElementById('addBarcode')?.value.trim() || '',
-    location:      locName,
+    location: locName,
     location_id,
-    notes:         document.getElementById('addNotes')?.value.trim() || '',
+    notes: document.getElementById('addNotes')?.value.trim() || '',
   };
+
+  // Single unit or bulk-no-serials: use existing single payload
+  const payload = units
+    ? basePayload  // individual unit payloads built below
+    : {
+        ...basePayload,
+        serial_number: document.getElementById('addSerial')?.value.trim() || '',
+        barcode:       document.getElementById('addBarcode')?.value.trim() || '',
+        quantity: qty,
+      };
 
   try {
     if (ME?.role === 'admin') {
-      const { item } = await api('/api/equipment', { method: 'POST', body: payload });
-      toast('Item added', 'success');
-      // Show label step
-      try {
-        const label = await api(`/api/equipment/${item.id}/label`);
-        _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
-        document.getElementById('addStep1').classList.add('hidden');
-        const step2 = document.getElementById('addStep2');
-        step2.classList.remove('hidden');
-        step2.innerHTML = `
-          <div class="success-icon" style="margin-bottom:12px">✓</div>
-          <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
-          <div class="label-preview">
-            <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
-            <div class="label-info">
-              <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
-              <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
-              <div class="label-id">${esc(label.asset_id)}</div>
-              <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
-            </div>
-          </div>
-          <div class="form-actions">
-            <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
-            <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
-          </div>
-        `;
-      } catch {
-        toast('Item created but label failed to load', 'info');
+      let createdItems = [];
+      if (units) {
+        // Create one row per unit with individual serial/barcode
+        for (const u of units) {
+          const { item } = await api('/api/equipment', { method: 'POST', body: { ...basePayload, ...u } });
+          createdItems.push(item);
+        }
+        toast(`${createdItems.length} items added`, 'success');
         closeModal();
+        loadItems();
+      } else {
+        // Single row (qty=1) or bulk row (qty>1, no individual serials)
+        const { item } = await api('/api/equipment', { method: 'POST', body: payload });
+        createdItems = [item];
+        toast(qty > 1 ? `Added ${qty}× ${item.name}` : 'Item added', 'success');
+        // Show label step only for single items
+        if (qty === 1) {
+          try {
+            const label = await api(`/api/equipment/${item.id}/label`);
+            _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
+            document.getElementById('addStep1').classList.add('hidden');
+            const step2 = document.getElementById('addStep2');
+            step2.classList.remove('hidden');
+            step2.innerHTML = `
+              <div class="success-icon" style="margin-bottom:12px">✓</div>
+              <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
+              <div class="label-preview">
+                <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
+                <div class="label-info">
+                  <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
+                  <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
+                  <div class="label-id">${esc(label.asset_id)}</div>
+                  <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
+                <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
+              </div>
+            `;
+          } catch {
+            toast('Item created but label failed to load', 'info');
+            closeModal();
+            loadItems();
+          }
+        } else {
+          closeModal();
+          loadItems();
+        }
       }
     } else {
       await api('/api/service-tickets', {
         method: 'POST',
-        body: { type: 'add_item', payload },
+        body: { type: 'add_item', payload: units ? { ...basePayload, units, quantity: qty } : payload },
       });
       toast('Request submitted — pending admin approval', 'success');
       closeModal();
     }
-    loadItems();
   } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
