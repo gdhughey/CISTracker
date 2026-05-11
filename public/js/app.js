@@ -865,17 +865,20 @@ function renderUnits(equipmentId, units) {
             const label   = u.barcode || u.serial_number || ('Unit #' + u.id);
             const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
             return `
-              <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:8px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px;padding:7px 10px">
+              <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:6px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px;padding:6px 10px">
                 <div style="flex:1;min-width:0">
                   <div style="font-size:12px;font-weight:600;font-family:var(--mono);color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(u.barcode || '—')}</div>
                   ${u.serial_number ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">SN: ${esc(u.serial_number)}</div>` : ''}
                   ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--sans);margin-top:1px">${esc(u.notes)}</div>` : ''}
                 </div>
-                <div style="display:flex;gap:4px;flex-shrink:0;align-items:center">
-                  ${hasAvail ? `<button class="btn-outline btn-sm btn-green" style="padding:3px 8px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},${JSON.stringify(noteVal)},${JSON.stringify(label)})">Check Out</button>` : ''}
+                <div style="display:flex;gap:3px;flex-shrink:0;align-items:center">
+                  ${hasAvail ? `<button class="btn-outline btn-sm btn-green" style="padding:3px 9px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},${JSON.stringify(noteVal)},${JSON.stringify(label)})">Check Out</button>` : ''}
                   ${isAdminUser ? `
-                    <button class="btn-outline btn-sm" style="padding:3px 6px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
-                    <button class="btn-outline btn-sm btn-red" style="padding:3px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
+                    <button style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);cursor:pointer;font-size:14px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s,color .15s" title="More options" onclick="toggleUnitMenu(${u.id})">⋮</button>
+                    <div id="unitMenu-${u.id}" style="display:none;gap:3px">
+                      <button class="btn-outline btn-sm" style="padding:3px 7px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
+                      <button class="btn-outline btn-sm btn-red" style="padding:3px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
+                    </div>
                   ` : ''}
                 </div>
               </div>`;
@@ -885,6 +888,15 @@ function renderUnits(equipmentId, units) {
       ` : ''}
     </div>
   `;
+}
+
+function toggleUnitMenu(uid) {
+  const menu = document.getElementById('unitMenu-' + uid);
+  if (!menu) return;
+  const open = menu.style.display === 'flex';
+  // Close all open menus first
+  document.querySelectorAll('[id^="unitMenu-"]').forEach(m => { m.style.display = 'none'; });
+  if (!open) menu.style.display = 'flex';
 }
 
 // Checkout modal pre-loaded for a specific unit (opened from the units list in the detail panel)
