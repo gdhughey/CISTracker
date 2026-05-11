@@ -272,4 +272,87 @@ router.delete('/locations/:id(\\d+)', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Categories CRUD ───────────────────────────────────────────────────────────
+const categoryService = require('../services/categoryService');
+
+const categorySchema = z.object({
+  name: z.string().min(1).max(100).transform(v => stripHtml(v)),
+});
+
+router.get('/categories', (_req, res) => {
+  res.json({ categories: categoryService.listAll() });
+});
+
+router.post('/categories', validate(categorySchema), (req, res) => {
+  try {
+    const cat = categoryService.create(req.body.name);
+    req.audit('category_create', req.body.name);
+    res.status(201).json({ category: cat });
+  } catch (err) {
+    if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists' });
+    throw err;
+  }
+});
+
+router.put('/categories/:id(\\d+)', validate(categorySchema), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!categoryService.getById(id)) return res.status(404).json({ error: 'Not found' });
+  const cat = categoryService.update(id, req.body.name);
+  req.audit('category_update', req.body.name);
+  res.json({ category: cat });
+});
+
+router.delete('/categories/:id(\\d+)', requireRole('admin'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const cat = categoryService.getById(id);
+  if (!cat) return res.status(404).json({ error: 'Not found' });
+  categoryService.remove(id);
+  req.audit('category_delete', cat.name);
+  res.json({ ok: true });
+});
+
+// ── Models CRUD ───────────────────────────────────────────────────────────────
+const modelService = require('../services/modelService');
+
+const modelSchema = z.object({
+  name:        z.string().min(1).max(200).transform(v => stripHtml(v)),
+  category_id: z.number().int().positive().optional().nullable(),
+  description: z.string().max(1000).optional().transform(v => stripHtml(v || '')),
+});
+
+router.get('/models', (_req, res) => {
+  res.json({ models: modelService.listAll() });
+});
+
+router.get('/models/:id(\\d+)', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const model = modelService.getById(id);
+  if (!model) return res.status(404).json({ error: 'Not found' });
+  const units = modelService.getUnits(id);
+  res.json({ model, units });
+});
+
+router.post('/models', requireRole('admin'), validate(modelSchema), (req, res) => {
+  const model = modelService.create(req.body);
+  req.audit('model_create', model.name);
+  res.status(201).json({ model });
+});
+
+router.put('/models/:id(\\d+)', requireRole('admin'), validate(modelSchema.partial()), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!modelService.getById(id)) return res.status(404).json({ error: 'Not found' });
+  const model = modelService.update(id, req.body);
+  req.audit('model_update', model.name);
+  res.json({ model });
+});
+
+router.delete('/models/:id(\\d+)', requireRole('admin'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const model = modelService.getById(id);
+  if (!model) return res.status(404).json({ error: 'Not found' });
+  modelService.remove(id);
+  req.audit('model_delete', model.name);
+  res.json({ ok: true });
+});
+
 module.exports = router;
