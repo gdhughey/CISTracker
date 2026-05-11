@@ -2754,22 +2754,50 @@ function renderActiveAudit(audit, entries) {
     const d = cnt - exp;
     return d === 0 ? '✓' : (d > 0 ? '+' : '') + d;
   };
+
+  // Summary counts
+  const matched    = entries.filter(e => e.counted_qty === e.expected_qty).length;
+  const warnings   = entries.filter(e => e.counted_qty !== e.expected_qty && Math.abs(e.counted_qty - e.expected_qty) <= 2).length;
+  const discrepant = entries.filter(e => Math.abs(e.counted_qty - e.expected_qty) > 2).length;
+  const summaryHtml = entries.length ? `
+    <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <div style="background:rgba(16,212,160,.1);border:1px solid rgba(16,212,160,.3);border-radius:var(--r-sm);padding:8px 14px;font-size:13px">
+        <span style="color:var(--green);font-weight:700">${matched}</span>
+        <span style="color:var(--text-sec)"> / ${entries.length} match</span>
+      </div>
+      ${warnings ? `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--r-sm);padding:8px 14px;font-size:13px">
+        <span style="color:var(--amber);font-weight:700">${warnings}</span>
+        <span style="color:var(--text-sec)"> off by 1–2</span>
+      </div>` : ''}
+      ${discrepant ? `<div style="background:rgba(240,74,90,.1);border:1px solid rgba(240,74,90,.3);border-radius:var(--r-sm);padding:8px 14px;font-size:13px">
+        <span style="color:var(--red);font-weight:700">${discrepant}</span>
+        <span style="color:var(--text-sec)"> major discrepanc${discrepant === 1 ? 'y' : 'ies'}</span>
+      </div>` : ''}
+    </div>` : '';
+
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <span style="font-size:14px;color:var(--text-sec)">Audit #${audit.id} — open</span>
       <button class="btn-outline btn-sm" onclick="closeAuditSession(${audit.id})">Close Audit</button>
     </div>
+    ${summaryHtml}
     <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">
       <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface)">
-        <span>Item</span><span style="text-align:center">Expected</span><span style="text-align:center">Counted</span><span style="text-align:center">Diff</span>
+        <span>Item</span><span style="text-align:center">System</span><span style="text-align:center">Counted</span><span style="text-align:center">Status</span>
       </div>
-      ${entries.length ? entries.map(e => `
-        <div class="audit-entry-row">
+      ${entries.length ? entries.map(e => {
+        const match = e.counted_qty === e.expected_qty;
+        const d = Math.abs(e.counted_qty - e.expected_qty);
+        const icon = match ? '✅' : d <= 2 ? '⚠️' : '❌';
+        const label = match ? 'Match' : (e.counted_qty > e.expected_qty ? '+' : '') + (e.counted_qty - e.expected_qty);
+        return `
+        <div class="audit-entry-row" style="${!match ? 'background:rgba(240,74,90,0.04)' : ''}">
           <span class="ae-name">${esc(e.item_name)}${e.category_name ? ' <span style="color:var(--text-muted)">(' + esc(e.category_name) + ')</span>' : ''}</span>
           <span class="ae-num">${e.expected_qty}</span>
           <span class="ae-num">${e.counted_qty}</span>
-          <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}">${discLabel(e.expected_qty, e.counted_qty)}</span>
-        </div>`).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No entries yet — add one below</div>'}
+          <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}" style="font-size:13px">${icon} ${label}</span>
+        </div>`;
+      }).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No entries yet — add one below</div>'}
     </div>
     <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);padding:16px">
       <div style="font-weight:600;font-size:13px;margin-bottom:12px">Add Entry</div>
@@ -2847,25 +2875,41 @@ async function closeAuditSession(id) {
 async function openAuditHistory(id) {
   try {
     const { audit, entries } = await api(`/api/inventory-audit/${id}`);
-    const discLabel = (exp, cnt) => { const d = cnt - exp; return d === 0 ? '✓' : (d > 0 ? '+' : '') + d; };
     const discClass = (exp, cnt) => { const d = Math.abs(cnt - exp); return d === 0 ? 'disc-ok' : d <= 2 ? 'disc-warn' : 'disc-bad'; };
+    const matched    = entries.filter(e => e.counted_qty === e.expected_qty).length;
+    const discrepant = entries.filter(e => e.counted_qty !== e.expected_qty).length;
     const modal = document.getElementById('modalContent');
     modal.innerHTML = `
       <div class="modal-title">Audit #${audit.id}</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
         ${fmtDate(audit.created_at)} · ${esc(audit.created_by_username)} · ${entries.length} entries
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <div style="background:rgba(16,212,160,.1);border:1px solid rgba(16,212,160,.3);border-radius:var(--r-sm);padding:6px 12px;font-size:12px">
+          <span style="color:var(--green);font-weight:700">${matched}</span>
+          <span style="color:var(--text-sec)"> matched</span>
+        </div>
+        ${discrepant ? `<div style="background:rgba(240,74,90,.1);border:1px solid rgba(240,74,90,.3);border-radius:var(--r-sm);padding:6px 12px;font-size:12px">
+          <span style="color:var(--red);font-weight:700">${discrepant}</span>
+          <span style="color:var(--text-sec)"> discrepanc${discrepant === 1 ? 'y' : 'ies'}</span>
+        </div>` : ''}
       </div>
       <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface)">
-          <span>Item</span><span style="text-align:center">Expected</span><span style="text-align:center">Counted</span><span style="text-align:center">Diff</span>
+          <span>Item</span><span style="text-align:center">System</span><span style="text-align:center">Counted</span><span style="text-align:center">Status</span>
         </div>
-        ${entries.map(e => `
-          <div class="audit-entry-row">
+        ${entries.map(e => {
+          const match = e.counted_qty === e.expected_qty;
+          const icon  = match ? '✅' : Math.abs(e.counted_qty - e.expected_qty) <= 2 ? '⚠️' : '❌';
+          const label = match ? 'Match' : (e.counted_qty > e.expected_qty ? '+' : '') + (e.counted_qty - e.expected_qty);
+          return `
+          <div class="audit-entry-row" style="${!match ? 'background:rgba(240,74,90,0.04)' : ''}">
             <span class="ae-name">${esc(e.item_name)}</span>
             <span class="ae-num">${e.expected_qty}</span>
             <span class="ae-num">${e.counted_qty}</span>
-            <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}">${discLabel(e.expected_qty, e.counted_qty)}</span>
-          </div>`).join('')}
+            <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}">${icon} ${label}</span>
+          </div>`;
+        }).join('')}
       </div>
       <div class="form-actions" style="margin-top:16px">
         <button class="btn-outline" onclick="closeModal()">Close</button>
