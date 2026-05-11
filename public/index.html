@@ -140,7 +140,13 @@
       <div class="nav-section">
         <div class="nav-label">Support</div>
         <div class="nav-item" data-view="tickets" onclick="switchView('tickets')">
-          Tickets <span id="ticketBadge" class="badge badge-purple hidden">0</span>
+          IT Tickets <span id="ticketBadge" class="badge badge-purple hidden">0</span>
+        </div>
+        <div class="nav-item" data-view="service-tickets" onclick="switchView('service-tickets')">
+          Service Tickets<span id="svcTicketBadge" class="nav-badge hidden"></span>
+        </div>
+        <div class="nav-item" data-view="inv-audit" onclick="switchView('inv-audit')">
+          Inv. Audit
         </div>
       </div>
       <div class="nav-section">
@@ -345,6 +351,31 @@
         <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Sign in faster with Face ID, Touch ID, Windows Hello, or your hardware security key — no password or 6-digit code needed. Each browser/device needs its own passkey.</p>
         <div id="passkeysList"></div>
       </div>
+    </div>
+
+    <!-- ═══ SERVICE TICKETS VIEW ═══ -->
+    <div id="view-service-tickets" class="hidden">
+      <div class="view-header">
+        <h2 class="view-heading">Service Tickets</h2>
+        <button class="btn-primary btn-sm" onclick="openNewServiceTicketModal()">+ New Request</button>
+      </div>
+      <div class="chip-row" id="svcTicketChips">
+        <button class="chip active" data-svcstatus="all"      onclick="setSvcTicketFilter('all')">All</button>
+        <button class="chip"        data-svcstatus="pending"   onclick="setSvcTicketFilter('pending')">Pending</button>
+        <button class="chip"        data-svcstatus="approved"  onclick="setSvcTicketFilter('approved')">Approved</button>
+        <button class="chip"        data-svcstatus="rejected"  onclick="setSvcTicketFilter('rejected')">Rejected</button>
+      </div>
+      <div id="svcTicketList"></div>
+    </div>
+
+    <!-- ═══ INVENTORY AUDIT VIEW ═══ -->
+    <div id="view-inv-audit" class="hidden">
+      <div class="view-header">
+        <h2 class="view-heading">Inventory Audit</h2>
+        <button class="btn-primary btn-sm" onclick="startNewAudit()">+ Start Audit</button>
+      </div>
+      <div id="auditSessionArea"></div>
+      <div id="auditHistoryList"></div>
     </div>
 
   </div><!-- /main-content -->
