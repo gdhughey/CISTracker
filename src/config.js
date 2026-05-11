@@ -58,6 +58,7 @@ const config = {
     apiKey: process.env.RESEND_API_KEY || '',
     from: 'noreply@cistracker.net',
     overdueHour: int(process.env.RESEND_OVERDUE_HOUR, 8),
+    adminEmails: ['gdhughey0726@gmail.com', 'brycesonmcdaniels@gmail.com'],
   },
 
   seed: {
