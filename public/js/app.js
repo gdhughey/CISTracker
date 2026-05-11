@@ -872,7 +872,7 @@ function renderUnits(equipmentId, units) {
                   ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--sans);margin-top:1px">${esc(u.notes)}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:3px;flex-shrink:0;align-items:center">
-                  ${hasAvail ? `<button class="btn-outline btn-sm btn-green" style="padding:3px 9px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},${JSON.stringify(noteVal)},${JSON.stringify(label)})">Check Out</button>` : ''}
+                  ${hasAvail ? `<button class="btn-outline btn-sm btn-green" style="padding:3px 9px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},'${noteVal.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}','${label.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">Check Out</button>` : ''}
                   ${isAdminUser ? `
                     <button style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);cursor:pointer;font-size:14px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s,color .15s" title="More options" onclick="toggleUnitMenu(${u.id})">⋮</button>
                     <div id="unitMenu-${u.id}" style="display:none;gap:3px">
@@ -1282,7 +1282,7 @@ async function loadBulkUnitPicker(equipmentId) {
                       .filter(Boolean).join(' · ');
       const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
       return `
-        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id}, ${JSON.stringify(noteVal)})">
+        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id},'${noteVal.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
           <div style="font-size:12px;font-weight:600;font-family:var(--mono);color:var(--text)">${esc(label)}</div>
           ${sub ? `<div style="font-size:11px;color:var(--text-muted)">${esc(sub)}</div>` : ''}
         </div>`;
