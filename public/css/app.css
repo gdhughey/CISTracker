@@ -840,26 +840,104 @@ input[type="range"]::-moz-range-track {
   .tour-bubble { max-width: 88vw; min-width: 0; }
 }
 
+/* ── Service Tickets Stats Bar ───────────────────────────────────── */
+.svc-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.svc-stat-card {
+  flex: 1;
+  min-width: 100px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.svc-stat-card:hover { border-color: var(--accent); }
+.svc-stat-card.active { border-color: var(--accent); background: rgba(99,102,241,.08); }
+.svc-stat-label { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
+.svc-stat-value { font-size: 28px; font-weight: 700; line-height: 1; }
+.svc-stat-card.stat-all     .svc-stat-value { color: var(--text); }
+.svc-stat-card.stat-pending .svc-stat-value { color: var(--amber); }
+.svc-stat-card.stat-approved .svc-stat-value { color: var(--green); }
+.svc-stat-card.stat-rejected .svc-stat-value { color: var(--red); }
+
 /* ── Service Ticket Cards ─────────────────────────────────────────── */
 .svc-ticket-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   border-radius: var(--r);
   padding: 14px 16px;
   margin-bottom: 8px;
   cursor: pointer;
-  transition: border-color .15s;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  transition: border-color .15s, background .15s, transform .1s;
 }
-.svc-ticket-card:hover { border-color: var(--accent); }
-.svc-ticket-card .stc-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.svc-ticket-card .stc-title  { font-weight: 500; color: var(--text); font-size: 14px; }
-.svc-ticket-card .stc-meta   { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.svc-ticket-card:hover {
+  border-color: var(--accent);
+  background: rgba(99,102,241,.05);
+  transform: translateX(2px);
+}
+.svc-ticket-card.status-pending  { border-left-color: var(--amber); }
+.svc-ticket-card.status-approved { border-left-color: var(--green); }
+.svc-ticket-card.status-rejected { border-left-color: var(--red); }
 
-.svc-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
-  padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: .04em; }
-.svc-status.pending  { background: rgba(245,158,11,.15); color: var(--amber); }
-.svc-status.approved { background: rgba(16,212,160,.15);  color: var(--green); }
-.svc-status.rejected { background: rgba(240,74,90,.15);   color: var(--red); }
+.stc-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.stc-icon.type-add_item        { background: rgba(99,102,241,.15); }
+.stc-icon.type-quantity_change { background: rgba(245,158,11,.12); }
+.stc-icon.type-other           { background: rgba(148,163,184,.1); }
+
+.stc-body { min-width: 0; }
+.stc-title { font-weight: 600; color: var(--text); font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stc-meta  { font-size: 12px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+.stc-meta-dot { color: var(--border); }
+
+.stc-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+
+.svc-status { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700;
+  padding: 3px 9px; border-radius: 99px; text-transform: uppercase; letter-spacing: .06em; }
+.svc-status.pending  { background: rgba(245,158,11,.15); color: var(--amber); border: 1px solid rgba(245,158,11,.25); }
+.svc-status.approved { background: rgba(16,212,160,.12);  color: var(--green); border: 1px solid rgba(16,212,160,.25); }
+.svc-status.rejected { background: rgba(240,74,90,.12);   color: var(--red);   border: 1px solid rgba(240,74,90,.25); }
+
+.stc-ticket-num { font-size: 11px; font-weight: 600; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; letter-spacing: .03em; }
+
+/* ── Service Tickets Empty State ─────────────────────────────────── */
+.svc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  text-align: center;
+}
+.svc-empty-icon {
+  width: 64px; height: 64px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+  margin-bottom: 16px;
+}
+.svc-empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.svc-empty-sub   { font-size: 13px; color: var(--text-muted); max-width: 280px; line-height: 1.5; }
 
 /* ── Audit Discrepancy Colors ─────────────────────────────────────── */
 .disc-ok   { color: var(--green); font-weight: 600; }

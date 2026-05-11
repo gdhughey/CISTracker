@@ -2674,8 +2674,8 @@ let _svcFilter = 'all';
 
 function setSvcTicketFilter(f) {
   _svcFilter = f;
-  document.querySelectorAll('#svcTicketChips .chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.svcstatus === f));
+  document.querySelectorAll('#svcStats .svc-stat-card').forEach(c =>
+    c.classList.toggle('active', c.getAttribute('onclick').includes(`'${f}'`)));
   renderSvcTickets();
 }
 
@@ -2704,22 +2704,65 @@ async function loadSvcTicketBadge() {
 function renderSvcTickets() {
   const container = document.getElementById('svcTicketList');
   if (!container) return;
+
+  // Update stat counters
+  const counts = { all: _svcTickets.length, pending: 0, approved: 0, rejected: 0 };
+  _svcTickets.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+  const statAll      = document.getElementById('svcStatAll');
+  const statPending  = document.getElementById('svcStatPending');
+  const statApproved = document.getElementById('svcStatApproved');
+  const statRejected = document.getElementById('svcStatRejected');
+  if (statAll)      statAll.textContent      = counts.all;
+  if (statPending)  statPending.textContent  = counts.pending;
+  if (statApproved) statApproved.textContent = counts.approved;
+  if (statRejected) statRejected.textContent = counts.rejected;
+
   const filtered = _svcFilter === 'all' ? _svcTickets : _svcTickets.filter(t => t.status === _svcFilter);
+
   if (!filtered.length) {
-    container.innerHTML = '<div class="empty-state"><p>No service tickets found.</p></div>';
+    const emptyLabels = {
+      all:      ['No service tickets yet.',     'Submit a request using the + New Request button above.'],
+      pending:  ['No pending tickets.',         'All caught up — no requests awaiting approval.'],
+      approved: ['No approved tickets.',        'Approved requests will appear here.'],
+      rejected: ['No rejected tickets.',        'Rejected requests will appear here.'],
+    };
+    const [title, sub] = emptyLabels[_svcFilter] || emptyLabels.all;
+    container.innerHTML = `
+      <div class="svc-empty">
+        <div class="svc-empty-icon">🎫</div>
+        <div class="svc-empty-title">${title}</div>
+        <div class="svc-empty-sub">${sub}</div>
+      </div>`;
     return;
   }
+
+  const typeIcon  = { add_item: '📦', quantity_change: '🔢', other: '💬' };
+  const typeLabel = { add_item: 'Add Item', quantity_change: 'Qty Change', other: 'Other' };
+  const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' };
+
   container.innerHTML = filtered.map(t => {
     const payload = typeof t.payload === 'string' ? JSON.parse(t.payload) : (t.payload || {});
-    const typeLabel = { add_item: 'Add Item', quantity_change: 'Quantity Change', other: 'Other' }[t.type] || t.type;
-    const summary = payload.name || payload.subject || t.type;
+    const summary  = payload.name || payload.subject || typeLabel[t.type] || t.type;
+    const icon     = typeIcon[t.type]  || '🎫';
+    const tLabel   = typeLabel[t.type] || t.type;
+    const sLabel   = statusLabel[t.status] || t.status;
     return `
-      <div class="svc-ticket-card" onclick="openSvcTicket(${t.id})">
-        <div class="stc-header">
-          <span class="stc-title">#${t.id} — ${esc(typeLabel)}: ${esc(summary)}</span>
-          <span class="svc-status ${t.status}">${t.status}</span>
+      <div class="svc-ticket-card status-${t.status}" onclick="openSvcTicket(${t.id})">
+        <div class="stc-icon type-${t.type}">${icon}</div>
+        <div class="stc-body">
+          <div class="stc-title">${esc(summary)}</div>
+          <div class="stc-meta">
+            <span>${esc(tLabel)}</span>
+            <span class="stc-meta-dot">·</span>
+            <span>${esc(t.requester_username)}</span>
+            <span class="stc-meta-dot">·</span>
+            <span>${fmtDate(t.created_at)}</span>
+          </div>
         </div>
-        <div class="stc-meta">Requested by ${esc(t.requester_username)} · ${fmtDate(t.created_at)}</div>
+        <div class="stc-right">
+          <span class="svc-status ${t.status}">${sLabel}</span>
+          <span class="stc-ticket-num">#${t.id}</span>
+        </div>
       </div>`;
   }).join('');
 }

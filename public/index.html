@@ -360,11 +360,23 @@
         <h2 class="view-heading">Service Tickets</h2>
         <button class="btn-primary btn-sm" onclick="openNewServiceTicketModal()">+ New Request</button>
       </div>
-      <div class="chip-row" id="svcTicketChips">
-        <button class="chip active" data-svcstatus="all"      onclick="setSvcTicketFilter('all')">All</button>
-        <button class="chip"        data-svcstatus="pending"   onclick="setSvcTicketFilter('pending')">Pending</button>
-        <button class="chip"        data-svcstatus="approved"  onclick="setSvcTicketFilter('approved')">Approved</button>
-        <button class="chip"        data-svcstatus="rejected"  onclick="setSvcTicketFilter('rejected')">Rejected</button>
+      <div class="svc-stats" id="svcStats">
+        <div class="svc-stat-card stat-all active" onclick="setSvcTicketFilter('all')">
+          <div class="svc-stat-label">All</div>
+          <div class="svc-stat-value" id="svcStatAll">0</div>
+        </div>
+        <div class="svc-stat-card stat-pending" onclick="setSvcTicketFilter('pending')">
+          <div class="svc-stat-label">Pending</div>
+          <div class="svc-stat-value" id="svcStatPending">0</div>
+        </div>
+        <div class="svc-stat-card stat-approved" onclick="setSvcTicketFilter('approved')">
+          <div class="svc-stat-label">Approved</div>
+          <div class="svc-stat-value" id="svcStatApproved">0</div>
+        </div>
+        <div class="svc-stat-card stat-rejected" onclick="setSvcTicketFilter('rejected')">
+          <div class="svc-stat-label">Rejected</div>
+          <div class="svc-stat-value" id="svcStatRejected">0</div>
+        </div>
       </div>
       <div id="svcTicketList"></div>
     </div>
