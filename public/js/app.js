@@ -852,24 +852,89 @@ function renderUnits(equipmentId, units) {
   const el = document.getElementById(`unitsList-${equipmentId}`);
   if (!el) return;
   const isAdminUser = ME.role === 'admin';
+  const parentItem  = ITEMS.find(i => i.id === equipmentId);
+  const hasAvail    = parentItem
+    ? Math.max(0, (parentItem.quantity || 1) - (parentItem.checked_out_count || 0)) > 0
+    : true;
   el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:4px;width:100%">
       ${units.length === 0
         ? `<span style="color:var(--text-muted);font-size:12px">No individual units recorded.</span>`
-        : units.map(u => `
-          <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);background:var(--bg-base);border:1px solid var(--border);border-radius:6px;padding:4px 8px">
-            <span style="flex:1;color:var(--text)">${esc(u.serial_number || '—')}${u.barcode ? ' · ' + esc(u.barcode) : ''}${u.notes ? ' <span style="color:var(--text-muted);font-family:var(--sans)">' + esc(u.notes) + '</span>' : ''}</span>
-            ${isAdminUser ? `
-              <button class="btn-outline btn-sm" style="padding:2px 6px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
-              <button class="btn-outline btn-sm btn-red" style="padding:2px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
-            ` : ''}
-          </div>
-        `).join('')}
+        : units.map(u => {
+            const label    = u.barcode || u.serial_number || ('Unit #' + u.id);
+            const noteVal  = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
+            const display  = [u.serial_number || '—', u.barcode ? ' · ' + u.barcode : '', u.notes ? ` <span style="color:var(--text-muted);font-family:var(--sans)">${esc(u.notes)}</span>` : ''].join('');
+            return `
+              <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);background:var(--bg-base);border:1px solid var(--border);border-radius:6px;padding:4px 8px">
+                <span style="flex:1;color:var(--text)">${display}</span>
+                ${hasAvail ? `<button class="btn-outline btn-sm" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},${JSON.stringify(noteVal)},${JSON.stringify(label)})">Check Out</button>` : ''}
+                ${isAdminUser ? `
+                  <button class="btn-outline btn-sm" style="padding:2px 6px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
+                  <button class="btn-outline btn-sm btn-red" style="padding:2px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
+                ` : ''}
+              </div>`;
+          }).join('')}
       ${isAdminUser ? `
         <button class="btn-outline btn-sm" style="margin-top:4px;font-size:12px;align-self:flex-start" onclick="addUnit(${equipmentId})">+ Add Unit</button>
       ` : ''}
     </div>
   `;
+}
+
+// Checkout modal pre-loaded for a specific unit (opened from the units list in the detail panel)
+async function openUnitCheckoutModal(equipmentId, unitNoteVal, unitLabel) {
+  const item = ITEMS.find(i => i.id === equipmentId);
+  if (!item) return;
+  const avail = Math.max(0, (item.quantity || 1) - (item.checked_out_count || 0));
+  if (avail <= 0) { toast('No units available', 'error'); return; }
+  const isAdmin = ME.role === 'admin';
+  const defaultDays = 7;
+  const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
+  const defaultDueStr = defaultDue.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+      <span style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase">Check Out Unit</span>
+      <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-name">${esc(item.name)}</div>
+    <div style="display:inline-flex;align-items:center;gap:6px;margin:6px 0 14px;background:var(--accent-soft);border:1px solid rgba(99,102,241,0.25);border-radius:6px;padding:5px 10px;font-size:12px;font-family:var(--mono);color:var(--accent)">${esc(unitLabel)}</div>
+    <div class="modal-body" id="coStep1">
+      <input type="hidden" id="coUnitNote" value="${esc(unitNoteVal)}">
+      ${isAdmin ? `
+        <div class="form-group">
+          <label>Borrower</label>
+          <select id="coBorrower" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
+            <option value="">Loading users…</option>
+          </select>
+        </div>
+      ` : `
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Checking out to <strong style="color:var(--text)">${esc(ME.username)}</strong></div>
+      `}
+      <div class="form-group">
+        <label id="durationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
+        <div class="slider-wrap">
+          <div class="slider-tooltip" id="coTooltip">${defaultDays}d</div>
+          <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}" oninput="updateDurationLabel(this.value)">
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px">
+          <span>1d</span><span>7d</span><span>14d</span><span>30d</span>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" id="bulkCoBtn" onclick="confirmCheckout(${equipmentId})">Check Out</button>
+      </div>
+    </div>
+    <div id="coSuccess" class="hidden" style="text-align:center;padding:24px 0">
+      <div class="success-icon">✓</div>
+      <div style="font-size:17px;font-weight:600">Checked Out!</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-top:6px">${esc(item.name)} — ${esc(unitLabel)}</div>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  if (isAdmin) loadUserSelect();
+  requestAnimationFrame(() => updateDurationLabel(defaultDays));
 }
 
 function addUnit(equipmentId) {
