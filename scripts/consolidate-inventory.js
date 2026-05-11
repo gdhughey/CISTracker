@@ -65,9 +65,15 @@ const consolidate = db.transaction(() => {
       UPDATE equipment SET quantity = ?, updated_at = datetime('now') WHERE id = ?
     `).run(qty, keepId);
 
-    // Delete the duplicate rows
-    const placeholders = deleteIds.map(() => '?').join(',');
-    db.prepare(`DELETE FROM equipment WHERE id IN (${placeholders})`).run(...deleteIds);
+    // Reassign FK references to the kept row before deleting duplicates
+    if (deleteIds.length) {
+      const placeholders = deleteIds.map(() => '?').join(',');
+      db.prepare(`UPDATE checkout_log SET equipment_id = ? WHERE equipment_id IN (${placeholders})`).run(keepId, ...deleteIds);
+      db.prepare(`UPDATE tickets SET equipment_id = ? WHERE equipment_id IN (${placeholders})`).run(keepId, ...deleteIds);
+      db.prepare(`DELETE FROM equipment_queue WHERE equipment_id IN (${placeholders})`).run(...deleteIds);
+      // Delete the duplicate rows
+      db.prepare(`DELETE FROM equipment WHERE id IN (${placeholders})`).run(...deleteIds);
+    }
 
     totalMerged += deleteIds.length;
   }
