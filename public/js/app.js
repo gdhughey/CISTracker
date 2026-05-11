@@ -526,7 +526,6 @@ function buildFilters() {
 // Keep old names as aliases for any callers still using them
 function buildCatChips() { buildFilters(); }
 function buildLocChips() { buildFilters(); }
-}
 
 function getItemStatus(item) {
   if (item.status === 'available') return 'available';
