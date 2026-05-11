@@ -839,3 +839,56 @@ input[type="range"]::-moz-range-track {
 @media (max-width: 700px) {
   .tour-bubble { max-width: 88vw; min-width: 0; }
 }
+
+/* ── Service Ticket Cards ─────────────────────────────────────────── */
+.svc-ticket-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.svc-ticket-card:hover { border-color: var(--accent); }
+.svc-ticket-card .stc-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.svc-ticket-card .stc-title  { font-weight: 500; color: var(--text); font-size: 14px; }
+.svc-ticket-card .stc-meta   { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+.svc-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: .04em; }
+.svc-status.pending  { background: rgba(245,158,11,.15); color: var(--amber); }
+.svc-status.approved { background: rgba(16,212,160,.15);  color: var(--green); }
+.svc-status.rejected { background: rgba(240,74,90,.15);   color: var(--red); }
+
+/* ── Audit Discrepancy Colors ─────────────────────────────────────── */
+.disc-ok   { color: var(--green); font-weight: 600; }
+.disc-warn { color: var(--amber); font-weight: 600; }
+.disc-bad  { color: var(--red);   font-weight: 600; }
+
+/* ── Audit Entry Row ──────────────────────────────────────────────── */
+.audit-entry-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 80px 80px;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  align-items: center;
+}
+.audit-entry-row .ae-name { color: var(--text); }
+.audit-entry-row .ae-num  { text-align: center; color: var(--text-sec); }
+.audit-entry-row .ae-diff { text-align: center; font-weight: 700; }
+
+/* ── Nav Badge ────────────────────────────────────────────────────── */
+.nav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #fff; border-radius: 99px;
+  font-size: 10px; font-weight: 700; min-width: 16px; height: 16px;
+  padding: 0 4px; margin-left: 6px;
+}
+.nav-badge.hidden { display: none; }
+
+/* ── Audit Log Drill-Down Links ───────────────────────────────────── */
+.audit-link { color: var(--accent); text-decoration: none; }
+.audit-link:hover { text-decoration: underline; }
