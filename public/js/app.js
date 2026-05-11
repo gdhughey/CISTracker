@@ -830,9 +830,29 @@ async function updateQueueBadge() {
 }
 
 // ── Checkout modal ─────────────────────────────────────────────────────
-function openCheckoutModal(id) {
+async function openCheckoutModal(id) {
   const item = ITEMS.find(i => i.id === id);
   if (!item) return;
+
+  let unitSelectHtml = '';
+
+  if (item.model_id) {
+    try {
+      const { units } = await api(`/api/admin/models/${item.model_id}`);
+      const available = (units || []).filter(u => u.status === 'available');
+      if (!available.length) { toast('No units available for this model', 'error'); return; }
+      unitSelectHtml = `
+        <div class="form-group">
+          <label class="form-label">Select Unit</label>
+          <select id="checkoutUnitId" class="form-input">
+            ${available.map(u =>
+              `<option value="${u.id}">${esc(u.barcode || u.serial_number || 'Unit #' + u.id)}${u.serial_number && u.barcode ? ' (' + esc(u.serial_number) + ')' : ''}</option>`
+            ).join('')}
+          </select>
+        </div>`;
+    } catch { toast('Failed to load units', 'error'); return; }
+  }
+
   const modal = document.getElementById('modalContent');
   const isAdmin = ME.role === 'admin';
   // Default due date label
@@ -846,6 +866,7 @@ function openCheckoutModal(id) {
     </div>
     <div class="modal-name">${esc(item.name)}</div>
     <div class="modal-id" style="margin-bottom:16px">${esc(item.barcode || 'ID-' + item.id)}</div>
+    ${unitSelectHtml}
     <div class="modal-body" id="coStep1">
       <div class="form-group">
         <label>Borrower Name</label>
@@ -926,13 +947,15 @@ async function loadUserSelect() {
 
 async function confirmCheckout(id) {
   try {
+    const unitIdEl = document.getElementById('checkoutUnitId');
+    const targetId = unitIdEl ? parseInt(unitIdEl.value, 10) : id;
     const days = parseInt(document.getElementById('coDuration')?.value || '7', 10);
     const body = { source: 'Manual', duration_days: days };
     if (ME.role === 'admin') {
       const sel = document.getElementById('coBorrower');
       if (sel && sel.value) body.for_user_id = parseInt(sel.value, 10);
     }
-    await api(`/api/equipment/${id}/checkout`, { method: 'POST', body });
+    await api(`/api/equipment/${targetId}/checkout`, { method: 'POST', body });
     document.getElementById('coStep1').classList.add('hidden');
     document.getElementById('coSuccess').classList.remove('hidden');
     setTimeout(() => { closeModal(); loadItems(); closeDetail(); }, 1400);
