@@ -35,9 +35,22 @@ router.get('/:id(\\d+)', (req, res) => {
 
 router.post('/', (req, res) => {
   const notes = stripHtml((req.body?.notes || '').slice(0, 500));
-  const audit = inventoryAuditService.create(req.user.id, notes);
-  req.audit('inventory_audit_create', String(audit.id));
+  const type  = req.body?.type === 'checklist' ? 'checklist' : 'manual';
+  const audit = inventoryAuditService.create(req.user.id, notes, type);
+  req.audit('inventory_audit_create', String(audit.id), { type });
   res.status(201).json({ audit });
+});
+
+router.post('/:id(\\d+)/populate', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const audit = inventoryAuditService.getById(id);
+  if (!audit) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && audit.created_by !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  inventoryAuditService.populate(id);
+  const entries = inventoryAuditService.getEntries(id);
+  res.json({ entries });
 });
 
 router.post('/:id(\\d+)/entries', validate(entrySchema), (req, res) => {
@@ -100,8 +113,9 @@ router.put('/:id(\\d+)/entries/:entryId(\\d+)', (req, res) => {
   }
   const counted_qty = parseInt(req.body?.counted_qty ?? 0, 10);
   if (isNaN(counted_qty) || counted_qty < 0) return res.status(400).json({ error: 'Invalid quantity' });
-  const notes = stripHtml((req.body?.notes || '').slice(0, 500));
-  const entry = inventoryAuditService.updateEntry(entryId, { counted_qty, notes });
+  const notes    = stripHtml((req.body?.notes || '').slice(0, 500));
+  const verified = req.body?.verified ? 1 : 0;
+  const entry    = inventoryAuditService.updateEntry(entryId, { counted_qty, notes, verified });
   res.json({ entry });
 });
 

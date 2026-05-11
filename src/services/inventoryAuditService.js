@@ -43,11 +43,29 @@ function computeExpected(modelId, itemName) {
   return db.prepare("SELECT COUNT(*) AS n FROM equipment WHERE lower(trim(name)) = lower(trim(?))").get(itemName).n;
 }
 
-function create(userId, notes) {
+function create(userId, notes, type) {
   const info = db.prepare(`
-    INSERT INTO inventory_audits (created_by, notes) VALUES (?, ?)
-  `).run(userId, notes || '');
+    INSERT INTO inventory_audits (created_by, notes, type) VALUES (?, ?, ?)
+  `).run(userId, notes || '', type === 'checklist' ? 'checklist' : 'manual');
   return getById(info.lastInsertRowid);
+}
+
+function populate(auditId) {
+  const items = db.prepare(`
+    SELECT
+      trim(e.name)     AS item_name,
+      c.id             AS category_id,
+      SUM(e.quantity)  AS total_qty
+    FROM equipment e
+    LEFT JOIN categories c ON lower(trim(c.name)) = lower(trim(e.category))
+    GROUP BY lower(trim(e.name)), lower(trim(e.category))
+    ORDER BY lower(trim(e.category)), lower(trim(e.name))
+  `).all();
+  const ins = db.prepare(`
+    INSERT INTO audit_entries (audit_id, item_name, category_id, expected_qty, counted_qty, notes, verified)
+    VALUES (?, ?, ?, ?, ?, '', 0)
+  `);
+  db.transaction(() => { for (const it of items) ins.run(auditId, it.item_name, it.category_id || null, it.total_qty, it.total_qty); })();
 }
 
 function addEntry(auditId, { model_id, category_id, item_name, counted_qty, notes }) {
@@ -76,9 +94,9 @@ function deleteAudit(id) {
   db.prepare(`DELETE FROM inventory_audits WHERE id = ?`).run(id);
 }
 
-function updateEntry(entryId, { counted_qty, notes }) {
-  db.prepare(`UPDATE audit_entries SET counted_qty = ?, notes = ? WHERE id = ?`)
-    .run(counted_qty, notes || '', entryId);
+function updateEntry(entryId, { counted_qty, notes, verified }) {
+  db.prepare(`UPDATE audit_entries SET counted_qty = ?, notes = ?, verified = ? WHERE id = ?`)
+    .run(counted_qty, notes || '', verified ? 1 : 0, entryId);
   return db.prepare('SELECT * FROM audit_entries WHERE id = ?').get(entryId);
 }
 
@@ -86,4 +104,4 @@ function deleteEntry(entryId) {
   db.prepare(`DELETE FROM audit_entries WHERE id = ?`).run(entryId);
 }
 
-module.exports = { listAll, getById, getEntries, create, addEntry, closeAudit, updateAudit, deleteAudit, updateEntry, deleteEntry };
+module.exports = { listAll, getById, getEntries, create, populate, addEntry, closeAudit, updateAudit, deleteAudit, updateEntry, deleteEntry };

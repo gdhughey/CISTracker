@@ -2911,9 +2911,51 @@ async function loadAuditView() {
   }
 }
 
-async function startNewAudit() {
+function startNewAudit() {
+  const totalItems = ITEMS.length;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Start Inventory Audit</div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Choose how you want to run this audit:</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+        <div class="audit-type-card" onclick="_startChecklist()">
+          <div class="atc-icon">✅</div>
+          <div>
+            <div class="atc-title">Checklist Audit</div>
+            <div class="atc-desc">Pre-loads all ${totalItems} inventory items as a checklist. Go down the list, check off each one, and flag discrepancies with a count and reason.</div>
+          </div>
+        </div>
+        <div class="audit-type-card" onclick="_startManual()">
+          <div class="atc-icon">📝</div>
+          <div>
+            <div class="atc-title">Manual Audit</div>
+            <div class="atc-desc">Manually add items one by one as you count them.</div>
+          </div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function _startChecklist() {
+  closeModal();
   try {
-    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: {} });
+    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: { type: 'checklist' } });
+    _activeAuditId = audit.id;
+    const { entries } = await api(`/api/inventory-audit/${audit.id}/populate`, { method: 'POST', body: {} });
+    await refreshActiveAudit();
+    toast(`Checklist loaded — ${entries.length} items`, 'success');
+  } catch (err) { toast(err.error || 'Failed to start checklist', 'error'); }
+}
+
+async function _startManual() {
+  closeModal();
+  try {
+    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: { type: 'manual' } });
     _activeAuditId = audit.id;
     await refreshActiveAudit();
     toast('Audit started', 'success');
@@ -2927,6 +2969,7 @@ async function refreshActiveAudit() {
 }
 
 function renderActiveAudit(audit, entries) {
+  if (audit.type === 'checklist') { renderChecklistAudit(audit, entries); return; }
   const el = document.getElementById('auditSessionArea');
   if (!el) return;
   const discClass = (exp, cnt) => {
@@ -3051,6 +3094,240 @@ async function submitAuditEntry() {
     if (nameEl) nameEl.value = '';
     if (qtyEl)  qtyEl.value  = '';
   } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+// ── Checklist Audit ───────────────────────────────────────────────────
+let _clEntries    = [];
+let _clFilter     = 'all';
+let _clSaveTimers = {};
+
+function renderChecklistAudit(audit, entries) {
+  const el = document.getElementById('auditSessionArea');
+  if (!el) return;
+  _clEntries = entries.map(e => ({ ...e }));
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:14px;color:var(--text-sec)">Checklist Audit #${audit.id}</span>
+        <button class="btn-outline btn-sm" onclick="editAuditNotes(${audit.id},${JSON.stringify(esc(audit.notes||''))})">Edit Notes</button>
+        <button class="btn-outline btn-sm btn-red" onclick="deleteAudit(${audit.id})">Delete</button>
+      </div>
+      <button class="btn-outline btn-sm" onclick="closeAuditSession(${audit.id})">Close Audit</button>
+    </div>
+
+    <div class="cl-progress-wrap">
+      <div class="cl-progress-header">
+        <span class="cl-progress-label" id="clProgressLabel">0 / ${_clEntries.length} verified</span>
+        <span class="cl-progress-pct" id="clProgressPct">0%</span>
+      </div>
+      <div class="cl-progress-track"><div class="cl-progress-fill" id="clProgressFill" style="width:0%"></div></div>
+      <div class="cl-stats" id="clStats">
+        <div class="cl-stat"><div class="cl-stat-dot" style="background:var(--green)"></div><span id="clStatMatch">0 match</span></div>
+        <div class="cl-stat"><div class="cl-stat-dot" style="background:var(--amber)"></div><span id="clStatDisc">0 discrepancies</span></div>
+        <div class="cl-stat"><div class="cl-stat-dot" style="background:var(--border)"></div><span id="clStatUnchecked">${_clEntries.length} unchecked</span></div>
+      </div>
+    </div>
+
+    <div class="cl-controls">
+      <div class="search-box" style="flex:1;min-width:180px">
+        <span class="search-icon">🔍</span>
+        <input id="clSearch" type="search" placeholder="Search items…" oninput="renderClRows()">
+      </div>
+      <div id="clFilterChips" style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="chip active" data-clf="all"       onclick="setClFilter('all')">All</button>
+        <button class="chip"        data-clf="unchecked" onclick="setClFilter('unchecked')">Unchecked</button>
+        <button class="chip"        data-clf="match"     onclick="setClFilter('match')">Match</button>
+        <button class="chip"        data-clf="disc"      onclick="setClFilter('disc')">Discrepancy</button>
+      </div>
+    </div>
+
+    <div class="cl-table">
+      <div class="cl-thead">
+        <span></span>
+        <span>Item</span>
+        <span style="text-align:center">System</span>
+        <span style="text-align:center">Your Count</span>
+        <span style="text-align:center">Status</span>
+      </div>
+      <div id="clRows"></div>
+    </div>`;
+
+  _clFilter = 'all';
+  renderClRows();
+}
+
+function updateClProgress() {
+  const verified  = _clEntries.filter(e => e.verified).length;
+  const match     = _clEntries.filter(e => e.verified && e.counted_qty === e.expected_qty).length;
+  const disc      = _clEntries.filter(e => e.verified && e.counted_qty !== e.expected_qty).length;
+  const unchecked = _clEntries.filter(e => !e.verified).length;
+  const pct       = _clEntries.length ? Math.round(verified / _clEntries.length * 100) : 0;
+  const lbl = document.getElementById('clProgressLabel');
+  const pctEl = document.getElementById('clProgressPct');
+  const fill  = document.getElementById('clProgressFill');
+  const sm = document.getElementById('clStatMatch');
+  const sd = document.getElementById('clStatDisc');
+  const su = document.getElementById('clStatUnchecked');
+  if (lbl)  lbl.textContent  = `${verified} / ${_clEntries.length} verified`;
+  if (pctEl) pctEl.textContent = `${pct}%`;
+  if (fill)  fill.style.width  = `${pct}%`;
+  if (sm) sm.textContent = `${match} match`;
+  if (sd) sd.textContent = `${disc} discrepanc${disc === 1 ? 'y' : 'ies'}`;
+  if (su) su.textContent = `${unchecked} unchecked`;
+}
+
+function setClFilter(f) {
+  _clFilter = f;
+  document.querySelectorAll('#clFilterChips .chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.clf === f));
+  renderClRows();
+}
+
+function renderClRows() {
+  const tbody = document.getElementById('clRows');
+  if (!tbody) return;
+  const q = (document.getElementById('clSearch')?.value || '').toLowerCase();
+
+  const visible = _clEntries.filter(e => {
+    if (q && !`${e.item_name} ${e.category_name || ''}`.toLowerCase().includes(q)) return false;
+    if (_clFilter === 'unchecked') return !e.verified;
+    if (_clFilter === 'match')     return  e.verified && e.counted_qty === e.expected_qty;
+    if (_clFilter === 'disc')      return  e.verified && e.counted_qty !== e.expected_qty;
+    return true;
+  });
+
+  if (!visible.length) {
+    tbody.innerHTML = `<div class="cl-empty">No items match this filter.</div>`;
+    return;
+  }
+
+  tbody.innerHTML = visible.map(e => {
+    const isMatch  = e.verified && e.counted_qty === e.expected_qty;
+    const isDisc   = e.verified && e.counted_qty !== e.expected_qty;
+    const bigDiff  = isDisc && Math.abs(e.counted_qty - e.expected_qty) > 2;
+    const rowCls   = isMatch ? 'state-match' : isDisc ? `state-disc${bigDiff ? ' big-diff' : ''}` : '';
+    const ckCls    = isMatch ? 'ck-match' : isDisc ? `ck-disc${bigDiff ? ' big-diff' : ''}` : '';
+    const ckIcon   = isMatch ? '✓' : isDisc ? '!' : '';
+    const diffCnt  = isDisc ? e.counted_qty - e.expected_qty : 0;
+    const statusHtml = isMatch
+      ? `<span class="cl-status s-match">✓ Match</span>`
+      : isDisc
+        ? `<span class="cl-status s-disc${bigDiff ? ' big-diff' : ''}">${diffCnt > 0 ? '+' : ''}${diffCnt}</span>`
+        : `<span class="cl-status s-none">—</span>`;
+
+    return `
+      <div class="cl-entry-wrap" id="clentry-${e.id}">
+        <div class="cl-row ${rowCls}">
+          <div class="cl-check ${ckCls}" onclick="clToggleCheck(${e.id})">${ckIcon}</div>
+          <div>
+            <div class="cl-name">${esc(e.item_name)}</div>
+            ${e.category_name ? `<div class="cl-cat">${esc(e.category_name)}</div>` : ''}
+          </div>
+          <div class="cl-sys-qty">${e.expected_qty}</div>
+          <div class="cl-count-wrap">
+            <input class="cl-count-input${isDisc ? (bigDiff ? ' big-diff' : ' differs') : ''}"
+              id="clcount-${e.id}" type="number" min="0"
+              value="${e.verified ? e.counted_qty : ''}"
+              placeholder="${e.expected_qty}"
+              oninput="clCountChange(${e.id})"
+              onclick="event.stopPropagation()">
+          </div>
+          ${statusHtml}
+        </div>
+        <div class="cl-reason-row${isDisc ? ' visible' : ''}" id="clreason-${e.id}">
+          <div class="cl-reason-label">⚠ Reason for discrepancy</div>
+          <textarea class="cl-reason-input" rows="2"
+            placeholder="Why does the count differ? (missing, damaged, wrong location…)"
+            oninput="clReasonChange(${e.id})"
+            onclick="event.stopPropagation()">${esc(e.notes || '')}</textarea>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function clToggleCheck(entryId) {
+  const entry = _clEntries.find(e => e.id === entryId);
+  if (!entry) return;
+  if (entry.verified) {
+    entry.verified    = 0;
+    entry.counted_qty = entry.expected_qty;
+    entry.notes       = '';
+  } else {
+    entry.verified    = 1;
+    entry.counted_qty = entry.expected_qty;
+  }
+  updateClProgress();
+  // Patch DOM in place for the touched row
+  const wrap = document.getElementById(`clentry-${entryId}`);
+  if (wrap) {
+    const isMatch = entry.verified && entry.counted_qty === entry.expected_qty;
+    const row = wrap.querySelector('.cl-row');
+    const ck  = wrap.querySelector('.cl-check');
+    if (row) row.className = `cl-row${isMatch ? ' state-match' : ''}`;
+    if (ck)  { ck.className = `cl-check${isMatch ? ' ck-match' : ''}`; ck.textContent = isMatch ? '✓' : ''; }
+    const countInput = wrap.querySelector('.cl-count-input');
+    if (countInput) { countInput.value = entry.verified ? entry.counted_qty : ''; countInput.className = 'cl-count-input'; }
+    const statusEl = wrap.querySelector('.cl-status');
+    if (statusEl) { statusEl.className = isMatch ? 'cl-status s-match' : 'cl-status s-none'; statusEl.textContent = isMatch ? '✓ Match' : '—'; }
+    const reasonRow = document.getElementById(`clreason-${entryId}`);
+    if (reasonRow) reasonRow.classList.remove('visible');
+  }
+  clScheduleSave(entryId);
+}
+
+function clCountChange(entryId) {
+  const entry = _clEntries.find(e => e.id === entryId);
+  const input = document.getElementById(`clcount-${entryId}`);
+  if (!entry || !input) return;
+  const val = input.value.trim();
+  if (val === '') { entry.verified = 0; entry.counted_qty = entry.expected_qty; updateClProgress(); clScheduleSave(entryId); return; }
+  const qty = parseInt(val, 10);
+  if (isNaN(qty) || qty < 0) return;
+  entry.counted_qty = qty;
+  entry.verified    = 1;
+  const differs  = qty !== entry.expected_qty;
+  const bigDiff  = differs && Math.abs(qty - entry.expected_qty) > 2;
+  input.className = `cl-count-input${bigDiff ? ' big-diff' : differs ? ' differs' : ''}`;
+  const reasonRow = document.getElementById(`clreason-${entryId}`);
+  if (reasonRow) reasonRow.classList.toggle('visible', differs);
+  const wrap = document.getElementById(`clentry-${entryId}`);
+  if (wrap) {
+    const row = wrap.querySelector('.cl-row');
+    const ck  = wrap.querySelector('.cl-check');
+    if (row) row.className = `cl-row${differs ? ` state-disc${bigDiff ? ' big-diff' : ''}` : ' state-match'}`;
+    if (ck)  { ck.className = `cl-check${differs ? ` ck-disc${bigDiff ? ' big-diff' : ''}` : ' ck-match'}`; ck.textContent = differs ? '!' : '✓'; }
+    const statusEl = wrap.querySelector('.cl-status');
+    const diff = qty - entry.expected_qty;
+    if (statusEl) { statusEl.className = differs ? `cl-status s-disc${bigDiff ? ' big-diff' : ''}` : 'cl-status s-match'; statusEl.textContent = differs ? `${diff > 0 ? '+' : ''}${diff}` : '✓ Match'; }
+  }
+  updateClProgress();
+  clScheduleSave(entryId);
+}
+
+function clReasonChange(entryId) {
+  const entry    = _clEntries.find(e => e.id === entryId);
+  const textarea = document.querySelector(`#clreason-${entryId} .cl-reason-input`);
+  if (!entry || !textarea) return;
+  entry.notes = textarea.value;
+  clScheduleSave(entryId);
+}
+
+function clScheduleSave(entryId) {
+  if (_clSaveTimers[entryId]) clearTimeout(_clSaveTimers[entryId]);
+  _clSaveTimers[entryId] = setTimeout(() => clSaveEntry(entryId), 600);
+}
+
+async function clSaveEntry(entryId) {
+  if (!_activeAuditId) return;
+  const entry = _clEntries.find(e => e.id === entryId);
+  if (!entry) return;
+  try {
+    await api(`/api/inventory-audit/${_activeAuditId}/entries/${entryId}`, {
+      method: 'PUT',
+      body: { counted_qty: entry.counted_qty, notes: entry.notes || '', verified: entry.verified },
+    });
+  } catch { toast('Auto-save failed', 'error'); }
 }
 
 async function closeAuditSession(id) {
