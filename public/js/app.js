@@ -5,6 +5,9 @@
 
 let ME = null;           // current user
 let ITEMS = [];          // all equipment
+let MODELS = [];
+let CATEGORIES = [];
+let LOCATIONS_LIST = [];
 let CSRF = '';           // CSRF token
 let currentView = 'inventory';
 let statusFilter = 'all';
@@ -445,13 +448,20 @@ function closeMobileSidebar() {
 
 async function loadItems() {
   try {
-    const data = await api('/api/equipment');
-    ITEMS = data.items || [];
-    buildCatChips();
-    buildLocChips();
+    const [{ items }, { models }, { categories }, { locations }] = await Promise.all([
+      api('/api/equipment'),
+      api('/api/admin/models'),
+      api('/api/admin/categories'),
+      api('/api/admin/locations'),
+    ]);
+    ITEMS = items;
+    MODELS = models;
+    CATEGORIES = categories;
+    LOCATIONS_LIST = locations;
+    buildFilters();
     renderItems();
   } catch (err) {
-    console.error('Failed to load items', err);
+    toast('Failed to load inventory', 'error');
   }
 }
 
@@ -470,33 +480,50 @@ function computeStats(items) {
   document.getElementById('statOverdue').textContent = overdue;
 }
 
-function buildCatChips() {
-  const cats = new Set(['All']);
-  for (const item of ITEMS) if (item.category) cats.add(item.category);
-  const container = document.getElementById('catChips');
-  container.innerHTML = '';
-  for (const c of cats) {
-    const chip = document.createElement('div');
-    chip.className = 'chip' + (c === catFilter ? ' active' : '');
-    chip.textContent = c;
-    chip.onclick = () => { catFilter = c; buildCatChips(); renderItems(); };
-    container.appendChild(chip);
+function setCatFilter(c) {
+  catFilter = c;
+  buildFilters();
+  renderItems();
+}
+
+function setLocFilter(l) {
+  locFilter = l;
+  buildFilters();
+  renderItems();
+}
+
+function buildFilters() {
+  // Category chips — from managed categories table
+  const catContainer = document.getElementById('catChips');
+  if (catContainer) {
+    catContainer.innerHTML =
+      `<button class="chip${catFilter === 'All' ? ' active' : ''}" onclick="setCatFilter('All')">All</button>` +
+      CATEGORIES.map(c =>
+        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter(${JSON.stringify(c.name)})">${esc(c.name)}</button>`
+      ).join('');
+  }
+
+  // Location chips — from managed locations table
+  const locContainer = document.getElementById('locChips');
+  if (locContainer) {
+    const usedLocIds = new Set(ITEMS.map(i => i.location_id).filter(Boolean));
+    const usedLocs = LOCATIONS_LIST.filter(l => usedLocIds.has(l.id));
+    if (usedLocs.length <= 1) {
+      locContainer.closest?.('.filter-row')?.classList.add('hidden');
+    } else {
+      locContainer.closest?.('.filter-row')?.classList.remove('hidden');
+      locContainer.innerHTML =
+        `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
+        usedLocs.map(l =>
+          `<button class="chip${locFilter === l.name ? ' active' : ''}" onclick="setLocFilter(${JSON.stringify(l.name)})">${esc(l.name)}</button>`
+        ).join('');
+    }
   }
 }
 
-function buildLocChips() {
-  const locs = new Set(['All']);
-  for (const item of ITEMS) if (item.location) locs.add(item.location);
-  const container = document.getElementById('locChips');
-  container.innerHTML = '';
-  if (locs.size <= 1) return; // no locations set, hide the row
-  for (const l of locs) {
-    const chip = document.createElement('div');
-    chip.className = 'chip' + (l === locFilter ? ' active' : '');
-    chip.textContent = l;
-    chip.onclick = () => { locFilter = l; buildLocChips(); renderItems(); };
-    container.appendChild(chip);
-  }
+// Keep old names as aliases for any callers still using them
+function buildCatChips() { buildFilters(); }
+function buildLocChips() { buildFilters(); }
 }
 
 function getItemStatus(item) {
@@ -537,7 +564,11 @@ function renderItems() {
     const st = getItemStatus(item);
     if (statusFilter !== 'all' && st !== statusFilter) continue;
     if (catFilter !== 'All' && item.category !== catFilter) continue;
-    if (locFilter !== 'All' && item.location !== locFilter) continue;
+    if (locFilter !== 'All') {
+      const loc = LOCATIONS_LIST.find(l => l.name === locFilter);
+      if (!loc) { if (item.location !== locFilter) continue; }
+      else if (item.location_id !== loc.id && item.location !== locFilter) continue;
+    }
     if (q) {
       const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location}`.toLowerCase();
       if (!hay.includes(q)) continue;
@@ -969,35 +1000,36 @@ async function confirmReturn(id) {
 }
 
 // ── Add item modal ─────────────────────────────────────────────────────
-async function openAddItemModal() {
-  let nextId = '';
-  try { const d = await api('/api/equipment/next-asset-id'); nextId = d.asset_id; } catch {}
+function openAddItemModal() {
+  const isAdmin = ME?.role === 'admin';
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start">
-      <div class="modal-title">Add New Item</div>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--accent);background:var(--accent-soft);padding:4px 10px;border-radius:6px">${esc(nextId)}</span>
-    </div>
-    <input type="hidden" id="addBarcode" value="${esc(nextId)}">
+    <div class="modal-title">${isAdmin ? 'Add Equipment' : 'Request New Item'}</div>
+    ${!isAdmin ? '<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Your request will be sent to an admin for approval.</p>' : ''}
     <div class="modal-body" id="addStep1">
-      <div class="form-group"><label>Item Name *</label><input id="addName" required></div>
-      <div class="form-group"><label>Category</label>
-        <select id="addCat" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
-          <option value="">Select…</option>
-          <option>Computers</option><option>Components</option><option>GPUs</option>
-          <option>Networking</option><option>Peripherals</option><option>Cables</option>
-          <option>Storage</option><option>Cases</option><option>Adapters</option>
-          <option>PSU Cables</option><option>Infrastructure</option><option>Tools</option>
-          <option>Books</option><option>Other</option>
+      <div class="form-group"><label class="form-label">Name <span style="color:var(--red)">*</span></label>
+        <input id="addName" class="form-input" placeholder="e.g. HP EliteBook 840" autofocus></div>
+      <div class="form-group"><label class="form-label">Category</label>
+        <select id="addCat" class="form-input">
+          <option value="">— Select category —</option>
+          ${CATEGORIES.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}
         </select>
+        <input id="addCatNew" class="form-input" placeholder="Or type a new category name" style="margin-top:6px">
       </div>
-      <div class="form-group"><label>Location</label><input id="addLoc" placeholder="e.g. Shelf A1"></div>
-      <div class="form-group"><label>Serial / Asset Number</label><input id="addSerial" class="mono" placeholder="Optional"></div>
-      <div class="form-group"><label>Notes</label><textarea id="addNotes" rows="2"></textarea></div>
-      <div class="info-strip">A QR label will be ready to print after creation.</div>
+      <div class="form-group"><label class="form-label">Serial Number</label>
+        <input id="addSerial" class="form-input" placeholder="Optional"></div>
+      <div class="form-group"><label class="form-label">Asset ID / Barcode</label>
+        <input id="addBarcode" class="form-input" placeholder="Optional"></div>
+      <div class="form-group"><label class="form-label">Location</label>
+        <select id="addLocId" class="form-input">
+          <option value="">— None —</option>
+          ${LOCATIONS_LIST.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label class="form-label">Notes</label>
+        <input id="addNotes" class="form-input" placeholder="Optional"></div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" onclick="submitAddItem()">Create & Print Label →</button>
+        <button class="btn-primary" onclick="submitAddItem()">${isAdmin ? 'Add Item' : 'Submit Request'}</button>
       </div>
     </div>
     <div id="addStep2" class="hidden"></div>
@@ -1006,51 +1038,68 @@ async function openAddItemModal() {
 }
 
 async function submitAddItem() {
-  const name = document.getElementById('addName').value.trim();
-  if (!name) { toast('Item name is required', 'error'); return; }
+  const name = document.getElementById('addName')?.value.trim();
+  if (!name) { toast('Name is required', 'error'); return; }
+
+  const catSelect = document.getElementById('addCat')?.value.trim();
+  const catNew    = document.getElementById('addCatNew')?.value.trim();
+  const category  = catNew || catSelect || '';
+  const locIdVal  = document.getElementById('addLocId')?.value;
+  const location_id = locIdVal ? parseInt(locIdVal, 10) : null;
+  const locName   = location_id ? (LOCATIONS_LIST.find(l => l.id === location_id)?.name || '') : '';
+
+  const payload = {
+    name,
+    category,
+    serial_number: document.getElementById('addSerial')?.value.trim() || '',
+    barcode:       document.getElementById('addBarcode')?.value.trim() || '',
+    location:      locName,
+    location_id,
+    notes:         document.getElementById('addNotes')?.value.trim() || '',
+  };
+
   try {
-    const body = {
-      name,
-      barcode: document.getElementById('addBarcode').value.trim(),
-      category: document.getElementById('addCat').value,
-      location: document.getElementById('addLoc').value.trim(),
-      serial_number: document.getElementById('addSerial').value.trim(),
-      notes: document.getElementById('addNotes').value.trim(),
-    };
-    const { item } = await api('/api/equipment', { method: 'POST', body });
-    toast('Item created!', 'success');
-    // Show label step
-    try {
-      const label = await api(`/api/equipment/${item.id}/label`);
-      _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
-      document.getElementById('addStep1').classList.add('hidden');
-      const step2 = document.getElementById('addStep2');
-      step2.classList.remove('hidden');
-      step2.innerHTML = `
-        <div class="success-icon" style="margin-bottom:12px">✓</div>
-        <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
-        <div class="label-preview">
-          <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
-          <div class="label-info">
-            <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
-            <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
-            <div class="label-id">${esc(label.asset_id)}</div>
-            <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
+    if (ME?.role === 'admin') {
+      const { item } = await api('/api/equipment', { method: 'POST', body: payload });
+      toast('Item added', 'success');
+      // Show label step
+      try {
+        const label = await api(`/api/equipment/${item.id}/label`);
+        _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
+        document.getElementById('addStep1').classList.add('hidden');
+        const step2 = document.getElementById('addStep2');
+        step2.classList.remove('hidden');
+        step2.innerHTML = `
+          <div class="success-icon" style="margin-bottom:12px">✓</div>
+          <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
+          <div class="label-preview">
+            <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
+            <div class="label-info">
+              <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
+              <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
+              <div class="label-id">${esc(label.asset_id)}</div>
+              <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
+            </div>
           </div>
-        </div>
-        <div class="form-actions">
-          <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
-          <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
-        </div>
-      `;
-    } catch (labelErr) {
-      toast('Item created but label failed to load', 'info');
+          <div class="form-actions">
+            <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
+            <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
+          </div>
+        `;
+      } catch {
+        toast('Item created but label failed to load', 'info');
+        closeModal();
+      }
+    } else {
+      await api('/api/service-tickets', {
+        method: 'POST',
+        body: { type: 'add_item', payload },
+      });
+      toast('Request submitted — pending admin approval', 'success');
       closeModal();
     }
     loadItems();
-  } catch (err) {
-    toast(err.error || 'Failed to create item', 'error');
-  }
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
 // ── Edit / Delete / Print ──────────────────────────────────────────────
@@ -1065,7 +1114,12 @@ async function editItem(id) {
     <div class="modal-body">
       <div class="form-group"><label>Name</label><input id="editName" value="${esc(item.name)}"></div>
       <div class="form-group"><label>Category</label><input id="editCat" value="${esc(item.category || '')}"></div>
-      <div class="form-group"><label>Location</label><input id="editLoc" value="${esc(item.location || '')}" placeholder="e.g. Shelf A1"></div>
+      <div class="form-group"><label>Location</label>
+        <select id="editLocId" class="form-input">
+          <option value="">— None —</option>
+          ${LOCATIONS_LIST.map(l => `<option value="${l.id}"${item.location_id === l.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}
+        </select>
+      </div>
       <div class="form-group"><label>Serial Number</label><input id="editSerial" class="mono" value="${esc(item.serial_number || '')}"></div>
       <div class="form-group"><label>Barcode</label><input id="editBarcode" class="mono" value="${esc(item.barcode || '')}"></div>
       <div class="form-group"><label>Notes</label><textarea id="editNotes" rows="2">${esc(item.notes || '')}</textarea></div>
@@ -1080,12 +1134,16 @@ async function editItem(id) {
 
 async function submitEdit(id) {
   try {
+    const editLocIdVal = document.getElementById('editLocId')?.value;
+    const editLocationId = editLocIdVal ? parseInt(editLocIdVal, 10) : null;
+    const editLocName = editLocationId ? (LOCATIONS_LIST.find(l => l.id === editLocationId)?.name || '') : '';
     await api(`/api/equipment/${id}`, {
       method: 'PUT',
       body: {
         name: document.getElementById('editName').value,
         category: document.getElementById('editCat').value,
-        location: document.getElementById('editLoc').value,
+        location: editLocName,
+        location_id: editLocationId,
         serial_number: document.getElementById('editSerial').value,
         barcode: document.getElementById('editBarcode').value,
         notes: document.getElementById('editNotes').value,
