@@ -19,6 +19,18 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// ── CIS barcode counter (continues from highest existing in both tables) ──────
+let _cisCounter = 0;
+function _scanBarcodes(rows) {
+  for (const r of rows) {
+    const m = /^CIS-(\d+)$/i.exec((r.barcode || '').trim());
+    if (m) { const n = parseInt(m[1], 10); if (n > _cisCounter) _cisCounter = n; }
+  }
+}
+_scanBarcodes(db.prepare("SELECT barcode FROM equipment WHERE barcode LIKE 'CIS-%'").all());
+_scanBarcodes(db.prepare("SELECT barcode FROM equipment_units WHERE barcode LIKE 'CIS-%'").all());
+function nextBarcode() { _cisCounter++; return 'CIS-' + String(_cisCounter).padStart(6, '0'); }
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 const findEq  = db.prepare("SELECT * FROM equipment WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1");
 const hasUnit = db.prepare("SELECT id FROM equipment_units WHERE equipment_id = ? AND serial_number = ?");
@@ -34,7 +46,7 @@ function addUnits(name, units /* [{sn, notes}] */) {
   for (const { sn, notes = '' } of units) {
     if (!sn || sn.match(/^(unreadable|no sn|no serial|n\/a|doesn't have one)$/i)) continue;
     if (hasUnit.get(item.id, sn)) { skipped++; continue; }
-    insUnit.run(item.id, sn, '', notes);
+    insUnit.run(item.id, sn, nextBarcode(), notes);
     added++;
   }
   if (added > 0 || skipped > 0)
