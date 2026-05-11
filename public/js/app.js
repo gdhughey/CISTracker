@@ -610,7 +610,7 @@ function renderBatch() {
     }
     tr.innerHTML = `
       <td class="cell-id">${esc(item.barcode || 'CIS-' + String(item.id).padStart(6,'0'))}</td>
-      <td><div class="cell-name">${esc(item.name)}</div>${subLine}${queueLine}</td>
+      <td><div class="cell-name">${esc(item.name)}${item.quantity > 1 ? ` <span style="background:var(--accent-soft);color:var(--accent);border-radius:99px;font-size:11px;font-weight:600;padding:1px 7px;margin-left:4px">×${item.quantity}</span>` : ''}</div>${subLine}${queueLine}</td>
       <td>${esc(item.category || '—')}</td>
       <td>${esc(item.location || '—')}</td>
       <td><span class="status-badge status-${st}"><span class="dot"></span>${statusLabel}</span></td>
@@ -723,6 +723,7 @@ async function openDetail(id) {
       <h4>Details</h4>
       <div class="meta-row"><span class="label">Serial</span><span class="value" style="font-family:var(--mono);font-size:12px">${esc(item.serial_number || '—')}</span></div>
       <div class="meta-row"><span class="label">Category</span><span class="value">${esc(item.category || '—')}</span></div>
+      ${item.quantity > 1 ? `<div class="meta-row"><span class="label">Quantity</span><span class="value" style="color:var(--accent);font-weight:600">${item.quantity}</span></div>` : ''}
       <div class="meta-row"><span class="label">Type</span><span class="value">${esc(item.type || '—')}</span></div>
       <div class="meta-row"><span class="label">Location</span><span class="value">${esc(item.location || '—')}</span></div>
       ${st !== 'available' ? `
