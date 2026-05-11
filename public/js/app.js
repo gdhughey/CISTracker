@@ -248,7 +248,7 @@ async function showApp() {
   }
   // Load data
   initTableScroll();
-  const adminLoads = ME.role === 'admin' ? [loadOverdueCount(), loadTicketCounts()] : [];
+  const adminLoads = ME.role === 'admin' ? [loadOverdueCount(), loadTicketCounts(), loadSvcTicketBadge()] : [];
   await Promise.all([loadItems(), updateQueueBadge(), ...adminLoads]);
   switchView('inventory');
   // First-time onboarding tour — only fires once per user/browser
@@ -431,6 +431,8 @@ function switchView(view) {
   if (view === 'locations') loadLocations();
   if (view === 'audit') loadAudit();
   if (view === 'passkeys') loadPasskeys();
+  if (view === 'service-tickets') loadServiceTickets();
+  if (view === 'inv-audit') loadAuditView();
 }
 
 function toggleMobileSidebar() {
@@ -2544,6 +2546,306 @@ async function deletePasskey(id, name) {
   } catch (err) {
     toast(err.error || 'Failed to remove passkey', 'error');
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SERVICE TICKETS
+// ═══════════════════════════════════════════════════════════════════════
+
+let _svcTickets = [];
+let _svcFilter = 'all';
+
+function setSvcTicketFilter(f) {
+  _svcFilter = f;
+  document.querySelectorAll('#svcTicketChips .chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.svcstatus === f));
+  renderSvcTickets();
+}
+
+async function loadServiceTickets() {
+  const container = document.getElementById('svcTicketList');
+  if (!container) return;
+  try {
+    const { tickets } = await api('/api/service-tickets');
+    _svcTickets = tickets;
+    renderSvcTickets();
+    loadSvcTicketBadge();
+  } catch { container.innerHTML = '<div class="empty-state"><p>Failed to load service tickets</p></div>'; }
+}
+
+async function loadSvcTicketBadge() {
+  if (ME?.role !== 'admin') return;
+  try {
+    const { pending } = await api('/api/service-tickets/counts');
+    const badge = document.getElementById('svcTicketBadge');
+    if (!badge) return;
+    if (pending > 0) { badge.textContent = pending; badge.classList.remove('hidden'); }
+    else badge.classList.add('hidden');
+  } catch {}
+}
+
+function renderSvcTickets() {
+  const container = document.getElementById('svcTicketList');
+  if (!container) return;
+  const filtered = _svcFilter === 'all' ? _svcTickets : _svcTickets.filter(t => t.status === _svcFilter);
+  if (!filtered.length) {
+    container.innerHTML = '<div class="empty-state"><p>No service tickets found.</p></div>';
+    return;
+  }
+  container.innerHTML = filtered.map(t => {
+    const payload = typeof t.payload === 'string' ? JSON.parse(t.payload) : (t.payload || {});
+    const typeLabel = { add_item: 'Add Item', quantity_change: 'Quantity Change', other: 'Other' }[t.type] || t.type;
+    const summary = payload.name || payload.subject || t.type;
+    return `
+      <div class="svc-ticket-card" onclick="openSvcTicket(${t.id})">
+        <div class="stc-header">
+          <span class="stc-title">#${t.id} — ${esc(typeLabel)}: ${esc(summary)}</span>
+          <span class="svc-status ${t.status}">${t.status}</span>
+        </div>
+        <div class="stc-meta">Requested by ${esc(t.requester_username)} · ${fmtDate(t.created_at)}</div>
+      </div>`;
+  }).join('');
+}
+
+async function openSvcTicket(id) {
+  const t = _svcTickets.find(x => x.id === id);
+  if (!t) return;
+  const payload = typeof t.payload === 'string' ? JSON.parse(t.payload) : (t.payload || {});
+  const payloadHtml = Object.entries(payload)
+    .filter(([, v]) => v !== '' && v != null)
+    .map(([k, v]) => `<div class="meta-row"><span class="label">${esc(k)}</span><span class="value">${esc(String(v))}</span></div>`)
+    .join('');
+  const adminActions = ME?.role === 'admin' && t.status === 'pending' ? `
+    <div class="form-group" style="margin-top:16px">
+      <label class="form-label">Admin Notes</label>
+      <input id="svcAdminNotes" class="form-input" placeholder="Optional notes">
+    </div>
+    <div class="form-actions">
+      <button class="btn-outline btn-red" onclick="rejectSvcTicket(${id})">Reject</button>
+      <button class="btn-primary" onclick="approveSvcTicket(${id})">Approve</button>
+    </div>` : `<div style="margin-top:12px;font-size:13px;color:var(--text-muted)">${t.admin_notes ? 'Admin notes: ' + esc(t.admin_notes) : ''}</div>`;
+
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Service Ticket #${t.id}</div>
+    <div class="detail-section">
+      <div class="meta-row"><span class="label">Type</span><span class="value">${esc(t.type)}</span></div>
+      <div class="meta-row"><span class="label">Status</span><span class="value"><span class="svc-status ${t.status}">${t.status}</span></span></div>
+      <div class="meta-row"><span class="label">Requested by</span><span class="value">${esc(t.requester_username)}</span></div>
+      <div class="meta-row"><span class="label">Date</span><span class="value">${fmtDateTime(t.created_at)}</span></div>
+    </div>
+    <div class="detail-section" style="margin-top:12px">${payloadHtml}</div>
+    ${adminActions}`;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function approveSvcTicket(id) {
+  const notes = document.getElementById('svcAdminNotes')?.value.trim() || '';
+  try {
+    await api(`/api/service-tickets/${id}/approve`, { method: 'POST', body: { admin_notes: notes } });
+    toast('Ticket approved', 'success');
+    closeModal();
+    loadServiceTickets();
+    loadItems();
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+async function rejectSvcTicket(id) {
+  const notes = document.getElementById('svcAdminNotes')?.value.trim() || '';
+  try {
+    await api(`/api/service-tickets/${id}/reject`, { method: 'POST', body: { admin_notes: notes } });
+    toast('Ticket rejected', 'error');
+    closeModal();
+    loadServiceTickets();
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+function openNewServiceTicketModal() {
+  openAddItemModal();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  INVENTORY AUDIT
+// ═══════════════════════════════════════════════════════════════════════
+
+let _activeAuditId = null;
+
+async function loadAuditView() {
+  const historyEl = document.getElementById('auditHistoryList');
+  const sessionEl = document.getElementById('auditSessionArea');
+  if (!historyEl || !sessionEl) return;
+
+  try {
+    const { audits } = await api('/api/inventory-audit');
+    const open = audits.find(a => a.status === 'open' && a.created_by === ME?.id);
+
+    if (open) {
+      _activeAuditId = open.id;
+      await refreshActiveAudit();
+    } else {
+      _activeAuditId = null;
+      sessionEl.innerHTML = '<div class="empty-state"><p>No open audit. Click <strong>+ Start Audit</strong> to begin.</p></div>';
+    }
+
+    const closed = audits.filter(a => a.status === 'closed');
+    historyEl.innerHTML = closed.length ? `
+      <h3 style="font-size:14px;font-weight:600;color:var(--text-sec);margin:20px 0 8px">Past Audits</h3>
+      ${closed.map(a => `
+        <div class="user-row" onclick="openAuditHistory(${a.id})" style="cursor:pointer">
+          <div class="user-info">
+            <div class="user-name">Audit #${a.id}</div>
+            <div class="user-email">${fmtDate(a.created_at)} · ${a.entry_count} entries · by ${esc(a.created_by_username)}</div>
+          </div>
+        </div>`).join('')}` : '';
+  } catch {
+    historyEl.innerHTML = '<div class="empty-state"><p>Failed to load audits</p></div>';
+  }
+}
+
+async function startNewAudit() {
+  try {
+    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: {} });
+    _activeAuditId = audit.id;
+    await refreshActiveAudit();
+    toast('Audit started', 'success');
+  } catch (err) { toast(err.error || 'Failed to start audit', 'error'); }
+}
+
+async function refreshActiveAudit() {
+  if (!_activeAuditId) return;
+  const { audit, entries } = await api(`/api/inventory-audit/${_activeAuditId}`);
+  renderActiveAudit(audit, entries);
+}
+
+function renderActiveAudit(audit, entries) {
+  const el = document.getElementById('auditSessionArea');
+  if (!el) return;
+  const discClass = (exp, cnt) => {
+    const d = Math.abs(cnt - exp);
+    return d === 0 ? 'disc-ok' : d <= 2 ? 'disc-warn' : 'disc-bad';
+  };
+  const discLabel = (exp, cnt) => {
+    const d = cnt - exp;
+    return d === 0 ? '✓' : (d > 0 ? '+' : '') + d;
+  };
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:14px;color:var(--text-sec)">Audit #${audit.id} — open</span>
+      <button class="btn-outline btn-sm" onclick="closeAuditSession(${audit.id})">Close Audit</button>
+    </div>
+    <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">
+      <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface)">
+        <span>Item</span><span style="text-align:center">Expected</span><span style="text-align:center">Counted</span><span style="text-align:center">Diff</span>
+      </div>
+      ${entries.length ? entries.map(e => `
+        <div class="audit-entry-row">
+          <span class="ae-name">${esc(e.item_name)}${e.category_name ? ' <span style="color:var(--text-muted)">(' + esc(e.category_name) + ')</span>' : ''}</span>
+          <span class="ae-num">${e.expected_qty}</span>
+          <span class="ae-num">${e.counted_qty}</span>
+          <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}">${discLabel(e.expected_qty, e.counted_qty)}</span>
+        </div>`).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No entries yet — add one below</div>'}
+    </div>
+    <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);padding:16px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:12px">Add Entry</div>
+      <div class="form-group">
+        <label class="form-label">Item Name <span style="color:var(--red)">*</span></label>
+        <input id="auditItemName" class="form-input" list="auditModelSuggestions" placeholder="e.g. B450 Motherboard">
+        <datalist id="auditModelSuggestions">
+          ${MODELS.map(m => `<option value="${esc(m.name)}">`).join('')}
+        </datalist>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select id="auditCatId" class="form-input">
+          <option value="">— None —</option>
+          ${CATEGORIES.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+        </select>
+        <input id="auditCatNew" class="form-input" placeholder="Or type a new category name" style="margin-top:6px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Quantity Counted <span style="color:var(--red)">*</span></label>
+        <input id="auditCountedQty" class="form-input" type="number" min="0" placeholder="0">
+      </div>
+      <div class="form-actions">
+        <button class="btn-primary" onclick="submitAuditEntry()">Save Entry</button>
+      </div>
+    </div>`;
+}
+
+async function submitAuditEntry() {
+  if (!_activeAuditId) return;
+  const itemName   = document.getElementById('auditItemName')?.value.trim();
+  const countedQty = parseInt(document.getElementById('auditCountedQty')?.value || '0', 10);
+  const catIdVal   = document.getElementById('auditCatId')?.value;
+  const catNewVal  = document.getElementById('auditCatNew')?.value.trim();
+
+  if (!itemName) { toast('Item name is required', 'error'); return; }
+  if (isNaN(countedQty) || countedQty < 0) { toast('Enter a valid quantity', 'error'); return; }
+
+  let category_id = catIdVal ? parseInt(catIdVal, 10) : null;
+
+  if (catNewVal) {
+    try {
+      const { category } = await api('/api/admin/categories', { method: 'POST', body: { name: catNewVal } });
+      category_id = category.id;
+      CATEGORIES.push(category);
+    } catch (err) { toast(err.error || 'Failed to create category', 'error'); return; }
+  }
+
+  const model = MODELS.find(m => m.name.toLowerCase() === itemName.toLowerCase());
+
+  try {
+    await api(`/api/inventory-audit/${_activeAuditId}/entries`, {
+      method: 'POST',
+      body: { item_name: itemName, counted_qty: countedQty, category_id, model_id: model?.id || null },
+    });
+    toast('Entry saved', 'success');
+    await refreshActiveAudit();
+    // Clear inputs for next entry
+    const nameEl = document.getElementById('auditItemName');
+    const qtyEl  = document.getElementById('auditCountedQty');
+    if (nameEl) nameEl.value = '';
+    if (qtyEl)  qtyEl.value  = '';
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+async function closeAuditSession(id) {
+  try {
+    await api(`/api/inventory-audit/${id}/close`, { method: 'POST', body: {} });
+    _activeAuditId = null;
+    toast('Audit closed', 'success');
+    loadAuditView();
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+async function openAuditHistory(id) {
+  try {
+    const { audit, entries } = await api(`/api/inventory-audit/${id}`);
+    const discLabel = (exp, cnt) => { const d = cnt - exp; return d === 0 ? '✓' : (d > 0 ? '+' : '') + d; };
+    const discClass = (exp, cnt) => { const d = Math.abs(cnt - exp); return d === 0 ? 'disc-ok' : d <= 2 ? 'disc-warn' : 'disc-bad'; };
+    const modal = document.getElementById('modalContent');
+    modal.innerHTML = `
+      <div class="modal-title">Audit #${audit.id}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+        ${fmtDate(audit.created_at)} · ${esc(audit.created_by_username)} · ${entries.length} entries
+      </div>
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface)">
+          <span>Item</span><span style="text-align:center">Expected</span><span style="text-align:center">Counted</span><span style="text-align:center">Diff</span>
+        </div>
+        ${entries.map(e => `
+          <div class="audit-entry-row">
+            <span class="ae-name">${esc(e.item_name)}</span>
+            <span class="ae-num">${e.expected_qty}</span>
+            <span class="ae-num">${e.counted_qty}</span>
+            <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}">${discLabel(e.expected_qty, e.counted_qty)}</span>
+          </div>`).join('')}
+      </div>
+      <div class="form-actions" style="margin-top:16px">
+        <button class="btn-outline" onclick="closeModal()">Close</button>
+      </div>`;
+    document.getElementById('modalOverlay').classList.add('open');
+  } catch { toast('Failed to load audit', 'error'); }
 }
 
 // Helper — read the CSRF cookie set by the server (httpOnly:false on this one)
