@@ -389,6 +389,21 @@ td { padding: 12px 16px; vertical-align: middle; }
 }
 .avail-bar-label strong { color: var(--text); }
 
+/* Unit picker cards (bulk checkout modal) */
+.unit-pick-card {
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  user-select: none;
+}
+.unit-pick-card:hover { background: var(--bg-hover, var(--bg-elevated)); border-color: var(--border-sub); }
+.unit-pick-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* Queue section */
 .queue-section { padding: 18px 22px; border-bottom: 1px solid var(--border); }
 .queue-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }

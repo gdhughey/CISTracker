@@ -1017,13 +1017,10 @@ async function openCheckoutModal(id) {
   const item = ITEMS.find(i => i.id === id);
   if (!item) return;
 
-  // Bulk item fast-path: skip unit-select; show simplified "Take 1" modal
+  // Bulk item: show unit picker so user can choose which specific unit to take
   if ((item.quantity || 1) > 1) {
     const avail = Math.max(0, (item.quantity || 1) - (item.checked_out_count || 0));
     if (avail <= 0) { toast('No units available', 'error'); return; }
-    const willRemain = avail - 1;
-    const pct = Math.round((willRemain / (item.quantity || 1)) * 100);
-    const tier = pct >= 67 ? 'green' : pct >= 34 ? 'amber' : 'red';
     const isAdmin = ME.role === 'admin';
     const defaultDays = 7;
     const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
@@ -1031,17 +1028,19 @@ async function openCheckoutModal(id) {
     const modal = document.getElementById('modalContent');
     modal.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-        <span style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase">Take 1 Unit</span>
+        <span style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase">Check Out Unit</span>
         <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1" onclick="closeModal()">×</button>
       </div>
       <div class="modal-name">${esc(item.name)}</div>
       <div class="modal-id" style="margin-bottom:14px">${esc(item.barcode || 'ID-' + item.id)}</div>
-      <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:16px">
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">After this checkout</div>
-        <div class="avail-bar-wrap" style="margin-top:4px;margin-bottom:6px"><div class="avail-bar-fill ab-${tier}" style="width:${pct}%"></div></div>
-        <div style="font-size:13px;color:var(--text)"><strong style="color:var(--${tier === 'green' ? 'green' : tier === 'amber' ? 'amber' : 'red'})">${willRemain}</strong> of <strong>${item.quantity}</strong> will remain available</div>
-      </div>
       <div class="modal-body" id="coStep1">
+        <div class="form-group">
+          <label style="margin-bottom:6px;display:block">Select Unit <span style="color:var(--text-muted);font-weight:400">(${avail} available)</span></label>
+          <div id="bulkUnitList" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding-right:2px">
+            <div style="color:var(--text-muted);font-size:12px;padding:8px 0">Loading units…</div>
+          </div>
+          <input type="hidden" id="coUnitNote" value="">
+        </div>
         ${isAdmin ? `
           <div class="form-group">
             <label>Borrower</label>
@@ -1064,7 +1063,7 @@ async function openCheckoutModal(id) {
         </div>
         <div class="form-actions">
           <button class="btn-outline" onclick="closeModal()">Cancel</button>
-          <button class="btn-primary" id="bulkCoBtn" onclick="confirmCheckout(${id})">Take 1</button>
+          <button class="btn-primary" id="bulkCoBtn" onclick="confirmCheckout(${id})">Check Out</button>
         </div>
       </div>
       <div id="coSuccess" class="hidden" style="text-align:center;padding:24px 0">
@@ -1076,6 +1075,8 @@ async function openCheckoutModal(id) {
     document.getElementById('modalOverlay').classList.add('open');
     if (isAdmin) loadUserSelect();
     requestAnimationFrame(() => updateDurationLabel(defaultDays));
+    // Load units async and render picker
+    loadBulkUnitPicker(id);
     return;
   }
 
@@ -1172,6 +1173,52 @@ function updateDurationLabel(days) {
   }
 }
 
+async function loadBulkUnitPicker(equipmentId) {
+  const container = document.getElementById('bulkUnitList');
+  if (!container) return;
+  try {
+    const { units } = await api(`/api/equipment/${equipmentId}/units`);
+    if (!units || units.length === 0) {
+      // No individual units recorded — offer "Any available unit"
+      container.innerHTML = `
+        <div class="unit-pick-card selected" id="unitCard-any" onclick="selectBulkUnit('any','')">
+          <div style="font-size:13px;font-weight:600">Any available unit</div>
+          <div style="font-size:11px;color:var(--text-muted)">No individual units tracked for this item</div>
+        </div>`;
+      document.getElementById('coUnitNote').value = '';
+      return;
+    }
+    // "Any" option first, then individual units
+    const anyCard = `
+      <div class="unit-pick-card" id="unitCard-any" onclick="selectBulkUnit('any','')">
+        <div style="font-size:13px;font-weight:500;color:var(--text-muted)">Any available unit</div>
+      </div>`;
+    const unitCards = units.map(u => {
+      const label = u.barcode || u.serial_number || ('Unit #' + u.id);
+      const sub   = [u.barcode ? u.barcode : null, u.serial_number ? 'SN: ' + u.serial_number : null, u.notes || null]
+                      .filter(Boolean).join(' · ');
+      const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
+      return `
+        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id}, ${JSON.stringify(noteVal)})">
+          <div style="font-size:12px;font-weight:600;font-family:var(--mono);color:var(--text)">${esc(label)}</div>
+          ${sub ? `<div style="font-size:11px;color:var(--text-muted)">${esc(sub)}</div>` : ''}
+        </div>`;
+    }).join('');
+    container.innerHTML = anyCard + unitCards;
+  } catch {
+    container.innerHTML = `<div style="color:var(--red);font-size:12px">Failed to load units</div>`;
+  }
+}
+
+function selectBulkUnit(uid, noteVal) {
+  // Highlight selected card
+  document.querySelectorAll('#bulkUnitList .unit-pick-card').forEach(el => el.classList.remove('selected'));
+  const card = document.getElementById('unitCard-' + uid);
+  if (card) card.classList.add('selected');
+  const noteInput = document.getElementById('coUnitNote');
+  if (noteInput) noteInput.value = noteVal || '';
+}
+
 async function loadUserSelect() {
   try {
     const { users } = await api('/api/admin/users');
@@ -1191,11 +1238,15 @@ async function loadUserSelect() {
 }
 
 async function confirmCheckout(id) {
+  const btn = document.getElementById('bulkCoBtn') || document.querySelector('#coStep1 .btn-primary');
+  if (btn) btn.disabled = true;
   try {
-    const unitIdEl = document.getElementById('checkoutUnitId');
-    const targetId = unitIdEl ? parseInt(unitIdEl.value, 10) : id;
+    const unitIdEl  = document.getElementById('checkoutUnitId');
+    const unitNote  = document.getElementById('coUnitNote');
+    const targetId  = unitIdEl ? parseInt(unitIdEl.value, 10) : id;
     const days = parseInt(document.getElementById('coDuration')?.value || '7', 10);
     const body = { source: 'Manual', duration_days: days };
+    if (unitNote && unitNote.value) body.notes = 'Unit: ' + unitNote.value;
     if (ME.role === 'admin') {
       const sel = document.getElementById('coBorrower');
       if (sel && sel.value) body.for_user_id = parseInt(sel.value, 10);
@@ -1206,6 +1257,7 @@ async function confirmCheckout(id) {
     setTimeout(() => { closeModal(); loadItems(); closeDetail(); }, 1400);
   } catch (err) {
     toast(err.error || 'Checkout failed', 'error');
+    if (btn) btn.disabled = false;
   }
 }
 
