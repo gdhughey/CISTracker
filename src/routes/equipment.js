@@ -3,6 +3,7 @@ const express = require('express');
 const QRCode = require('qrcode');
 const { z } = require('zod');
 const equipmentService = require('../services/equipmentService');
+const equipmentUnitService = require('../services/equipmentUnitService');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { stripHtml } = require('../utils/sanitize');
@@ -217,6 +218,46 @@ router.post('/:id(\\d+)/checkin', validate(checkoutSchema), (req, res, next) => 
       item: result.item,
       nextInQueue: result.nextInQueue ? { username: result.nextInQueue.username } : null,
     });
+  } catch (err) { next(err); }
+});
+
+// ── Equipment Units (per-unit serial/barcode under a qty>1 parent) ──────────
+const unitSchema = z.object({
+  serial_number: z.string().max(200).optional().transform(v => stripHtml(v || '')),
+  barcode:       z.string().max(200).optional().transform(v => stripHtml(v || '')),
+  notes:         z.string().max(500).optional().transform(v => stripHtml(v || '')),
+});
+
+router.get('/:id(\\d+)/units', (req, res, next) => {
+  try {
+    const item = equipmentService.getById(parseInt(req.params.id, 10));
+    if (!item) return res.status(404).json({ error: 'Equipment not found' });
+    res.json({ units: equipmentUnitService.listByEquipment(item.id) });
+  } catch (err) { next(err); }
+});
+
+router.post('/:id(\\d+)/units', requireRole('admin'), validate(unitSchema), (req, res, next) => {
+  try {
+    const item = equipmentService.getById(parseInt(req.params.id, 10));
+    if (!item) return res.status(404).json({ error: 'Equipment not found' });
+    const unit = equipmentUnitService.create(item.id, req.body);
+    req.audit('unit_add', String(item.id), { serial: unit.serial_number });
+    res.status(201).json({ unit });
+  } catch (err) { next(err); }
+});
+
+router.put('/units/:uid(\\d+)', requireRole('admin'), validate(unitSchema), (req, res, next) => {
+  try {
+    const unit = equipmentUnitService.update(parseInt(req.params.uid, 10), req.body);
+    req.audit('unit_update', String(unit.equipment_id));
+    res.json({ unit });
+  } catch (err) { next(err); }
+});
+
+router.delete('/units/:uid(\\d+)', requireRole('admin'), (req, res, next) => {
+  try {
+    equipmentUnitService.remove(parseInt(req.params.uid, 10));
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

@@ -741,6 +741,7 @@ async function openDetail(id) {
       <div class="meta-row"><span class="label">Serial</span><span class="value" style="font-family:var(--mono);font-size:12px">${esc(item.serial_number || '—')}</span></div>
       <div class="meta-row"><span class="label">Category</span><span class="value">${esc(item.category || '—')}</span></div>
       ${item.quantity > 1 ? `<div class="meta-row"><span class="label">Quantity</span><span class="value" style="color:var(--accent);font-weight:600">${item.quantity}</span></div>` : ''}
+      ${item.quantity > 1 ? `<div class="meta-row" style="align-items:flex-start"><span class="label" style="padding-top:2px">Units</span><span class="value" style="width:100%"><span id="unitsList-${item.id}" style="color:var(--text-muted);font-size:12px">Loading…</span></span></div>` : ''}
       <div class="meta-row"><span class="label">Type</span><span class="value">${esc(item.type || '—')}</span></div>
       <div class="meta-row"><span class="label">Location</span><span class="value">${esc(item.location || '—')}</span></div>
       ${st !== 'available' ? `
@@ -768,10 +769,111 @@ async function openDetail(id) {
     ` : ''}
   `;
   document.getElementById('detailOverlay').classList.add('open');
+  if (item.quantity > 1) loadUnits(item.id);
 }
 
 function closeDetail() {
   document.getElementById('detailOverlay').classList.remove('open');
+}
+
+// ── Equipment Units (per-unit serial/barcode under qty>1 items) ───────────
+async function loadUnits(equipmentId) {
+  const el = document.getElementById(`unitsList-${equipmentId}`);
+  if (!el) return;
+  try {
+    const { units } = await api(`/api/equipment/${equipmentId}/units`);
+    renderUnits(equipmentId, units);
+  } catch {
+    el.innerHTML = '<span style="color:var(--red)">Failed to load units</span>';
+  }
+}
+
+function renderUnits(equipmentId, units) {
+  const el = document.getElementById(`unitsList-${equipmentId}`);
+  if (!el) return;
+  const isAdminUser = ME.role === 'admin';
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+      ${units.length === 0
+        ? `<span style="color:var(--text-muted);font-size:12px">No individual units recorded.</span>`
+        : units.map(u => `
+          <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);background:var(--bg-base);border:1px solid var(--border);border-radius:6px;padding:4px 8px">
+            <span style="flex:1;color:var(--text)">${esc(u.serial_number || '—')}${u.barcode ? ' · ' + esc(u.barcode) : ''}${u.notes ? ' <span style="color:var(--text-muted);font-family:var(--sans)">' + esc(u.notes) + '</span>' : ''}</span>
+            ${isAdminUser ? `
+              <button class="btn-outline btn-sm" style="padding:2px 6px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
+              <button class="btn-outline btn-sm btn-red" style="padding:2px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
+            ` : ''}
+          </div>
+        `).join('')}
+      ${isAdminUser ? `
+        <button class="btn-outline btn-sm" style="margin-top:4px;font-size:12px;align-self:flex-start" onclick="addUnit(${equipmentId})">+ Add Unit</button>
+      ` : ''}
+    </div>
+  `;
+}
+
+function addUnit(equipmentId) {
+  showModal(`
+    <div style="padding:20px 24px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:16px">Add Unit</div>
+      <div class="form-group"><label>Serial Number</label><input id="unitSerial" class="form-input mono" placeholder="e.g. SN123456"></div>
+      <div class="form-group"><label>Barcode</label><input id="unitBarcode" class="form-input mono" placeholder="e.g. CIS-001234"></div>
+      <div class="form-group"><label>Notes</label><input id="unitNotes" class="form-input" placeholder="Optional"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary" onclick="saveNewUnit(${equipmentId})">Save</button>
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+  `);
+}
+
+async function saveNewUnit(equipmentId) {
+  const serial_number = document.getElementById('unitSerial')?.value.trim() || '';
+  const barcode       = document.getElementById('unitBarcode')?.value.trim() || '';
+  const notes         = document.getElementById('unitNotes')?.value.trim() || '';
+  if (!serial_number && !barcode) { toast('Enter at least a serial or barcode', 'error'); return; }
+  try {
+    await api(`/api/equipment/${equipmentId}/units`, { method: 'POST', body: { serial_number, barcode, notes } });
+    closeModal();
+    toast('Unit added', 'success');
+    loadUnits(equipmentId);
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+function editUnit(equipmentId, uid, serial, barcode, notes) {
+  showModal(`
+    <div style="padding:20px 24px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:16px">Edit Unit</div>
+      <div class="form-group"><label>Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(serial)}"></div>
+      <div class="form-group"><label>Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(barcode)}"></div>
+      <div class="form-group"><label>Notes</label><input id="editUnitNotes" class="form-input" value="${esc(notes)}"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary" onclick="saveEditUnit(${equipmentId},${uid})">Save</button>
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+  `);
+}
+
+async function saveEditUnit(equipmentId, uid) {
+  const serial_number = document.getElementById('editUnitSerial')?.value.trim() || '';
+  const barcode       = document.getElementById('editUnitBarcode')?.value.trim() || '';
+  const notes         = document.getElementById('editUnitNotes')?.value.trim() || '';
+  try {
+    await api(`/api/equipment/units/${uid}`, { method: 'PUT', body: { serial_number, barcode, notes } });
+    closeModal();
+    toast('Unit updated', 'success');
+    loadUnits(equipmentId);
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+async function deleteUnit(equipmentId, uid) {
+  if (!confirm('Delete this unit?')) return;
+  try {
+    await api(`/api/equipment/units/${uid}`, { method: 'DELETE' });
+    toast('Unit deleted', 'info');
+    loadUnits(equipmentId);
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
 // ── Queue actions ──────────────────────────────────────────────────────
