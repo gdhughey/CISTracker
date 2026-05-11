@@ -692,11 +692,11 @@ async function openDetail(id) {
   try {
     const { entries } = await api(`/api/equipment/log?equipment_id=${id}&limit=10`);
     const itemEntries = (entries || []);
-    if (itemEntries.length > 0) {
-      historyHtml = `
-        <div class="detail-section">
-          <h4>History</h4>
-          ${itemEntries.map(e => `
+    historyHtml = `
+      <div class="detail-section" id="itemHistorySection">
+        <h4>History</h4>
+        ${itemEntries.length > 0
+          ? itemEntries.map(e => `
             <div class="history-item">
               <div class="history-dot ${e.action}"></div>
               <div>
@@ -704,10 +704,12 @@ async function openDetail(id) {
                 <div class="history-date">${fmtDateTime(e.created_at)}</div>
               </div>
             </div>
-          `).join('')}
-        </div>`;
-    }
-  } catch {}
+          `).join('')
+          : '<p style="color:var(--text-muted);font-size:12px;padding:8px 0">No history yet.</p>'}
+      </div>`;
+  } catch {
+    historyHtml = '<div class="detail-section" id="itemHistorySection"><h4>History</h4><p style="color:var(--text-muted);font-size:12px;padding:8px 0">No history yet.</p></div>';
+  }
 
   panel.innerHTML = `
     <div class="detail-header">
@@ -2383,17 +2385,42 @@ async function loadAudit() {
       container.innerHTML = '<div class="empty-state"><p>No audit entries</p></div>';
       return;
     }
-    container.innerHTML = entries.map(e => `
-      <div class="audit-row">
-        <span class="action">${esc(e.action)}</span>
-        <span class="target">${esc(e.target || '—')}</span>
-        <span style="font-size:11px;color:var(--text-muted)">${esc(e.ip_address || '')}</span>
-        <span class="date">${fmtDateTime(e.created_at)}</span>
-      </div>
-    `).join('');
+    container.innerHTML = entries.map(e => {
+      const targetHtml = e.target
+        ? `<a href="#" class="audit-link" onclick="handleAuditTarget(event,${JSON.stringify(e.action)},${JSON.stringify(e.target)})">${esc(e.target)}</a>`
+        : '—';
+      const userHtml = e.username
+        ? `<a href="#" class="audit-link" onclick="openUserFromAudit(event,${e.user_id || 0})">${esc(e.username)}</a>`
+        : '—';
+      return `
+        <div class="audit-row">
+          <span class="action">${esc(e.action)}</span>
+          <span class="target">${targetHtml}</span>
+          <span style="font-size:11px;color:var(--text-muted)">${userHtml}</span>
+          <span class="date">${fmtDateTime(e.created_at)}</span>
+        </div>`;
+    }).join('');
   } catch {
     container.innerHTML = '<div class="empty-state"><p>Failed to load audit log</p></div>';
   }
+}
+
+function handleAuditTarget(e, action, target) {
+  e.preventDefault();
+  const equipmentActions = ['checkout','checkin','equipment_create','equipment_update','equipment_delete','clear_log'];
+  if (equipmentActions.includes(action)) {
+    const id = parseInt(target, 10);
+    if (!isNaN(id)) { openDetail(id); return; }
+  }
+}
+
+async function openUserFromAudit(e, userId) {
+  e.preventDefault();
+  if (!userId) return;
+  try {
+    switchView('users');
+    setTimeout(() => openUserDetail(userId), 300);
+  } catch { toast('Failed to open user', 'error'); }
 }
 
 // ── Util ───────────────────────────────────────────────────────────────
