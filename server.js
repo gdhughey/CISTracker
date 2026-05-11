@@ -4,6 +4,11 @@ const express = require('express');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const config = require('./src/config');
+
+// Run migrations before requiring any service/middleware that prepares SQL statements.
+const { runMigrations } = require('./src/db/migrate');
+runMigrations();
+
 const helmetMw = require('./src/middleware/helmet');
 const { apiLimiter } = require('./src/middleware/rateLimit');
 const { issueToken, verifyToken } = require('./src/middleware/csrf');
@@ -19,9 +24,6 @@ const ticketRoutes = require('./src/routes/tickets');
 const passkeyRoutes = require('./src/routes/passkey');
 const serviceTicketRoutes  = require('./src/routes/serviceTickets');
 const inventoryAuditRoutes = require('./src/routes/inventoryAudit');
-
-const { runMigrations } = require('./src/db/migrate');
-runMigrations();
 
 require('./src/services/reminderService');
 
