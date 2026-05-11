@@ -17,6 +17,8 @@ const adminRoutes = require('./src/routes/admin');
 const queueRoutes = require('./src/routes/queue');
 const ticketRoutes = require('./src/routes/tickets');
 const passkeyRoutes = require('./src/routes/passkey');
+const serviceTicketRoutes  = require('./src/routes/serviceTickets');
+const inventoryAuditRoutes = require('./src/routes/inventoryAudit');
 
 const { runMigrations } = require('./src/db/migrate');
 runMigrations();
@@ -59,6 +61,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/passkey', passkeyRoutes);
+app.use('/api/service-tickets', serviceTicketRoutes);
+app.use('/api/inventory-audit', inventoryAuditRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
