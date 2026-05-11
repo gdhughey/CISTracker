@@ -66,4 +66,24 @@ function closeAudit(id) {
   return getById(id);
 }
 
-module.exports = { listAll, getById, getEntries, create, addEntry, closeAudit };
+function updateAudit(id, notes) {
+  db.prepare(`UPDATE inventory_audits SET notes = ? WHERE id = ?`).run(notes || '', id);
+  return getById(id);
+}
+
+function deleteAudit(id) {
+  db.prepare(`DELETE FROM audit_entries WHERE audit_id = ?`).run(id);
+  db.prepare(`DELETE FROM inventory_audits WHERE id = ?`).run(id);
+}
+
+function updateEntry(entryId, { counted_qty, notes }) {
+  db.prepare(`UPDATE audit_entries SET counted_qty = ?, notes = ? WHERE id = ?`)
+    .run(counted_qty, notes || '', entryId);
+  return db.prepare('SELECT * FROM audit_entries WHERE id = ?').get(entryId);
+}
+
+function deleteEntry(entryId) {
+  db.prepare(`DELETE FROM audit_entries WHERE id = ?`).run(entryId);
+}
+
+module.exports = { listAll, getById, getEntries, create, addEntry, closeAudit, updateAudit, deleteAudit, updateEntry, deleteEntry };

@@ -2890,7 +2890,7 @@ async function loadAuditView() {
       ${closed.map(a => `
         <div class="audit-history-card" onclick="openAuditHistory(${a.id})">
           <div class="audit-history-icon">📋</div>
-          <div>
+          <div style="min-width:0;flex:1">
             <div class="audit-history-title">Audit #${a.id}</div>
             <div class="audit-history-meta">
               <span>${esc(a.created_by_username)}</span>
@@ -2898,9 +2898,13 @@ async function loadAuditView() {
               <span>${fmtDate(a.created_at)}</span>
               <span class="stc-meta-dot">·</span>
               <span>${a.entry_count} entr${a.entry_count === 1 ? 'y' : 'ies'}</span>
+              ${a.notes ? `<span class="stc-meta-dot">·</span><span style="font-style:italic">${esc(a.notes)}</span>` : ''}
             </div>
           </div>
-          <span class="audit-history-num">#${a.id}</span>
+          <div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
+            <button class="btn-outline btn-sm" onclick="editAuditNotes(${a.id},${JSON.stringify(esc(a.notes||''))})">Edit</button>
+            <button class="btn-outline btn-sm btn-red" onclick="deleteAudit(${a.id})">Delete</button>
+          </div>
         </div>`).join('')}` : '';
   } catch {
     historyEl.innerHTML = '<div class="empty-state"><p>Failed to load audits</p></div>';
@@ -2956,13 +2960,17 @@ function renderActiveAudit(audit, entries) {
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <span style="font-size:14px;color:var(--text-sec)">Audit #${audit.id} — open</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;color:var(--text-sec)">Audit #${audit.id} — open</span>
+        <button class="btn-outline btn-sm" onclick="editAuditNotes(${audit.id},${JSON.stringify(esc(audit.notes||''))})">Edit Notes</button>
+        <button class="btn-outline btn-sm btn-red" onclick="deleteAudit(${audit.id})">Delete</button>
+      </div>
       <button class="btn-outline btn-sm" onclick="closeAuditSession(${audit.id})">Close Audit</button>
     </div>
     ${summaryHtml}
     <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">
-      <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface)">
-        <span>Item</span><span style="text-align:center">System</span><span style="text-align:center">Counted</span><span style="text-align:center">Status</span>
+      <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface);grid-template-columns:1fr 80px 80px 80px 60px">
+        <span>Item</span><span style="text-align:center">System</span><span style="text-align:center">Counted</span><span style="text-align:center">Status</span><span></span>
       </div>
       ${entries.length ? entries.map(e => {
         const match = e.counted_qty === e.expected_qty;
@@ -2970,11 +2978,14 @@ function renderActiveAudit(audit, entries) {
         const icon = match ? '✅' : d <= 2 ? '⚠️' : '❌';
         const label = match ? 'Match' : (e.counted_qty > e.expected_qty ? '+' : '') + (e.counted_qty - e.expected_qty);
         return `
-        <div class="audit-entry-row" style="${!match ? 'background:rgba(240,74,90,0.04)' : ''}">
+        <div class="audit-entry-row" style="${!match ? 'background:rgba(240,74,90,0.04);' : ''}grid-template-columns:1fr 80px 80px 80px 60px">
           <span class="ae-name">${esc(e.item_name)}${e.category_name ? ' <span style="color:var(--text-muted)">(' + esc(e.category_name) + ')</span>' : ''}</span>
           <span class="ae-num">${e.expected_qty}</span>
           <span class="ae-num">${e.counted_qty}</span>
           <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}" style="font-size:13px">${icon} ${label}</span>
+          <span style="text-align:center">
+            <button class="btn-outline btn-sm btn-red" style="padding:2px 7px;font-size:11px" onclick="deleteAuditEntry(${audit.id},${e.id})">✕</button>
+          </span>
         </div>`;
       }).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No entries yet — add one below</div>'}
     </div>
@@ -3048,6 +3059,50 @@ async function closeAuditSession(id) {
     _activeAuditId = null;
     toast('Audit closed', 'success');
     loadAuditView();
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+function editAuditNotes(id, currentNotes) {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Edit Audit Notes</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <input id="auditNotesInput" class="form-input" value="${currentNotes}" placeholder="Optional notes about this audit">
+      </div>
+      <div class="form-actions">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveAuditNotes(${id})">Save</button>
+      </div>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function saveAuditNotes(id) {
+  const notes = document.getElementById('auditNotesInput')?.value.trim() || '';
+  try {
+    await api(`/api/inventory-audit/${id}`, { method: 'PUT', body: { notes } });
+    toast('Audit updated', 'success');
+    closeModal();
+    loadAuditView();
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+async function deleteAudit(id) {
+  if (!confirm(`Delete Audit #${id} and all its entries? This cannot be undone.`)) return;
+  try {
+    await api(`/api/inventory-audit/${id}`, { method: 'DELETE' });
+    if (_activeAuditId === id) _activeAuditId = null;
+    toast('Audit deleted', 'info');
+    loadAuditView();
+  } catch (err) { toast(err.error || 'Failed', 'error'); }
+}
+
+async function deleteAuditEntry(auditId, entryId) {
+  try {
+    await api(`/api/inventory-audit/${auditId}/entries/${entryId}`, { method: 'DELETE' });
+    refreshActiveAudit();
   } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
