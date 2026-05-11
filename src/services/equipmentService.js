@@ -234,12 +234,25 @@ function batchCheckout(equipmentIds, userId, username, notes, source, performedB
   return results;
 }
 
+function batchCheckin(equipmentIds, actingUser, notes) {
+  const results = [];
+  for (const id of equipmentIds) {
+    try {
+      const result = checkin(id, actingUser, notes, 'Manual');
+      results.push({ id, success: true, item: result.item });
+    } catch (err) {
+      results.push({ id, success: false, error: err.message });
+    }
+  }
+  return results;
+}
+
 function clearLog() {
   db.prepare('DELETE FROM checkout_log').run();
 }
 
 module.exports = {
   listAll, getById, create, update, remove, findByIdentifier,
-  checkout, checkin, batchCheckout, getLog, clearLog, getOverdue, getCheckoutsForUser,
+  checkout, checkin, batchCheckout, batchCheckin, getLog, clearLog, getOverdue, getCheckoutsForUser,
   nextAssetId,
 };

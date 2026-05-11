@@ -25,6 +25,9 @@ let renderShown = 0;    // how many rows are currently rendered
 // Mass checkout cart
 const _cart = new Set(); // Set of equipment IDs
 
+// Mass return cart
+const _returnCart = new Set(); // Set of equipment IDs to return
+
 // ── UTC helper ─────────────────────────────────────────────────────────
 function utc(d) {
   if (!d) return new Date(NaN);
@@ -1362,13 +1365,15 @@ async function loadCheckinout() {
   }
   container.innerHTML = outItems.map(item => {
     const st = getItemStatus(item);
+    const inReturnCart = _returnCart.has(item.id);
     return `
-      <div class="out-item">
+      <div class="out-item" id="returnRow-${item.id}">
         <div style="width:6px;height:6px;border-radius:50%;background:${st === 'overdue' ? 'var(--red)' : 'var(--amber)'}"></div>
         <div class="item-info">
           <div class="item-name">${esc(item.name)}</div>
           <div class="item-meta">${esc(item.checked_out_username || '—')} · ${fmtDate(item.checked_out_at)}</div>
         </div>
+        ${isAdmin ? `<button class="btn-cart${inReturnCart ? ' in-cart' : ''}" id="returnCartBtn-${item.id}" title="${inReturnCart ? 'Remove from return cart' : 'Add to return cart'}" onclick="event.stopPropagation();toggleReturnCart(${item.id})">↩</button>` : ''}
         <button class="btn-outline btn-sm btn-green" onclick="openReturnModal(${item.id})">Return</button>
       </div>
     `;
@@ -3622,6 +3627,112 @@ async function confirmBatchCheckout() {
   } catch (err) {
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = `Checkout ${ids.length} Items →`; }
     toast(err.error || 'Batch checkout failed', 'error');
+  }
+}
+
+// ── Mass Return Cart ─────────────────────────────────────────────────────
+function toggleReturnCart(id) {
+  if (_returnCart.has(id)) {
+    _returnCart.delete(id);
+  } else {
+    _returnCart.add(id);
+  }
+  const btn = document.getElementById(`returnCartBtn-${id}`);
+  if (btn) {
+    btn.classList.toggle('in-cart', _returnCart.has(id));
+    btn.title = _returnCart.has(id) ? 'Remove from return cart' : 'Add to return cart';
+  }
+  updateReturnFab();
+}
+
+function updateReturnFab() {
+  const fab = document.getElementById('returnFab');
+  const badge = document.getElementById('returnBadge');
+  const n = _returnCart.size;
+  if (fab) fab.classList.toggle('hidden', n === 0);
+  if (badge) badge.textContent = n;
+}
+
+function openReturnCartModal() {
+  if (_returnCart.size === 0) return;
+  const ids = [..._returnCart];
+  const returnItems = ids.map(id => ITEMS.find(i => i.id === id)).filter(Boolean);
+  showModal(`
+    <div style="padding:20px 24px 0">
+      <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Mass Return</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text)">${returnItems.length} item${returnItems.length !== 1 ? 's' : ''} selected</div>
+    </div>
+    <div class="cart-item-list" style="padding:12px 24px 0" id="returnCartItemList">
+      ${returnItems.map(item => `
+        <div class="cart-item-row" id="returnCartRow-${item.id}">
+          <div style="flex:1;min-width:0">
+            <div class="cart-item-name">${esc(item.name)}</div>
+            <div class="cart-item-id">${esc(item.checked_out_username || '—')}</div>
+          </div>
+          <button class="cart-remove-btn" onclick="returnCartRemoveItem(${item.id})" title="Remove">✕</button>
+        </div>
+      `).join('')}
+    </div>
+    <div id="returnCartForm" style="padding:16px 24px 20px">
+      <input id="returnCartNotes" type="text" maxlength="500" placeholder="Add a note… (optional)" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px;box-sizing:border-box;margin-bottom:12px">
+      <button class="btn-primary" id="returnCartSubmitBtn" onclick="confirmBatchCheckin()" style="width:100%;background:var(--green,#16a34a)">Return ${returnItems.length} Item${returnItems.length !== 1 ? 's' : ''} →</button>
+    </div>
+    <div id="returnCartSuccess" class="hidden" style="text-align:center;padding:24px">
+      <div style="font-size:28px">✅</div>
+      <div id="returnCartSuccessMsg" style="font-size:13px;color:var(--text-muted);margin-top:6px"></div>
+    </div>
+  `);
+}
+
+function returnCartRemoveItem(id) {
+  _returnCart.delete(id);
+  const row = document.getElementById(`returnCartRow-${id}`);
+  if (row) row.remove();
+  const btn = document.getElementById(`returnCartBtn-${id}`);
+  if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to return cart'; }
+  updateReturnFab();
+  const remaining = document.querySelectorAll('#returnCartItemList .cart-item-row').length;
+  if (remaining === 0) closeModal();
+  const submitBtn = document.getElementById('returnCartSubmitBtn');
+  if (submitBtn) submitBtn.textContent = `Return ${remaining} Item${remaining !== 1 ? 's' : ''} →`;
+}
+
+async function confirmBatchCheckin() {
+  const ids = [..._returnCart];
+  if (!ids.length) return;
+  const notes = (document.getElementById('returnCartNotes')?.value || '').trim();
+  const body = { equipment_ids: ids, notes };
+  const submitBtn = document.getElementById('returnCartSubmitBtn');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Processing…'; }
+  try {
+    const { results } = await api('/api/equipment/batch-checkin', { method: 'POST', body });
+    const succeeded = results.filter(r => r.success).length;
+    const failed    = results.filter(r => !r.success);
+    for (const r of results) {
+      if (r.success) {
+        _returnCart.delete(r.id);
+        const btn = document.getElementById(`returnCartBtn-${r.id}`);
+        if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to return cart'; }
+      }
+    }
+    updateReturnFab();
+    document.getElementById('returnCartForm')?.classList.add('hidden');
+    const listEl = document.getElementById('returnCartItemList');
+    if (listEl) listEl.style.display = 'none';
+    const successEl = document.getElementById('returnCartSuccess');
+    if (successEl) successEl.classList.remove('hidden');
+    let msg = `${succeeded} item${succeeded !== 1 ? 's' : ''} returned successfully.`;
+    if (failed.length) msg += ` ${failed.length} could not be returned.`;
+    const msgEl = document.getElementById('returnCartSuccessMsg');
+    if (msgEl) msgEl.textContent = msg;
+    if (failed.length) {
+      const names = failed.map(r => { const it = ITEMS.find(i => i.id === r.id); return it ? it.name : `ID ${r.id}`; });
+      toast(`Failed: ${names.join(', ')}`, 'error');
+    }
+    setTimeout(() => { closeModal(); loadCheckinout(); }, 1800);
+  } catch (err) {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = `Return ${ids.length} Items →`; }
+    toast(err.error || 'Batch return failed', 'error');
   }
 }
 

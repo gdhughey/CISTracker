@@ -162,6 +162,19 @@ router.post('/batch-checkout', validate(batchCheckoutSchema), (req, res, next) =
   } catch (err) { next(err); }
 });
 
+const batchCheckinSchema = z.object({
+  equipment_ids: z.array(z.number().int().positive()).min(1).max(50),
+  notes: z.string().max(500).optional().transform(v => stripHtml(v || '')),
+});
+
+router.post('/batch-checkin', requireRole('admin'), validate(batchCheckinSchema), (req, res, next) => {
+  try {
+    const results = equipmentService.batchCheckin(req.body.equipment_ids, req.user, req.body.notes || '');
+    req.audit('batch_checkin', null, { count: results.filter(r => r.success).length });
+    res.json({ results });
+  } catch (err) { next(err); }
+});
+
 router.post('/:id(\\d+)/checkout', validate(checkoutSchema), (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
