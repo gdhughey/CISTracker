@@ -39,18 +39,16 @@ const checkoutSchema = z.object({
 router.use(requireAuth);
 
 router.get('/', (req, res) => {
+  const status = req.query.status;
+  const items = equipmentService.listAll({ status });
   try {
-    const status = req.query.status;
-    const items = equipmentService.listAll({ status });
-    try {
-      const queueService = require('../services/queueService');
-      const queueLengths = queueService.allQueueLengths();
-      for (const item of items) {
-        item.queue_length = queueLengths.get(item.id) || 0;
-      }
-    } catch { /* queue table may not exist yet */ }
-    res.json({ items });
-  } catch { res.json({ items: [] }); }
+    const queueService = require('../services/queueService');
+    const queueLengths = queueService.allQueueLengths();
+    for (const item of items) {
+      item.queue_length = queueLengths.get(item.id) || 0;
+    }
+  } catch { /* queue table may not exist yet */ }
+  res.json({ items });
 });
 
 // Full activity log is admin-only.
@@ -112,20 +110,16 @@ router.get('/:id(\\d+)', (req, res) => {
 });
 
 router.post('/', requireRole('admin'), validate(createSchema), (req, res) => {
-  try {
-    const item = equipmentService.create(req.body);
-    req.audit('equipment_create', String(item.id), { name: item.name });
-    res.status(201).json({ item });
-  } catch { res.status(503).json({ error: 'Inventory is being rebuilt — items cannot be added yet.' }); }
+  const item = equipmentService.create(req.body);
+  req.audit('equipment_create', String(item.id), { name: item.name });
+  res.status(201).json({ item });
 });
 
 router.put('/:id(\\d+)', requireRole('admin'), validate(updateSchema), (req, res) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    const item = equipmentService.update(id, req.body);
-    req.audit('equipment_update', String(id));
-    res.json({ item });
-  } catch { res.status(503).json({ error: 'Inventory is being rebuilt.' }); }
+  const id = parseInt(req.params.id, 10);
+  const item = equipmentService.update(id, req.body);
+  req.audit('equipment_update', String(id));
+  res.json({ item });
 });
 
 router.delete('/:id(\\d+)', requireRole('admin'), (req, res) => {

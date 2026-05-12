@@ -200,10 +200,8 @@ router.post('/users/import', csvUpload.single('file'), async (req, res) => {
 });
 
 router.get('/overdue', (req, res) => {
-  try {
-    const days = parseInt(req.query.days, 10) || 3;
-    res.json({ items: equipmentService.getOverdue(days) });
-  } catch { res.json({ items: [] }); }
+  const days = parseInt(req.query.days, 10) || 3;
+  res.json({ items: equipmentService.getOverdue(days) });
 });
 
 router.get('/audit', (req, res) => {
@@ -221,10 +219,8 @@ const locationSchema = z.object({
 });
 
 router.get('/locations', (_req, res) => {
-  try {
-    const rows = db.prepare('SELECT * FROM locations ORDER BY name').all();
-    res.json({ locations: rows });
-  } catch { res.json({ locations: [] }); }
+  const rows = db.prepare('SELECT * FROM locations ORDER BY name').all();
+  res.json({ locations: rows });
 });
 
 router.post('/locations', validate(locationSchema), (req, res) => {
@@ -287,8 +283,7 @@ const categorySchema = z.object({
 });
 
 router.get('/categories', (_req, res) => {
-  try { res.json({ categories: categoryService.listAll() }); }
-  catch { res.json({ categories: [] }); }
+  res.json({ categories: categoryService.listAll() });
 });
 
 router.post('/categories', validate(categorySchema), (req, res) => {
@@ -329,8 +324,7 @@ const modelSchema = z.object({
 });
 
 router.get('/models', (_req, res) => {
-  try { res.json({ models: modelService.listAll() }); }
-  catch { res.json({ models: [] }); }
+  res.json({ models: modelService.listAll() });
 });
 
 router.get('/models/:id(\\d+)', (req, res) => {
