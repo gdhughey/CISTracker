@@ -89,11 +89,41 @@ function addEntry(auditId, { model_id, category_id, item_name, counted_qty, note
   return db.prepare('SELECT * FROM audit_entries WHERE id = ?').get(info.lastInsertRowid);
 }
 
-function closeAudit(id) {
+function closeAudit(id, closedByUserId, closedByUsername) {
   db.prepare(`
     UPDATE inventory_audits SET status = 'closed', closed_at = datetime('now') WHERE id = ?
   `).run(id);
-  return getById(id);
+  const audit = getById(id);
+
+  // Find all entries where counted_qty differs from expected_qty
+  const discrepancies = db.prepare(`
+    SELECT id AS entry_id, item_name, expected_qty, counted_qty, notes
+    FROM audit_entries
+    WHERE audit_id = ? AND counted_qty != expected_qty
+  `).all(id);
+
+  if (discrepancies.length > 0 && closedByUserId) {
+    try {
+      const serviceTicketService = require('./serviceTicketService');
+      const emailService = require('./emailService');
+      const payload = {
+        audit_id:    audit.id,
+        audit_notes: audit.notes || '',
+        closed_by:   closedByUsername || String(closedByUserId),
+        discrepancies,
+      };
+      const ticket = serviceTicketService.create({
+        type:        'inventory_discrepancy',
+        requestedBy: closedByUserId,
+        payload,
+      });
+      emailService.notifyAdminsAuditDiscrepancy(ticket, closedByUsername || String(closedByUserId), discrepancies);
+    } catch (err) {
+      console.warn('[audit] Failed to create discrepancy ticket:', err.message);
+    }
+  }
+
+  return audit;
 }
 
 function updateAudit(id, notes) {

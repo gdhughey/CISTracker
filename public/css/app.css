@@ -1006,9 +1006,10 @@ input[type="range"]::-moz-range-track {
   font-size: 16px;
   flex-shrink: 0;
 }
-.stc-icon.type-add_item        { background: rgba(99,102,241,.15); }
-.stc-icon.type-quantity_change { background: rgba(245,158,11,.12); }
-.stc-icon.type-other           { background: rgba(148,163,184,.1); }
+.stc-icon.type-add_item               { background: rgba(99,102,241,.15); }
+.stc-icon.type-quantity_change        { background: rgba(245,158,11,.12); }
+.stc-icon.type-other                  { background: rgba(148,163,184,.1); }
+.stc-icon.type-inventory_discrepancy  { background: rgba(245,158,11,.15); }
 
 .stc-body { min-width: 0; }
 .stc-title { font-weight: 600; color: var(--text); font-size: 14px;

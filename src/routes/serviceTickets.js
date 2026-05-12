@@ -80,6 +80,19 @@ router.post('/:id(\\d+)/approve', requireRole('admin'), validate(resolveSchema),
           model_id:      payload.model_id || null,
           notes:         payload.notes || '',
         });
+      } else if (ticket.type === 'inventory_discrepancy') {
+        const db = require('../db/connection');
+        db.transaction(() => {
+          for (const disc of (payload.discrepancies || [])) {
+            const entry = db.prepare('SELECT item_name FROM audit_entries WHERE id = ?').get(disc.entry_id);
+            if (!entry) continue;
+            db.prepare(`
+              UPDATE equipment
+              SET quantity = ?, updated_at = datetime('now')
+              WHERE lower(trim(name)) = lower(trim(?))
+            `).run(disc.counted_qty, entry.item_name);
+          }
+        })();
       }
     };
 

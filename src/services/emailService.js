@@ -216,6 +216,39 @@ async function notifyAdminsServiceTicket(ticket, requesterUsername) {
   ));
 }
 
+async function notifyAdminsAuditDiscrepancy(ticket, closedByUsername, discrepancies) {
+  const db = require('../db/connection');
+  const admins = db.prepare("SELECT email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email != ''").all();
+  if (!admins.length) return;
+  const count = discrepancies.length;
+  const rows = discrepancies.map(d => `
+    <tr>
+      <td style="padding:8px 12px;color:#fff;border-bottom:1px solid #2a2d3a;">${esc(d.item_name)}</td>
+      <td style="padding:8px 12px;text-align:center;color:#d1d5db;border-bottom:1px solid #2a2d3a;">${d.expected_qty}</td>
+      <td style="padding:8px 12px;text-align:center;color:#d1d5db;border-bottom:1px solid #2a2d3a;">${d.counted_qty}</td>
+      <td style="padding:8px 12px;color:#9ca3af;font-size:13px;border-bottom:1px solid #2a2d3a;">${esc(d.notes || '')}</td>
+    </tr>`).join('');
+  await Promise.allSettled(admins.map(({ email }) =>
+    send({
+      to: email,
+      subject: `[Audit Discrepancy] ${count} item${count === 1 ? '' : 's'} need review — Audit #${ticket.id}`,
+      html: wrap(`
+        <p>An inventory audit was closed by <strong style="color:#fff;">${esc(closedByUsername)}</strong> with <strong style="color:#fff;">${count} discrepanc${count === 1 ? 'y' : 'ies'}</strong> that require review.</p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border:1px solid #2a2d3a;border-radius:6px;overflow:hidden;">
+          <tr style="background:#0f1117;">
+            <th style="text-align:left;padding:8px 12px;color:#9ca3af;font-size:12px;font-weight:600;">Item</th>
+            <th style="text-align:center;padding:8px 12px;color:#9ca3af;font-size:12px;font-weight:600;">Expected</th>
+            <th style="text-align:center;padding:8px 12px;color:#9ca3af;font-size:12px;font-weight:600;">Counted</th>
+            <th style="text-align:left;padding:8px 12px;color:#9ca3af;font-size:12px;font-weight:600;">Notes</th>
+          </tr>
+          ${rows}
+        </table>
+        <p><a href="${config.appUrl}" style="display:inline-block;background:#3b82f6;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:600;">Review in CISTracker</a></p>
+      `),
+    })
+  ));
+}
+
 async function notifyNewAdmin(email, username) {
   if (!email) return;
   await send({
@@ -238,5 +271,6 @@ module.exports = {
   sendTicketConfirmation,
   sendTicketStatusUpdate,
   notifyAdminsServiceTicket,
+  notifyAdminsAuditDiscrepancy,
   notifyNewAdmin,
 };

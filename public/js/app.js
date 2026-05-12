@@ -3222,8 +3222,8 @@ function renderSvcTickets() {
     return;
   }
 
-  const typeIcon  = { add_item: '📦', quantity_change: '🔢', other: '💬' };
-  const typeLabel = { add_item: 'Add Item', quantity_change: 'Qty Change', other: 'Other' };
+  const typeIcon  = { add_item: '📦', quantity_change: '🔢', other: '💬', inventory_discrepancy: '🔍' };
+  const typeLabel = { add_item: 'Add Item', quantity_change: 'Qty Change', other: 'Other', inventory_discrepancy: 'Discrepancy Report' };
   const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' };
 
   container.innerHTML = filtered.map(t => {
@@ -3257,10 +3257,52 @@ async function openSvcTicket(id) {
   const t = _svcTickets.find(x => x.id === id);
   if (!t) return;
   const payload = typeof t.payload === 'string' ? JSON.parse(t.payload) : (t.payload || {});
-  const payloadHtml = Object.entries(payload)
-    .filter(([, v]) => v !== '' && v != null)
-    .map(([k, v]) => `<div class="meta-row"><span class="label">${esc(k)}</span><span class="value">${esc(String(v))}</span></div>`)
-    .join('');
+
+  let detailHtml;
+  if (t.type === 'inventory_discrepancy') {
+    const discs = payload.discrepancies || [];
+    const rows = discs.map(d => {
+      const diff = d.counted_qty - d.expected_qty;
+      const diffColor = diff < 0 ? 'var(--red)' : 'var(--green)';
+      const diffStr = diff > 0 ? `+${diff}` : String(diff);
+      return `<tr>
+        <td style="padding:8px 12px;color:var(--text)">${esc(d.item_name)}</td>
+        <td style="padding:8px 12px;text-align:center;color:var(--text-muted)">${d.expected_qty}</td>
+        <td style="padding:8px 12px;text-align:center;color:var(--text-muted)">${d.counted_qty}</td>
+        <td style="padding:8px 12px;text-align:center;font-weight:700;color:${diffColor}">${diffStr}</td>
+        <td style="padding:8px 12px;font-size:12px;color:var(--text-muted)">${esc(d.notes || '')}</td>
+      </tr>`;
+    }).join('');
+    detailHtml = `
+      <div class="detail-section" style="margin-top:12px">
+        <div class="meta-row"><span class="label">Audit #</span><span class="value">${esc(String(payload.audit_id || ''))}</span></div>
+        <div class="meta-row"><span class="label">Closed by</span><span class="value">${esc(payload.closed_by || '')}</span></div>
+        ${payload.audit_notes ? `<div class="meta-row"><span class="label">Audit notes</span><span class="value">${esc(payload.audit_notes)}</span></div>` : ''}
+      </div>
+      <div style="margin-top:14px;overflow-x:auto">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid var(--border);border-radius:8px;overflow:hidden;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--bg-surface)">
+              <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Item</th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Expected</th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Counted</th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Diff</th>
+              <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Notes</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } else {
+    detailHtml = `<div class="detail-section" style="margin-top:12px">${
+      Object.entries(payload)
+        .filter(([, v]) => v !== '' && v != null)
+        .map(([k, v]) => `<div class="meta-row"><span class="label">${esc(k)}</span><span class="value">${esc(String(v))}</span></div>`)
+        .join('')
+    }</div>`;
+  }
+
+  const typeLabels = { add_item: 'Add Item', quantity_change: 'Qty Change', other: 'Other', inventory_discrepancy: 'Discrepancy Report' };
   const adminActions = ME?.role === 'admin' && t.status === 'pending' ? `
     <div class="form-group" style="margin-top:16px">
       <label class="form-label">Admin Notes</label>
@@ -3275,12 +3317,12 @@ async function openSvcTicket(id) {
   modal.innerHTML = `
     <div class="modal-title">Service Ticket #${t.id}</div>
     <div class="detail-section">
-      <div class="meta-row"><span class="label">Type</span><span class="value">${esc(t.type)}</span></div>
+      <div class="meta-row"><span class="label">Type</span><span class="value">${esc(typeLabels[t.type] || t.type)}</span></div>
       <div class="meta-row"><span class="label">Status</span><span class="value"><span class="svc-status ${t.status}">${t.status}</span></span></div>
       <div class="meta-row"><span class="label">Requested by</span><span class="value">${esc(t.requester_username)}</span></div>
       <div class="meta-row"><span class="label">Date</span><span class="value">${fmtDateTime(t.created_at)}</span></div>
     </div>
-    <div class="detail-section" style="margin-top:12px">${payloadHtml}</div>
+    ${detailHtml}
     ${adminActions}`;
   document.getElementById('modalOverlay').classList.add('open');
 }

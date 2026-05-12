@@ -75,7 +75,7 @@ router.post('/:id(\\d+)/close', (req, res) => {
   if (req.user.role !== 'admin' && audit.created_by !== req.user.id) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  const closed = inventoryAuditService.closeAudit(id);
+  const closed = inventoryAuditService.closeAudit(id, req.user.id, req.user.username);
   req.audit('inventory_audit_close', String(id));
   res.json({ audit: closed });
 });
