@@ -1131,6 +1131,17 @@ input[type="range"]::-moz-range-track {
 .audit-scope-row label { font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 .audit-scope-row select { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; cursor: pointer; }
 
+/* ── Audit Finish Button ─────────────────────────────────────────── */
+.audit-finish-btn {
+  display: block; width: 100%; padding: 15px;
+  font-size: 16px; font-weight: 700; letter-spacing: .02em;
+  background: var(--red); color: #fff;
+  border: none; border-radius: 10px; cursor: pointer;
+  transition: opacity .15s ease, transform .1s ease;
+}
+.audit-finish-btn:hover { opacity: .88; transform: translateY(-1px); }
+.audit-finish-btn:active { opacity: 1; transform: translateY(0); }
+
 /* ── Checklist Audit ─────────────────────────────────────────────── */
 .cl-progress-wrap {
   background: var(--bg-elevated); border: 1px solid var(--border);

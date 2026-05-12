@@ -3529,6 +3529,12 @@ function renderActiveAudit(audit, entries) {
       <div class="form-actions">
         <button class="btn-primary" onclick="submitAuditEntry()">Save Entry</button>
       </div>
+    </div>
+    <div style="margin-top:20px">
+      <button class="audit-finish-btn" onclick="closeAuditSession(${audit.id})">
+        ✓ Finish Audit
+      </button>
+      <div style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:8px">Closes this audit and saves all entries</div>
     </div>`;
 }
 
@@ -3654,6 +3660,12 @@ function renderChecklistAudit(audit, entries) {
         <span style="text-align:center">Status</span>
       </div>
       <div id="clRows"></div>
+    </div>
+    <div style="margin-top:20px">
+      <button class="audit-finish-btn" onclick="closeAuditSession(${audit.id})">
+        ✓ Finish Audit
+      </button>
+      <div style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:8px">Closes this audit and saves all entries</div>
     </div>`;
 
   _clFilter    = 'all';
