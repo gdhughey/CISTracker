@@ -28,6 +28,36 @@ const _cart = new Set(); // Set of equipment IDs
 // Mass return cart
 const _returnCart = new Set(); // Set of equipment IDs to return
 
+// ── Live refresh ────────────────────────────────────────────────────────
+let _refreshInterval = null;
+const REFRESH_MS = 90_000; // 90 seconds
+
+const VIEW_REFRESH = {
+  inventory:       () => loadItems(),
+  checkinout:      () => loadCheckinout(),
+  overdue:         () => loadOverdue(),
+  tickets:         () => loadTickets(),
+  queue:           () => loadMyQueue(),
+  users:           () => loadUsers(),
+  locations:       () => loadLocations(),
+  audit:           () => loadAudit(),
+  'service-tickets': () => loadServiceTickets(),
+  'inv-audit':     () => loadAuditView(),
+};
+
+function startRefreshInterval() {
+  stopRefreshInterval();
+  const fn = VIEW_REFRESH[currentView];
+  if (!fn) return;
+  _refreshInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') fn();
+  }, REFRESH_MS);
+}
+
+function stopRefreshInterval() {
+  if (_refreshInterval) { clearInterval(_refreshInterval); _refreshInterval = null; }
+}
+
 // ── UTC helper ─────────────────────────────────────────────────────────
 function utc(d) {
   if (!d) return new Date(NaN);
@@ -65,6 +95,7 @@ async function api(url, opts = {}) {
   // Grab CSRF from response cookie
   const csrfCookie = document.cookie.split(';').find(c => c.trim().startsWith('csrf_token='));
   if (csrfCookie) CSRF = csrfCookie.split('=')[1];
+  if (res.status === 401) { window.location.href = '/'; return; }
   if (!res.ok) throw { status: res.status, ...(typeof data === 'object' ? data : { error: data }) };
   return data;
 }
@@ -106,6 +137,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch {
     showLogin();
   }
+
+  // Live refresh: resume/pause on tab visibility changes
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      const fn = VIEW_REFRESH[currentView];
+      if (fn) fn();
+      startRefreshInterval();
+    } else {
+      stopRefreshInterval();
+    }
+  });
 });
 
 // ── Auth ───────────────────────────────────────────────────────────────
@@ -410,6 +452,7 @@ function switchView(view) {
   // Stop any active QR scan when leaving the checkinout view
   if (view !== 'checkinout' && window._stopScan) { window._stopScan(); window._stopScan = null; }
   currentView = view;
+  startRefreshInterval();
   // Hide all views
   document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
   const target = document.getElementById('view-' + view);
@@ -3326,17 +3369,26 @@ async function loadAuditView() {
 
 function startNewAudit() {
   const totalItems = ITEMS.length;
+  const locOptions = LOCATIONS_LIST.map(l =>
+    `<option value="${l.id}">${esc(l.name)}</option>`).join('');
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <div class="modal-title">Start Inventory Audit</div>
     <div class="modal-body">
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Choose how you want to run this audit:</p>
+      <div style="margin-bottom:14px">
+        <label class="form-label" style="margin-bottom:4px;display:block">Scope to location <span style="opacity:.5;font-weight:400">(optional — leave blank for all)</span></label>
+        <select id="auditLocationScope" class="form-input">
+          <option value="">All locations (${totalItems} items)</option>
+          ${locOptions}
+        </select>
+      </div>
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
         <div class="audit-type-card" onclick="_startChecklist()">
           <div class="atc-icon">✅</div>
           <div>
             <div class="atc-title">Checklist Audit</div>
-            <div class="atc-desc">Pre-loads all ${totalItems} inventory items as a checklist. Go down the list, check off each one, and flag discrepancies with a count and reason.</div>
+            <div class="atc-desc">Pre-loads inventory items as a checklist grouped by location. Check off each one and flag discrepancies.</div>
           </div>
         </div>
         <div class="audit-type-card" onclick="_startManual()">
@@ -3355,11 +3407,12 @@ function startNewAudit() {
 }
 
 async function _startChecklist() {
+  const scopeLocId = parseInt(document.getElementById('auditLocationScope')?.value || '', 10) || null;
   closeModal();
   try {
-    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: { type: 'checklist' } });
+    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: { type: 'checklist', scope_location_id: scopeLocId } });
     _activeAuditId = audit.id;
-    const { entries } = await api(`/api/inventory-audit/${audit.id}/populate`, { method: 'POST', body: {} });
+    const { entries } = await api(`/api/inventory-audit/${audit.id}/populate`, { method: 'POST', body: { location_id: scopeLocId } });
     await refreshActiveAudit();
     toast(`Checklist loaded — ${entries.length} items`, 'success');
   } catch (err) { toast(err.error || 'Failed to start checklist', 'error'); }
@@ -3512,6 +3565,7 @@ async function submitAuditEntry() {
 // ── Checklist Audit ───────────────────────────────────────────────────
 let _clEntries    = [];
 let _clFilter     = 'all';
+let _clLocFilter  = 'all'; // location chip filter
 let _clSaveTimers = {};
 
 function renderChecklistAudit(audit, entries) {
@@ -3519,10 +3573,38 @@ function renderChecklistAudit(audit, entries) {
   if (!el) return;
   _clEntries = entries.map(e => ({ ...e }));
 
+  // Build unique location list from entries
+  const locMap = new Map(); // id (or null) -> name
+  for (const e of _clEntries) {
+    const key = e.location_id ?? null;
+    if (!locMap.has(key)) locMap.set(key, e.location_name || null);
+  }
+  const locKeys = [...locMap.keys()].sort((a, b) => {
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return (locMap.get(a) || '').localeCompare(locMap.get(b) || '');
+  });
+  const hasLocations = locKeys.some(k => k !== null);
+
+  const scopeBadge = audit.scope_location_id
+    ? `<span style="font-size:12px;background:var(--accent-faint);color:var(--accent);border-radius:4px;padding:2px 7px;border:1px solid var(--accent)">📍 ${esc(entries.find(e => e.location_id === audit.scope_location_id)?.location_name || 'Location scoped')}</span>`
+    : '';
+
+  const locChips = hasLocations ? `
+    <div id="clLocChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+      <button class="chip active" data-cll="all" onclick="setClLocFilter('all')">All Locations</button>
+      ${locKeys.map(k => {
+        const name = locMap.get(k) || 'Unassigned';
+        const cnt  = _clEntries.filter(e => (e.location_id ?? null) === k).length;
+        return `<button class="chip" data-cll="${k ?? 'null'}" onclick="setClLocFilter(${k === null ? 'null' : k})">${esc(name)} <span style="opacity:.6">(${cnt})</span></button>`;
+      }).join('')}
+    </div>` : '';
+
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:14px;color:var(--text-sec)">Checklist Audit #${audit.id}</span>
+        ${scopeBadge}
         <button class="btn-outline btn-sm" onclick="editAuditNotes(${audit.id},${JSON.stringify(esc(audit.notes||''))})">Edit Notes</button>
         <button class="btn-outline btn-sm btn-red" onclick="deleteAudit(${audit.id})">Delete</button>
       </div>
@@ -3554,6 +3636,7 @@ function renderChecklistAudit(audit, entries) {
         <button class="chip"        data-clf="disc"      onclick="setClFilter('disc')">Discrepancy</button>
       </div>
     </div>
+    ${locChips}
 
     <div class="cl-table">
       <div class="cl-thead">
@@ -3566,7 +3649,8 @@ function renderChecklistAudit(audit, entries) {
       <div id="clRows"></div>
     </div>`;
 
-  _clFilter = 'all';
+  _clFilter    = 'all';
+  _clLocFilter = 'all';
   renderClRows();
 }
 
@@ -3597,13 +3681,68 @@ function setClFilter(f) {
   renderClRows();
 }
 
+function setClLocFilter(locId) {
+  _clLocFilter = locId;
+  document.querySelectorAll('#clLocChips .chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.cll === String(locId === null ? 'null' : locId)));
+  renderClRows();
+}
+
+function _entryRowHtml(e) {
+  const isMatch  = e.verified && e.counted_qty === e.expected_qty;
+  const isDisc   = e.verified && e.counted_qty !== e.expected_qty;
+  const bigDiff  = isDisc && Math.abs(e.counted_qty - e.expected_qty) > 2;
+  const rowCls   = isMatch ? 'state-match' : isDisc ? `state-disc${bigDiff ? ' big-diff' : ''}` : '';
+  const ckCls    = isMatch ? 'ck-match' : isDisc ? `ck-disc${bigDiff ? ' big-diff' : ''}` : '';
+  const ckIcon   = isMatch ? '✓' : isDisc ? '!' : '';
+  const diffCnt  = isDisc ? e.counted_qty - e.expected_qty : 0;
+  const statusHtml = isMatch
+    ? `<span class="cl-status s-match">✓ Match</span>`
+    : isDisc
+      ? `<span class="cl-status s-disc${bigDiff ? ' big-diff' : ''}">${diffCnt > 0 ? '+' : ''}${diffCnt}</span>`
+      : `<span class="cl-status s-none">—</span>`;
+  return `
+    <div class="cl-entry-wrap" id="clentry-${e.id}">
+      <div class="cl-row ${rowCls}">
+        <div class="cl-check ${ckCls}" onclick="clToggleCheck(${e.id})">${ckIcon}</div>
+        <div>
+          <div class="cl-name">${esc(e.item_name)}</div>
+          ${e.category_name ? `<div class="cl-cat">${esc(e.category_name)}</div>` : ''}
+        </div>
+        <div class="cl-sys-qty">${e.expected_qty}</div>
+        <div class="cl-count-wrap">
+          <input class="cl-count-input${isDisc ? (bigDiff ? ' big-diff' : ' differs') : ''}"
+            id="clcount-${e.id}" type="number" min="0"
+            value="${e.verified ? e.counted_qty : ''}"
+            placeholder="${e.expected_qty}"
+            oninput="clCountChange(${e.id})"
+            onclick="event.stopPropagation()">
+        </div>
+        ${statusHtml}
+      </div>
+      <div class="cl-reason-row${isDisc ? ' visible' : ''}" id="clreason-${e.id}">
+        <div class="cl-reason-label">⚠ Reason for discrepancy</div>
+        <textarea class="cl-reason-input" rows="2"
+          placeholder="Why does the count differ? (missing, damaged, wrong location…)"
+          oninput="clReasonChange(${e.id})"
+          onclick="event.stopPropagation()">${esc(e.notes || '')}</textarea>
+      </div>
+    </div>`;
+}
+
 function renderClRows() {
   const tbody = document.getElementById('clRows');
   if (!tbody) return;
   const q = (document.getElementById('clSearch')?.value || '').toLowerCase();
 
   const visible = _clEntries.filter(e => {
-    if (q && !`${e.item_name} ${e.category_name || ''}`.toLowerCase().includes(q)) return false;
+    if (q && !`${e.item_name} ${e.category_name || ''} ${e.location_name || ''}`.toLowerCase().includes(q)) return false;
+    // location filter
+    if (_clLocFilter !== 'all') {
+      const wantNull = _clLocFilter === null || _clLocFilter === 'null';
+      if (wantNull) { if (e.location_id !== null && e.location_id !== undefined) return false; }
+      else if ((e.location_id ?? null) !== Number(_clLocFilter)) return false;
+    }
     if (_clFilter === 'unchecked') return !e.verified;
     if (_clFilter === 'match')     return  e.verified && e.counted_qty === e.expected_qty;
     if (_clFilter === 'disc')      return  e.verified && e.counted_qty !== e.expected_qty;
@@ -3615,47 +3754,29 @@ function renderClRows() {
     return;
   }
 
-  tbody.innerHTML = visible.map(e => {
-    const isMatch  = e.verified && e.counted_qty === e.expected_qty;
-    const isDisc   = e.verified && e.counted_qty !== e.expected_qty;
-    const bigDiff  = isDisc && Math.abs(e.counted_qty - e.expected_qty) > 2;
-    const rowCls   = isMatch ? 'state-match' : isDisc ? `state-disc${bigDiff ? ' big-diff' : ''}` : '';
-    const ckCls    = isMatch ? 'ck-match' : isDisc ? `ck-disc${bigDiff ? ' big-diff' : ''}` : '';
-    const ckIcon   = isMatch ? '✓' : isDisc ? '!' : '';
-    const diffCnt  = isDisc ? e.counted_qty - e.expected_qty : 0;
-    const statusHtml = isMatch
-      ? `<span class="cl-status s-match">✓ Match</span>`
-      : isDisc
-        ? `<span class="cl-status s-disc${bigDiff ? ' big-diff' : ''}">${diffCnt > 0 ? '+' : ''}${diffCnt}</span>`
-        : `<span class="cl-status s-none">—</span>`;
+  // Group by location for section headers
+  const groups = [];
+  let lastLocId = '__UNSET__';
+  for (const e of visible) {
+    const locId = e.location_id ?? null;
+    if (locId !== lastLocId) {
+      groups.push({ locId, locName: e.location_name || null, entries: [] });
+      lastLocId = locId;
+    }
+    groups[groups.length - 1].entries.push(e);
+  }
 
-    return `
-      <div class="cl-entry-wrap" id="clentry-${e.id}">
-        <div class="cl-row ${rowCls}">
-          <div class="cl-check ${ckCls}" onclick="clToggleCheck(${e.id})">${ckIcon}</div>
-          <div>
-            <div class="cl-name">${esc(e.item_name)}</div>
-            ${e.category_name ? `<div class="cl-cat">${esc(e.category_name)}</div>` : ''}
-          </div>
-          <div class="cl-sys-qty">${e.expected_qty}</div>
-          <div class="cl-count-wrap">
-            <input class="cl-count-input${isDisc ? (bigDiff ? ' big-diff' : ' differs') : ''}"
-              id="clcount-${e.id}" type="number" min="0"
-              value="${e.verified ? e.counted_qty : ''}"
-              placeholder="${e.expected_qty}"
-              oninput="clCountChange(${e.id})"
-              onclick="event.stopPropagation()">
-          </div>
-          ${statusHtml}
-        </div>
-        <div class="cl-reason-row${isDisc ? ' visible' : ''}" id="clreason-${e.id}">
-          <div class="cl-reason-label">⚠ Reason for discrepancy</div>
-          <textarea class="cl-reason-input" rows="2"
-            placeholder="Why does the count differ? (missing, damaged, wrong location…)"
-            oninput="clReasonChange(${e.id})"
-            onclick="event.stopPropagation()">${esc(e.notes || '')}</textarea>
-        </div>
-      </div>`;
+  const showHeaders = groups.length > 1 || (groups.length === 1 && groups[0].locName !== null);
+
+  tbody.innerHTML = groups.map(g => {
+    const header = showHeaders
+      ? `<div class="cl-location-header">
+           <span class="cl-loc-icon">📍</span>
+           <span class="cl-loc-name">${esc(g.locName || 'Unassigned')}</span>
+           <span class="cl-loc-count">${g.entries.length} item${g.entries.length === 1 ? '' : 's'}</span>
+         </div>`
+      : '';
+    return header + g.entries.map(_entryRowHtml).join('');
   }).join('');
 }
 

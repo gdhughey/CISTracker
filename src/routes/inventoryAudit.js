@@ -34,9 +34,10 @@ router.get('/:id(\\d+)', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const notes = stripHtml((req.body?.notes || '').slice(0, 500));
-  const type  = req.body?.type === 'checklist' ? 'checklist' : 'manual';
-  const audit = inventoryAuditService.create(req.user.id, notes, type);
+  const notes          = stripHtml((req.body?.notes || '').slice(0, 500));
+  const type           = req.body?.type === 'checklist' ? 'checklist' : 'manual';
+  const scopeLocId     = req.body?.scope_location_id ? parseInt(req.body.scope_location_id, 10) : null;
+  const audit          = inventoryAuditService.create(req.user.id, notes, type, scopeLocId || null);
   req.audit('inventory_audit_create', String(audit.id), { type });
   res.status(201).json({ audit });
 });
@@ -48,7 +49,8 @@ router.post('/:id(\\d+)/populate', (req, res) => {
   if (req.user.role !== 'admin' && audit.created_by !== req.user.id) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  inventoryAuditService.populate(id);
+  const locationId = req.body?.location_id ? parseInt(req.body.location_id, 10) : (audit.scope_location_id || null);
+  inventoryAuditService.populate(id, locationId);
   const entries = inventoryAuditService.getEntries(id);
   res.json({ entries });
 });

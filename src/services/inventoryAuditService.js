@@ -27,12 +27,14 @@ function getById(id) {
 
 function getEntries(auditId) {
   return db.prepare(`
-    SELECT ae.*, m.name AS model_name, c.name AS category_name
+    SELECT ae.*, m.name AS model_name, c.name AS category_name,
+           l.name AS location_name
     FROM audit_entries ae
     LEFT JOIN models m ON m.id = ae.model_id
     LEFT JOIN categories c ON c.id = ae.category_id
+    LEFT JOIN locations l ON l.id = ae.location_id
     WHERE ae.audit_id = ?
-    ORDER BY ae.created_at
+    ORDER BY l.name NULLS LAST, lower(ae.item_name)
   `).all(auditId);
 }
 
@@ -43,29 +45,33 @@ function computeExpected(modelId, itemName) {
   return db.prepare("SELECT COUNT(*) AS n FROM equipment WHERE lower(trim(name)) = lower(trim(?))").get(itemName).n;
 }
 
-function create(userId, notes, type) {
+function create(userId, notes, type, scopeLocationId) {
   const info = db.prepare(`
-    INSERT INTO inventory_audits (created_by, notes, type) VALUES (?, ?, ?)
-  `).run(userId, notes || '', type === 'checklist' ? 'checklist' : 'manual');
+    INSERT INTO inventory_audits (created_by, notes, type, scope_location_id) VALUES (?, ?, ?, ?)
+  `).run(userId, notes || '', type === 'checklist' ? 'checklist' : 'manual', scopeLocationId || null);
   return getById(info.lastInsertRowid);
 }
 
-function populate(auditId) {
+function populate(auditId, scopeLocationId) {
+  const whereClause = scopeLocationId ? 'WHERE e.location_id = ?' : '';
+  const params = scopeLocationId ? [scopeLocationId] : [];
   const items = db.prepare(`
     SELECT
       trim(e.name)     AS item_name,
       c.id             AS category_id,
+      e.location_id    AS location_id,
       SUM(e.quantity)  AS total_qty
     FROM equipment e
     LEFT JOIN categories c ON lower(trim(c.name)) = lower(trim(e.category))
-    GROUP BY lower(trim(e.name)), lower(trim(e.category))
+    ${whereClause}
+    GROUP BY lower(trim(e.name)), lower(trim(e.category)), e.location_id
     ORDER BY lower(trim(e.category)), lower(trim(e.name))
-  `).all();
+  `).all(...params);
   const ins = db.prepare(`
-    INSERT INTO audit_entries (audit_id, item_name, category_id, expected_qty, counted_qty, notes, verified)
-    VALUES (?, ?, ?, ?, ?, '', 0)
+    INSERT INTO audit_entries (audit_id, item_name, category_id, location_id, expected_qty, counted_qty, notes, verified)
+    VALUES (?, ?, ?, ?, ?, ?, '', 0)
   `);
-  db.transaction(() => { for (const it of items) ins.run(auditId, it.item_name, it.category_id || null, it.total_qty, it.total_qty); })();
+  db.transaction(() => { for (const it of items) ins.run(auditId, it.item_name, it.category_id || null, it.location_id || null, it.total_qty, it.total_qty); })();
 }
 
 function addEntry(auditId, { model_id, category_id, item_name, counted_qty, notes }) {

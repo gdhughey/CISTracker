@@ -1234,3 +1234,19 @@ input[type="range"]::-moz-range-track {
 .cart-remove-btn:hover { color: var(--red); }
 
 .cl-empty { padding: 28px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+/* Location section headers in checklist */
+.cl-location-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.cl-loc-icon { font-size: 13px; }
+.cl-loc-name { font-size: 12px; font-weight: 700; color: var(--text); text-transform: uppercase; letter-spacing: .04em; }
+.cl-loc-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
