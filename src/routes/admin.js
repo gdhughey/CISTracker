@@ -219,10 +219,10 @@ const locationSchema = z.object({
 });
 
 router.get('/locations', (_req, res) => {
-  const rows = db.prepare(
-    "SELECT * FROM locations ORDER BY name"
-  ).all();
-  res.json({ locations: rows });
+  try {
+    const rows = db.prepare('SELECT * FROM locations ORDER BY name').all();
+    res.json({ locations: rows });
+  } catch { res.json({ locations: [] }); }
 });
 
 router.post('/locations', validate(locationSchema), (req, res) => {
@@ -285,7 +285,8 @@ const categorySchema = z.object({
 });
 
 router.get('/categories', (_req, res) => {
-  res.json({ categories: categoryService.listAll() });
+  try { res.json({ categories: categoryService.listAll() }); }
+  catch { res.json({ categories: [] }); }
 });
 
 router.post('/categories', validate(categorySchema), (req, res) => {
@@ -326,7 +327,8 @@ const modelSchema = z.object({
 });
 
 router.get('/models', (_req, res) => {
-  res.json({ models: modelService.listAll() });
+  try { res.json({ models: modelService.listAll() }); }
+  catch { res.json({ models: [] }); }
 });
 
 router.get('/models/:id(\\d+)', (req, res) => {

@@ -39,18 +39,18 @@ const checkoutSchema = z.object({
 router.use(requireAuth);
 
 router.get('/', (req, res) => {
-  const status = req.query.status;
-  // Admins see everything; users see all items (needed for browse).
-  const items = equipmentService.listAll({ status });
-  // Attach queue counts — one query for all items instead of one per item
   try {
-    const queueService = require('../services/queueService');
-    const queueLengths = queueService.allQueueLengths();
-    for (const item of items) {
-      item.queue_length = queueLengths.get(item.id) || 0;
-    }
-  } catch { /* queue table may not exist yet */ }
-  res.json({ items });
+    const status = req.query.status;
+    const items = equipmentService.listAll({ status });
+    try {
+      const queueService = require('../services/queueService');
+      const queueLengths = queueService.allQueueLengths();
+      for (const item of items) {
+        item.queue_length = queueLengths.get(item.id) || 0;
+      }
+    } catch { /* queue table may not exist yet */ }
+    res.json({ items });
+  } catch { res.json({ items: [] }); }
 });
 
 // Full activity log is admin-only.
