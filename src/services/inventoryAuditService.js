@@ -27,22 +27,17 @@ function getById(id) {
 
 function getEntries(auditId) {
   return db.prepare(`
-    SELECT ae.*, m.name AS model_name, c.name AS category_name,
-           l.name AS location_name
+    SELECT ae.*, m.name AS model_name, c.name AS category_name
     FROM audit_entries ae
     LEFT JOIN models m ON m.id = ae.model_id
     LEFT JOIN categories c ON c.id = ae.category_id
-    LEFT JOIN locations l ON l.id = ae.location_id
     WHERE ae.audit_id = ?
-    ORDER BY l.name NULLS LAST, lower(ae.item_name)
+    ORDER BY lower(ae.item_name)
   `).all(auditId);
 }
 
-function computeExpected(modelId, itemName) {
-  if (modelId) {
-    return db.prepare("SELECT COUNT(*) AS n FROM equipment WHERE model_id = ?").get(modelId).n;
-  }
-  return db.prepare("SELECT COUNT(*) AS n FROM equipment WHERE lower(trim(name)) = lower(trim(?))").get(itemName).n;
+function computeExpected(_modelId, _itemName) {
+  return 0; // equipment table removed; expected qty unknown until items are re-added
 }
 
 function create(userId, notes, type, scopeLocationId) {
@@ -52,26 +47,8 @@ function create(userId, notes, type, scopeLocationId) {
   return getById(info.lastInsertRowid);
 }
 
-function populate(auditId, scopeLocationId) {
-  const whereClause = scopeLocationId ? 'WHERE e.location_id = ?' : '';
-  const params = scopeLocationId ? [scopeLocationId] : [];
-  const items = db.prepare(`
-    SELECT
-      trim(e.name)     AS item_name,
-      c.id             AS category_id,
-      e.location_id    AS location_id,
-      SUM(e.quantity)  AS total_qty
-    FROM equipment e
-    LEFT JOIN categories c ON lower(trim(c.name)) = lower(trim(e.category))
-    ${whereClause}
-    GROUP BY lower(trim(e.name)), lower(trim(e.category)), e.location_id
-    ORDER BY lower(trim(e.category)), lower(trim(e.name))
-  `).all(...params);
-  const ins = db.prepare(`
-    INSERT INTO audit_entries (audit_id, item_name, category_id, location_id, expected_qty, counted_qty, notes, verified)
-    VALUES (?, ?, ?, ?, ?, ?, '', 0)
-  `);
-  db.transaction(() => { for (const it of items) ins.run(auditId, it.item_name, it.category_id || null, it.location_id || null, it.total_qty, it.total_qty); })();
+function populate(_auditId, _scopeLocationId) {
+  // equipment table removed; checklist populate is a no-op until items are re-added
 }
 
 function addEntry(auditId, { model_id, category_id, item_name, counted_qty, notes }) {

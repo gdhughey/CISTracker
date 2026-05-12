@@ -13,12 +13,10 @@ function listAll({ status, userId, assignedTo, limit = 100 } = {}) {
     SELECT t.*,
            u.username AS reporter_username,
            a.username AS assigned_username,
-           e.name AS equipment_name,
            (SELECT COUNT(*) FROM ticket_comments tc WHERE tc.ticket_id = t.id) AS comment_count
     FROM tickets t
     JOIN users u ON u.id = t.user_id
     LEFT JOIN users a ON a.id = t.assigned_to
-    LEFT JOIN equipment e ON e.id = t.equipment_id
     ${where}
     ORDER BY
       CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
@@ -31,12 +29,10 @@ function getById(id) {
   return db.prepare(`
     SELECT t.*,
            u.username AS reporter_username, u.email AS reporter_email,
-           a.username AS assigned_username,
-           e.name AS equipment_name
+           a.username AS assigned_username
     FROM tickets t
     JOIN users u ON u.id = t.user_id
     LEFT JOIN users a ON a.id = t.assigned_to
-    LEFT JOIN equipment e ON e.id = t.equipment_id
     WHERE t.id = ?
   `).get(id);
 }

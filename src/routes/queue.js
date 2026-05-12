@@ -48,7 +48,8 @@ router.delete('/:equipmentId(\\d+)/user/:userId(\\d+)', requireRole('admin'), (r
 
 // My queue positions across all items
 router.get('/my/positions', (req, res) => {
-  res.json({ queues: queueService.getUserQueues(req.user.id) });
+  try { res.json({ queues: queueService.getUserQueues(req.user.id) }); }
+  catch { res.json({ queues: [] }); }
 });
 
 module.exports = router;

@@ -200,8 +200,10 @@ router.post('/users/import', csvUpload.single('file'), async (req, res) => {
 });
 
 router.get('/overdue', (req, res) => {
-  const days = parseInt(req.query.days, 10) || 3;
-  res.json({ items: equipmentService.getOverdue(days) });
+  try {
+    const days = parseInt(req.query.days, 10) || 3;
+    res.json({ items: equipmentService.getOverdue(days) });
+  } catch { res.json({ items: [] }); }
 });
 
 router.get('/audit', (req, res) => {

@@ -112,16 +112,20 @@ router.get('/:id(\\d+)', (req, res) => {
 });
 
 router.post('/', requireRole('admin'), validate(createSchema), (req, res) => {
-  const item = equipmentService.create(req.body);
-  req.audit('equipment_create', String(item.id), { name: item.name });
-  res.status(201).json({ item });
+  try {
+    const item = equipmentService.create(req.body);
+    req.audit('equipment_create', String(item.id), { name: item.name });
+    res.status(201).json({ item });
+  } catch { res.status(503).json({ error: 'Inventory is being rebuilt — items cannot be added yet.' }); }
 });
 
 router.put('/:id(\\d+)', requireRole('admin'), validate(updateSchema), (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const item = equipmentService.update(id, req.body);
-  req.audit('equipment_update', String(id));
-  res.json({ item });
+  try {
+    const id = parseInt(req.params.id, 10);
+    const item = equipmentService.update(id, req.body);
+    req.audit('equipment_update', String(id));
+    res.json({ item });
+  } catch { res.status(503).json({ error: 'Inventory is being rebuilt.' }); }
 });
 
 router.delete('/:id(\\d+)', requireRole('admin'), (req, res) => {
