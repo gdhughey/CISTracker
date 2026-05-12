@@ -577,10 +577,9 @@ function buildFilters() {
       ...managedLocs.map(l => l.name),
       ...freeTextNames,
     ];
-    if (allLocNames.length <= 1) {
-      locContainer.closest?.('.filter-row')?.classList.add('hidden');
+    if (allLocNames.length === 0) {
+      locContainer.innerHTML = '';
     } else {
-      locContainer.closest?.('.filter-row')?.classList.remove('hidden');
       locContainer.innerHTML =
         `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
         allLocNames.map(name =>
