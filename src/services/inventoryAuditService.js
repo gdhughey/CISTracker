@@ -47,8 +47,37 @@ function create(userId, notes, type, scopeLocationId) {
   return getById(info.lastInsertRowid);
 }
 
-function populate(_auditId, _scopeLocationId) {
-  // equipment table removed; checklist populate is a no-op until items are re-added
+function populate(auditId, scopeLocationId) {
+  // When scoping by location, match items by location_id FK OR free-text location name
+  let whereClause = '';
+  let params = [];
+  if (scopeLocationId) {
+    const loc = db.prepare('SELECT name FROM locations WHERE id = ?').get(scopeLocationId);
+    const locName = loc ? loc.name : null;
+    whereClause = locName
+      ? 'WHERE (e.location_id = ? OR lower(trim(e.location)) = lower(trim(?)))'
+      : 'WHERE e.location_id = ?';
+    params = locName ? [scopeLocationId, locName] : [scopeLocationId];
+  }
+  const items = db.prepare(`
+    SELECT
+      trim(e.name)     AS item_name,
+      c.id             AS category_id,
+      e.location_id    AS location_id,
+      SUM(e.quantity)  AS total_qty
+    FROM equipment e
+    LEFT JOIN categories c ON lower(trim(c.name)) = lower(trim(e.category))
+    ${whereClause}
+    GROUP BY lower(trim(e.name)), lower(trim(e.category)), e.location_id
+    ORDER BY lower(trim(e.category)), lower(trim(e.name))
+  `).all(...params);
+  const ins = db.prepare(`
+    INSERT INTO audit_entries (audit_id, item_name, category_id, location_id, expected_qty, counted_qty, notes, verified)
+    VALUES (?, ?, ?, ?, ?, ?, '', 0)
+  `);
+  db.transaction(() => {
+    for (const it of items) ins.run(auditId, it.item_name, it.category_id || null, it.location_id || null, it.total_qty, it.total_qty);
+  })();
 }
 
 function addEntry(auditId, { model_id, category_id, item_name, counted_qty, notes }) {

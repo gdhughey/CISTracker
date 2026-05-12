@@ -564,11 +564,10 @@ function buildFilters() {
       ).join('');
   }
 
-  // Location chips — from managed locations table + free-text fallback for unmatched items
+  // Location chips — all managed locations + free-text fallback for unlinked items
   const locContainer = document.getElementById('locChips');
   if (locContainer) {
-    const usedLocIds = new Set(ITEMS.map(i => i.location_id).filter(Boolean));
-    const managedLocs = LOCATIONS_LIST.filter(l => usedLocIds.has(l.id));
+    const managedLocs = LOCATIONS_LIST;
     const managedNames = new Set(managedLocs.map(l => l.name.toLowerCase()));
     // Include free-text locations for items not linked to a managed location
     const freeTextNames = [...new Set(
@@ -3370,33 +3369,42 @@ async function loadAuditView() {
 function startNewAudit() {
   const totalItems = ITEMS.length;
   const locOptions = LOCATIONS_LIST.map(l =>
-    `<option value="${l.id}">${esc(l.name)}</option>`).join('');
+    `<option value="${l.id}">${esc(l.name)} (${ITEMS.filter(i => i.location_id === l.id).length} items)</option>`
+  ).join('');
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <div class="modal-title">Start Inventory Audit</div>
+    <div class="modal-title" style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">📋</span>
+      <div>
+        <div>Start Inventory Audit</div>
+        <div style="font-size:12px;font-weight:400;color:var(--text-muted);margin-top:2px">Choose an audit type to begin</div>
+      </div>
+    </div>
     <div class="modal-body">
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Choose how you want to run this audit:</p>
-      <div style="margin-bottom:14px">
-        <label class="form-label" style="margin-bottom:4px;display:block">Scope to location <span style="opacity:.5;font-weight:400">(optional — leave blank for all)</span></label>
-        <select id="auditLocationScope" class="form-input">
-          <option value="">All locations (${totalItems} items)</option>
+      <div class="audit-scope-row">
+        <span class="scope-icon">📍</span>
+        <label>Scope</label>
+        <select id="auditLocationScope">
+          <option value="">All locations — ${totalItems} item${totalItems !== 1 ? 's' : ''}</option>
           ${locOptions}
         </select>
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
-        <div class="audit-type-card" onclick="_startChecklist()">
-          <div class="atc-icon">✅</div>
+      <div class="audit-type-cards">
+        <div class="audit-type-card atc-checklist" onclick="_startChecklist()">
+          <div class="atc-icon-wrap">✅</div>
           <div>
             <div class="atc-title">Checklist Audit</div>
-            <div class="atc-desc">Pre-loads inventory items as a checklist grouped by location. Check off each one and flag discrepancies.</div>
+            <div class="atc-desc">Pre-loads all inventory items as a checklist grouped by location. Verify each one and flag discrepancies.</div>
           </div>
+          <div class="atc-cta">Start checklist →</div>
         </div>
-        <div class="audit-type-card" onclick="_startManual()">
-          <div class="atc-icon">📝</div>
+        <div class="audit-type-card atc-manual" onclick="_startManual()">
+          <div class="atc-icon-wrap">✏️</div>
           <div>
             <div class="atc-title">Manual Audit</div>
-            <div class="atc-desc">Manually add items one by one as you count them.</div>
+            <div class="atc-desc">Add items one by one as you count them. Best for spot-checks or partial audits.</div>
           </div>
+          <div class="atc-cta">Start manual →</div>
         </div>
       </div>
       <div class="form-actions">
