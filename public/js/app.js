@@ -653,10 +653,33 @@ function setStatusFilter(s) {
   renderItems();
 }
 
+// Smart search — splits query into tokens, each must match (substring OR 1-char fuzzy for 4+ char tokens)
+function searchMatch(hay, query) {
+  if (!query) return true;
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const h = hay.toLowerCase();
+  return tokens.every(tok => {
+    if (h.includes(tok)) return true;
+    if (tok.length < 4) return false;
+    // Fuzzy: check if any word in haystack is within edit distance 1
+    const hayWords = h.split(/[\s\-_./]+/);
+    return hayWords.some(w => w.length >= tok.length - 1 && w.length <= tok.length + 1 && editDist(tok, w) <= 1);
+  });
+}
+function editDist(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+}
+
 function filterItems() { renderItems(); }
 
 function renderItems() {
-  const q = (document.getElementById('searchInput').value || '').toLowerCase();
+  const q = (document.getElementById('searchInput').value || '').trim();
   // Build filtered list
   renderVisible = [];
   for (const item of ITEMS) {
@@ -673,8 +696,8 @@ function renderItems() {
       else if (item.location_id !== loc.id && item.location !== locFilter) continue;
     }
     if (q) {
-      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location}`.toLowerCase();
-      if (!hay.includes(q)) continue;
+      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location} ${item.product_number || ''}`;
+      if (!searchMatch(hay, q)) continue;
     }
     renderVisible.push(item);
   }
@@ -1750,7 +1773,12 @@ async function editItem(id) {
     <div class="modal-name">${esc(item.name)}</div>
     <div class="modal-body">
       <div class="form-group"><label>Name</label><input id="editName" value="${esc(item.name)}"></div>
-      <div class="form-group"><label>Category</label><input id="editCat" value="${esc(item.category || '')}"></div>
+      <div class="form-group"><label>Category</label>
+        <select id="editCat" class="form-input">
+          <option value="">— None —</option>
+          ${CATEGORIES.map(c => `<option value="${esc(c.name)}"${item.category === c.name ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select>
+      </div>
       <div class="form-group"><label>Location</label>
         <select id="editLocId" class="form-input">
           <option value="">— None —</option>
@@ -1894,12 +1922,12 @@ async function loadCheckinout() {
 }
 
 function manualSearchItems() {
-  const q = (document.getElementById('manualSearch').value || '').toLowerCase();
+  const q = (document.getElementById('manualSearch').value || '').trim();
   const container = document.getElementById('manualResults');
   if (!q) { container.innerHTML = ''; return; }
   const results = ITEMS.filter(i => {
-    const hay = `${i.name} ${i.barcode} ${i.serial_number} ${i.category}`.toLowerCase();
-    return hay.includes(q);
+    const hay = `${i.name} ${i.barcode} ${i.serial_number} ${i.category} ${i.product_number || ''}`;
+    return searchMatch(hay, q);
   }).slice(0, 20);
   container.innerHTML = results.map(item => {
     const st = getItemStatus(item);
@@ -3116,6 +3144,26 @@ async function deleteCategory(id) {
 //  AUDIT LOG (admin)
 // ═══════════════════════════════════════════════════════════════════════
 
+const LOGIN_ACTIONS = new Set(['login_success','login_success_mfa','login_failed','login_mfa_required','mfa_failed','logout','register']);
+
+function parseUserAgent(ua) {
+  if (!ua) return '';
+  let os = '';
+  if (/Windows NT 10|Windows 11/.test(ua))      os = 'Windows';
+  else if (/Windows/.test(ua))                   os = 'Windows';
+  else if (/iPhone|iPad/.test(ua))               os = /iPad/.test(ua) ? 'iPad' : 'iPhone';
+  else if (/Android/.test(ua))                   os = 'Android';
+  else if (/Mac OS X/.test(ua))                  os = 'Mac';
+  else if (/Linux/.test(ua))                     os = 'Linux';
+  let browser = '';
+  if (/Edg\//.test(ua))                          browser = 'Edge';
+  else if (/OPR\/|Opera/.test(ua))               browser = 'Opera';
+  else if (/Chrome\//.test(ua))                  browser = 'Chrome';
+  else if (/Firefox\//.test(ua))                 browser = 'Firefox';
+  else if (/Safari\//.test(ua))                  browser = 'Safari';
+  return [browser, os].filter(Boolean).join(' · ');
+}
+
 async function loadAudit() {
   const container = document.getElementById('auditList');
   try {
@@ -3131,12 +3179,20 @@ async function loadAudit() {
       const userHtml = e.username
         ? `<a href="#" class="audit-link" onclick="openUserFromAudit(event,${e.user_id || 0})">${esc(e.username)}</a>`
         : '—';
+      const isLogin = LOGIN_ACTIONS.has(e.action);
+      const ipHtml = isLogin && e.ip_address
+        ? `<span class="audit-ip">📍 ${esc(e.ip_address)}</span>`
+        : '';
+      const deviceHtml = isLogin && e.user_agent
+        ? `<span class="audit-device">${esc(parseUserAgent(e.user_agent))}</span>`
+        : '';
       return `
         <div class="audit-row">
           <span class="action">${esc(e.action)}</span>
           <span class="target">${targetHtml}</span>
           <span style="font-size:11px;color:var(--text-muted)">${userHtml}</span>
           <span class="date">${fmtDateTime(e.created_at)}</span>
+          ${ipHtml || deviceHtml ? `<span class="audit-meta">${ipHtml}${deviceHtml}</span>` : '<span></span>'}
         </div>`;
     }).join('');
   } catch {
