@@ -71,7 +71,7 @@ function findByIdentifier({ barcode, serial_number }) {
   `).get(...params) || null;
 }
 
-function create({ name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, quantity }) {
+function create({ name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, product_number, quantity }) {
   // Server-side dedupe: if a barcode or serial number is supplied and an
   // equipment row already exists with that identifier, return that row
   // instead of creating a duplicate. This prevents the checkout flow from
@@ -81,14 +81,14 @@ function create({ name, type, serial_number, barcode, category, location, locati
   const existing = findByIdentifier({ barcode, serial_number });
   if (existing) return existing;
   const info = db.prepare(`
-    INSERT INTO equipment (name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, quantity)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, type || '', serial_number || '', barcode || '', category || '', location || '', location_id || null, model_id || null, image_path || null, notes || '', quantity || 1);
+    INSERT INTO equipment (name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, product_number, quantity)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, type || '', serial_number || '', barcode || '', category || '', location || '', location_id || null, model_id || null, image_path || null, notes || '', product_number || '', quantity || 1);
   return getById(info.lastInsertRowid);
 }
 
 function update(id, fields) {
-  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'location', 'location_id', 'model_id', 'notes', 'image_path'];
+  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'location', 'location_id', 'model_id', 'notes', 'image_path', 'product_number'];
   const sets = [];
   const params = [];
   for (const key of allowed) {

@@ -19,8 +19,9 @@ const createSchema = z.object({
   location:      z.string().max(200).optional().transform(v => stripHtml(v || '')),
   location_id:   z.number().int().positive().optional().nullable(),
   model_id:      z.number().int().positive().optional().nullable(),
-  notes:         z.string().max(2000).optional().transform(v => stripHtml(v || '')),
-  quantity:      z.number().int().min(1).max(10000).optional().default(1),
+  notes:          z.string().max(2000).optional().transform(v => stripHtml(v || '')),
+  product_number: z.string().max(200).optional().transform(v => stripHtml(v || '')),
+  quantity:       z.number().int().min(1).max(10000).optional().default(1),
 });
 
 const updateSchema = createSchema.partial();

@@ -1510,6 +1510,8 @@ function openAddItemModal() {
       </div>
       <div class="form-group"><label class="form-label">Quantity</label>
         <input id="addQty" class="form-input" type="number" min="1" max="10000" value="1" placeholder="1" oninput="onAddQtyChange()"></div>
+      <div class="form-group"><label class="form-label">Product Number</label>
+        <input id="addProductNumber" class="form-input" placeholder="Optional — model/part number"></div>
       <div id="addSingleUnit">
         <div class="form-group"><label class="form-label">Serial Number</label>
           <input id="addSerial" class="form-input" placeholder="Optional"></div>
@@ -1517,12 +1519,8 @@ function openAddItemModal() {
           <input id="addBarcode" class="form-input" placeholder="Optional"></div>
       </div>
       <div id="addMultiUnits" class="hidden">
-        <div class="form-group" style="margin-bottom:10px">
-          <label class="form-label">Product Number <span style="font-weight:400;color:var(--text-muted)">(applies to all units)</span></label>
-          <input id="addProductNumber" class="form-input" placeholder="Type once to fill all rows" oninput="applyProductNumber(this.value)">
-        </div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Override individual serial &amp; barcode below — leave blank for units you don't have that info for yet.</div>
-        <div id="addUnitRows" style="max-height:240px;overflow-y:auto;padding-right:4px"></div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Enter serial &amp; barcode for each unit — leave blank for units you don't have that info for yet.</div>
+        <div id="addUnitRows" style="max-height:280px;overflow-y:auto;padding-right:4px"></div>
       </div>
       <div class="form-group"><label class="form-label">Location</label>
         <select id="addLocId" class="form-input">
@@ -1573,12 +1571,6 @@ function onAddQtyChange() {
   }
 }
 
-function applyProductNumber(val) {
-  document.querySelectorAll('#addUnitRows .unit-serial').forEach(input => {
-    input.value = val;
-  });
-}
-
 async function submitAddItem() {
   const name = document.getElementById('addName')?.value.trim();
   if (!name) { toast('Name is required', 'error'); return; }
@@ -1609,6 +1601,7 @@ async function submitAddItem() {
     location: locName,
     location_id,
     notes: document.getElementById('addNotes')?.value.trim() || '',
+    product_number: document.getElementById('addProductNumber')?.value.trim() || '',
   };
 
   // Single unit or bulk-no-serials: use existing single payload
