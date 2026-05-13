@@ -110,7 +110,9 @@ router.get('/:id(\\d+)', (req, res) => {
 });
 
 router.post('/', requireRole('admin'), validate(createSchema), (req, res) => {
-  const item = equipmentService.create(req.body);
+  const body = { ...req.body };
+  if (!body.barcode) body.barcode = equipmentService.nextAssetId();
+  const item = equipmentService.create(body);
   req.audit('equipment_create', String(item.id), { name: item.name });
   res.status(201).json({ item });
 });
