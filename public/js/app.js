@@ -481,6 +481,7 @@ function switchView(view) {
   if (view === 'queue') loadMyQueue();
   if (view === 'users') loadUsers();
   if (view === 'locations') loadLocations();
+  if (view === 'categories') loadCategories();
   if (view === 'audit') loadAudit();
   if (view === 'passkeys') loadPasskeys();
   if (view === 'service-tickets') loadServiceTickets();
@@ -566,27 +567,33 @@ function buildFilters() {
       ).join('');
   }
 
-  // Location chips — all managed locations + free-text fallback for unlinked items
-  const locContainer = document.getElementById('locChips');
-  if (locContainer) {
+  // Location chips — collapse into dropdown when > 5 locations
+  const locWrap = document.getElementById('locChipsWrap');
+  if (locWrap) {
     const managedLocs = LOCATIONS_LIST;
     const managedNames = new Set(managedLocs.map(l => l.name.toLowerCase()));
-    // Include free-text locations for items not linked to a managed location
     const freeTextNames = [...new Set(
       ITEMS.map(i => i.location).filter(s => s && !managedNames.has(s.toLowerCase()))
     )].sort();
-    const allLocNames = [
-      ...managedLocs.map(l => l.name),
-      ...freeTextNames,
-    ];
+    const allLocNames = [...managedLocs.map(l => l.name), ...freeTextNames];
     if (allLocNames.length === 0) {
-      locContainer.innerHTML = '';
+      locWrap.innerHTML = '';
     } else {
-      locContainer.innerHTML =
+      const chipsHtml =
         `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
         allLocNames.map(name =>
           `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter('${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(name)}</button>`
         ).join('');
+      if (allLocNames.length > 5) {
+        const activeLabel = locFilter !== 'All' ? ` · ${esc(locFilter)}` : '';
+        locWrap.innerHTML = `
+          <details id="locDetails" class="loc-filter-details"${locFilter !== 'All' ? ' open' : ''}>
+            <summary class="loc-filter-summary">📍 Location${activeLabel}</summary>
+            <div class="cat-chips" style="padding:6px 24px 10px">${chipsHtml}</div>
+          </details>`;
+      } else {
+        locWrap.innerHTML = `<div class="cat-chips">${chipsHtml}</div>`;
+      }
     }
   }
 }
@@ -3006,6 +3013,102 @@ async function deleteLocation(id) {
     toast('Location deleted', 'success');
     closeModal();
     loadLocations();
+  } catch (err) { toast(err.error || 'Failed to delete', 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CATEGORIES (admin)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function loadCategories() {
+  const container = document.getElementById('categoriesList');
+  if (!container) return;
+  try {
+    const { categories } = await api('/api/admin/categories');
+    CATEGORIES = categories;
+    buildFilters();
+    if (!categories.length) {
+      container.innerHTML = '<div class="empty-state"><p>No categories yet. Add your first category above.</p></div>';
+      return;
+    }
+    container.innerHTML = categories.map(cat => `
+      <div class="user-row" onclick="openEditCategoryModal(${cat.id})" style="cursor:pointer">
+        <div class="user-info">
+          <div class="user-name">${esc(cat.name)}</div>
+        </div>
+      </div>
+    `).join('');
+  } catch {
+    container.innerHTML = '<div class="empty-state"><p>Failed to load categories</p></div>';
+  }
+}
+
+function openCreateCategoryModal() {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Add Category</div>
+    <div class="form-group">
+      <label class="form-label">Name <span style="color:var(--red)">*</span></label>
+      <input id="catName" class="form-input" placeholder="e.g. Laptops" autofocus>
+    </div>
+    <div class="form-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitCreateCategory()">Add Category</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function submitCreateCategory() {
+  const name = document.getElementById('catName')?.value.trim();
+  if (!name) { toast('Name is required', 'error'); return; }
+  try {
+    await api('/api/admin/categories', { method: 'POST', body: { name } });
+    toast('Category added', 'success');
+    closeModal();
+    loadCategories();
+  } catch (err) { toast(err.error || 'Failed to add category', 'error'); }
+}
+
+function openEditCategoryModal(id) {
+  const cat = CATEGORIES.find(c => c.id === id);
+  if (!cat) { toast('Category not found', 'error'); return; }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="modal-title">Edit Category</div>
+    <div class="form-group">
+      <label class="form-label">Name <span style="color:var(--red)">*</span></label>
+      <input id="catName" class="form-input" value="${esc(cat.name)}">
+    </div>
+    <div class="form-actions" style="justify-content:space-between">
+      <button class="btn-outline btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteCategory(${cat.id})">Delete</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="submitEditCategory(${cat.id})">Save</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function submitEditCategory(id) {
+  const name = document.getElementById('catName')?.value.trim();
+  if (!name) { toast('Name is required', 'error'); return; }
+  try {
+    await api(`/api/admin/categories/${id}`, { method: 'PUT', body: { name } });
+    toast('Category updated', 'success');
+    closeModal();
+    loadCategories();
+  } catch (err) { toast(err.error || 'Failed to update', 'error'); }
+}
+
+async function deleteCategory(id) {
+  if (!confirm('Delete this category? Equipment using it will lose their category assignment.')) return;
+  try {
+    await api(`/api/admin/categories/${id}`, { method: 'DELETE' });
+    toast('Category deleted', 'success');
+    closeModal();
+    loadCategories();
   } catch (err) { toast(err.error || 'Failed to delete', 'error'); }
 }
 

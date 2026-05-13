@@ -1303,3 +1303,23 @@ input[type="range"]::-moz-range-track {
 .cl-loc-icon { font-size: 13px; }
 .cl-loc-name { font-size: 12px; font-weight: 700; color: var(--text); text-transform: uppercase; letter-spacing: .04em; }
 .cl-loc-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
+/* Location filter dropdown (collapses when > 5 locations) */
+.loc-filter-details { border-bottom: 1px solid var(--border); }
+.loc-filter-details[open] { border-bottom: none; }
+.loc-filter-summary {
+  list-style: none;
+  padding: 6px 24px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.loc-filter-summary::-webkit-details-marker { display: none; }
+.loc-filter-summary::after { content: '▾'; font-size: 10px; margin-left: 2px; }
+.loc-filter-details[open] .loc-filter-summary::after { content: '▴'; }
+.loc-filter-summary:hover { color: var(--text); }

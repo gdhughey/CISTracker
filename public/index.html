@@ -163,6 +163,9 @@
         <div class="nav-item" data-view="locations" onclick="switchView('locations')">
           Locations
         </div>
+        <div class="nav-item" data-view="categories" onclick="switchView('categories')">
+          Categories
+        </div>
         <div class="nav-item" data-view="audit" onclick="switchView('audit')">
           Audit Log
         </div>
@@ -203,7 +206,7 @@
         <div class="stat-card"><div class="stat-num c-red" id="statOverdue">0</div><div class="stat-label">Overdue</div></div>
       </div>
       <div class="cat-chips" id="catChips"></div>
-      <div class="cat-chips" id="locChips"></div>
+      <div id="locChipsWrap"></div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -355,6 +358,17 @@
           <button class="btn-primary" onclick="openCreateLocationModal()">+ Add Location</button>
         </div>
         <div id="locationsList"></div>
+      </div>
+    </div>
+
+    <!-- ═══ CATEGORIES VIEW (admin) ═══ -->
+    <div id="view-categories" class="hidden">
+      <div class="admin-view">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 class="view-heading">Categories</h2>
+          <button class="btn-primary" onclick="openCreateCategoryModal()">+ Add Category</button>
+        </div>
+        <div id="categoriesList"></div>
       </div>
     </div>
 
