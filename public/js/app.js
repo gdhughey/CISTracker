@@ -1516,7 +1516,7 @@ function openAddItemModal() {
       </div>
       <div id="addMultiUnits" class="hidden">
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Enter serial &amp; barcode for each unit — leave blank for units you don't have that info for yet.</div>
-        <div id="addUnitRows"></div>
+        <div id="addUnitRows" style="max-height:280px;overflow-y:auto;padding-right:4px"></div>
       </div>
       <div class="form-group"><label class="form-label">Location</label>
         <select id="addLocId" class="form-input">
