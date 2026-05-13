@@ -26,7 +26,7 @@ const config = {
 
   session: {
     secret: required('SESSION_SECRET'),
-    idleMinutes: int(process.env.SESSION_IDLE_MINUTES, 15),
+    idleMinutes: int(process.env.SESSION_IDLE_MINUTES, 60),
     absoluteHours: int(process.env.SESSION_ABSOLUTE_HOURS, 8),
     cookieName: 'cyberlab_sid',
   },

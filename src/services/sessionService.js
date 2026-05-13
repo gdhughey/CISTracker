@@ -51,12 +51,6 @@ function lookup(sid, req) {
       return null;
     }
   }
-  // Bind to IP/UA — if either changed dramatically, kill the session.
-  // (UA can drift slightly across browser updates so we only compare IP strictly.)
-  if (session.ip_address && session.ip_address !== req.ip) {
-    deleteStmt.run(sid);
-    return null;
-  }
   // Sliding idle expiry
   touchStmt.run(idleExpiry(), sid);
   const user = userService.getById(session.user_id);

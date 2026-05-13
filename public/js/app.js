@@ -300,6 +300,8 @@ async function showApp() {
   const adminLoads = ME.role === 'admin' ? [loadOverdueCount(), loadTicketCounts(), loadSvcTicketBadge()] : [];
   await Promise.all([loadItems(), updateQueueBadge(), ...adminLoads]);
   switchView('inventory');
+  // Keep session alive — silent ping every 4 minutes so idle users aren't logged out
+  setInterval(() => api('/api/auth/me').catch(() => {}), 4 * 60 * 1000);
   // First-time onboarding tour — only fires once per user/browser
   maybeStartTour();
 }
