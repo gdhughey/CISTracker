@@ -1550,15 +1550,22 @@ function onAddQtyChange() {
     // Build/update unit rows — preserve existing values
     const existing = rows ? [...rows.querySelectorAll('.unit-row')] : [];
     const currentCount = existing.length;
+    const baseName = document.getElementById('addName')?.value.trim() || '';
     if (rows) {
       if (qty > currentCount) {
         for (let i = currentCount; i < qty; i++) {
           const div = document.createElement('div');
           div.className = 'unit-row';
-          div.style.cssText = 'display:grid;grid-template-columns:32px 1fr 1fr;gap:6px;align-items:center;margin-bottom:6px';
-          div.innerHTML = `<span style="font-size:12px;color:var(--text-muted);text-align:right">${i+1}</span>
-            <input class="form-input unit-serial" placeholder="Serial #" style="font-size:13px">
-            <input class="form-input unit-barcode" placeholder="Asset ID / Barcode" style="font-size:13px">`;
+          div.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px';
+          div.innerHTML = `
+            <div style="display:grid;grid-template-columns:28px 1fr;gap:6px;align-items:center;margin-bottom:5px">
+              <span style="font-size:11px;color:var(--text-muted);text-align:right;font-weight:600">${i+1}</span>
+              <input class="form-input unit-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <input class="form-input unit-serial" placeholder="Serial #" style="font-size:12px">
+              <input class="form-input unit-barcode" placeholder="Asset ID / Barcode" style="font-size:12px">
+            </div>`;
           rows.appendChild(div);
         }
       } else {
@@ -1588,10 +1595,11 @@ async function submitAddItem() {
   if (qty > 1) {
     const unitRows = document.querySelectorAll('#addUnitRows .unit-row');
     const collected = [...unitRows].map(r => ({
+      name:          r.querySelector('.unit-name')?.value.trim() || '',
       serial_number: r.querySelector('.unit-serial')?.value.trim() || '',
       barcode:       r.querySelector('.unit-barcode')?.value.trim() || '',
     }));
-    const hasAny = collected.some(u => u.serial_number || u.barcode);
+    const hasAny = collected.some(u => u.name || u.serial_number || u.barcode);
     if (hasAny) units = collected;
   }
 

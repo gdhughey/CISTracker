@@ -227,6 +227,7 @@ const unitSchema = z.object({
   serial_number: z.string().max(200).optional().transform(v => stripHtml(v || '')),
   barcode:       z.string().max(200).optional().transform(v => stripHtml(v || '')),
   notes:         z.string().max(500).optional().transform(v => stripHtml(v || '')),
+  name:          z.string().max(200).optional().transform(v => stripHtml(v || '')),
 });
 
 router.get('/:id(\\d+)/units', (req, res, next) => {

@@ -5,21 +5,22 @@ function listByEquipment(equipmentId) {
   return db.prepare('SELECT * FROM equipment_units WHERE equipment_id = ? ORDER BY id').all(equipmentId);
 }
 
-function create(equipmentId, { serial_number = '', barcode = '', notes = '' }) {
+function create(equipmentId, { serial_number = '', barcode = '', notes = '', name = '' }) {
   const info = db.prepare(
-    'INSERT INTO equipment_units (equipment_id, serial_number, barcode, notes) VALUES (?, ?, ?, ?)'
-  ).run(equipmentId, serial_number.trim(), barcode.trim(), notes.trim());
+    'INSERT INTO equipment_units (equipment_id, serial_number, barcode, notes, name) VALUES (?, ?, ?, ?, ?)'
+  ).run(equipmentId, serial_number.trim(), barcode.trim(), notes.trim(), name.trim());
   return db.prepare('SELECT * FROM equipment_units WHERE id = ?').get(info.lastInsertRowid);
 }
 
-function update(id, { serial_number, barcode, notes }) {
+function update(id, { serial_number, barcode, notes, name }) {
   const unit = db.prepare('SELECT * FROM equipment_units WHERE id = ?').get(id);
   if (!unit) throw Object.assign(new Error('Unit not found'), { status: 404 });
-  db.prepare('UPDATE equipment_units SET serial_number = ?, barcode = ?, notes = ? WHERE id = ?')
+  db.prepare('UPDATE equipment_units SET serial_number = ?, barcode = ?, notes = ?, name = ? WHERE id = ?')
     .run(
       serial_number !== undefined ? serial_number.trim() : unit.serial_number,
       barcode       !== undefined ? barcode.trim()       : unit.barcode,
       notes         !== undefined ? notes.trim()         : unit.notes,
+      name          !== undefined ? name.trim()          : unit.name,
       id,
     );
   return db.prepare('SELECT * FROM equipment_units WHERE id = ?').get(id);
