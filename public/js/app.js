@@ -3323,17 +3323,25 @@ async function loadPasskeys() {
 
 async function registerPasskey() {
   if (!swa()) { toast('Passkey support not loaded — refresh the page', 'error'); return; }
-  if (!window.PublicKeyCredential) { toast('Browser does not support passkeys', 'error'); return; }
+  if (!window.PublicKeyCredential) { toast('This browser does not support passkeys', 'error'); return; }
   try {
     const options = await api('/api/passkey/register-options', { method: 'POST', body: {} });
     let attestation;
     try {
       attestation = await swa().startRegistration({ optionsJSON: options });
     } catch (err) {
-      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) return; // user cancelled
+      if (err && err.name === 'AbortError') return; // user cancelled via browser UI
+      if (err && err.name === 'NotAllowedError') {
+        toast('Browser blocked passkey registration — make sure you\'re on HTTPS and your device has Windows Hello, Face ID, or a security key set up.', 'error');
+        return;
+      }
+      if (err && err.name === 'InvalidStateError') {
+        toast('This device\'s passkey is already registered on your account.', 'error');
+        return;
+      }
       throw err;
     }
-    const deviceName = prompt('Name this passkey (e.g. "iPhone 15", "Lab desktop"):', '') || '';
+    const deviceName = prompt('Name this passkey (e.g. "Windows PC", "iPhone 15"):', '') || '';
     await api('/api/passkey/register-verify', {
       method: 'POST',
       body: { response: attestation, deviceName: deviceName.trim() },
