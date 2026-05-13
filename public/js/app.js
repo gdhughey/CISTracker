@@ -1703,12 +1703,13 @@ async function submitAddItem() {
     if (ME?.role === 'admin') {
       let createdItems = [];
       if (units) {
-        // Create one row per unit with individual serial/barcode
-        for (const u of units) {
-          const { item } = await api('/api/equipment', { method: 'POST', body: { ...basePayload, ...u } });
-          createdItems.push(item);
-        }
-        toast(`${createdItems.length} items added`, 'success');
+        // Create ONE parent item with full quantity, then attach units individually
+        const { item } = await api('/api/equipment', { method: 'POST', body: { ...basePayload, quantity: units.length } });
+        createdItems.push(item);
+        await Promise.all(units.map(u =>
+          api(`/api/equipment/${item.id}/units`, { method: 'POST', body: u })
+        ));
+        toast(`${name} added with ${units.length} units`, 'success');
         closeModal();
         loadItems();
       } else {
