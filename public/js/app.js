@@ -923,7 +923,7 @@ function renderUnits(equipmentId, units) {
                   ${isAdminUser ? `
                     <button style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);cursor:pointer;font-size:14px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s,color .15s" title="More options" onclick="toggleUnitMenu(${u.id})">⋮</button>
                     <div id="unitMenu-${u.id}" style="display:none;gap:3px">
-                      <button class="btn-outline btn-sm" style="padding:3px 7px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}')">Edit</button>
+                      <button class="btn-outline btn-sm" style="padding:3px 7px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}','${(u.name||'').replace(/'/g,"\\'")}')">Edit</button>
                       <button class="btn-outline btn-sm btn-red" style="padding:3px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
                     </div>
                   ` : ''}
@@ -1003,43 +1003,89 @@ async function openUnitCheckoutModal(equipmentId, unitNoteVal, unitLabel) {
 }
 
 function addUnit(equipmentId) {
+  const item = ITEMS.find(i => i.id === equipmentId);
+  const baseName = item?.name || '';
   showModal(`
-    <div style="padding:20px 24px">
-      <div style="font-size:15px;font-weight:700;margin-bottom:16px">Add Unit</div>
-      <div class="form-group"><label>Serial Number</label><input id="unitSerial" class="form-input mono" placeholder="e.g. SN123456"></div>
-      <div class="form-group"><label>Barcode</label><input id="unitBarcode" class="form-input mono" placeholder="e.g. CIS-001234"></div>
-      <div class="form-group"><label>Notes</label><input id="unitNotes" class="form-input" placeholder="Optional"></div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn-primary" onclick="saveNewUnit(${equipmentId})">Save</button>
+    <div class="modal-title">Add Units</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">How many units to add?</label>
+        <input id="bulkUnitQty" class="form-input" type="number" min="1" max="500" value="1"
+          oninput="renderBulkUnitRows(${equipmentId}, '${esc(baseName).replace(/'/g,"\\'")}')">
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Name, serial &amp; barcode per unit — leave blank for any you don't have yet.</div>
+      <div id="bulkUnitRows" style="max-height:300px;overflow-y:auto;padding-right:4px"></div>
+      <div class="form-actions" style="margin-top:12px">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveNewUnit(${equipmentId})">Add Units</button>
       </div>
     </div>
   `);
+  renderBulkUnitRows(equipmentId, baseName);
+}
+
+function renderBulkUnitRows(equipmentId, baseName) {
+  const qty = Math.max(1, parseInt(document.getElementById('bulkUnitQty')?.value, 10) || 1);
+  const container = document.getElementById('bulkUnitRows');
+  if (!container) return;
+  const existing = [...container.querySelectorAll('.bulk-unit-row')];
+  const currentCount = existing.length;
+  if (qty > currentCount) {
+    for (let i = currentCount; i < qty; i++) {
+      const div = document.createElement('div');
+      div.className = 'bulk-unit-row';
+      div.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px';
+      div.innerHTML = `
+        <div style="display:grid;grid-template-columns:28px 1fr;gap:6px;align-items:center;margin-bottom:5px">
+          <span style="font-size:11px;color:var(--text-muted);text-align:right;font-weight:600">${i+1}</span>
+          <input class="form-input bur-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <input class="form-input bur-serial" placeholder="Serial #" style="font-size:12px">
+          <input class="form-input bur-barcode" placeholder="Asset ID / Barcode" style="font-size:12px">
+        </div>`;
+      container.appendChild(div);
+    }
+  } else {
+    while (container.children.length > qty) container.removeChild(container.lastChild);
+  }
 }
 
 async function saveNewUnit(equipmentId) {
-  const serial_number = document.getElementById('unitSerial')?.value.trim() || '';
-  const barcode       = document.getElementById('unitBarcode')?.value.trim() || '';
-  const notes         = document.getElementById('unitNotes')?.value.trim() || '';
-  if (!serial_number && !barcode) { toast('Enter at least a serial or barcode', 'error'); return; }
+  const rows = document.querySelectorAll('#bulkUnitRows .bulk-unit-row');
+  if (!rows.length) { toast('No units to add', 'error'); return; }
+  const units = [...rows].map(r => ({
+    name:          r.querySelector('.bur-name')?.value.trim() || '',
+    serial_number: r.querySelector('.bur-serial')?.value.trim() || '',
+    barcode:       r.querySelector('.bur-barcode')?.value.trim() || '',
+  }));
   try {
-    await api(`/api/equipment/${equipmentId}/units`, { method: 'POST', body: { serial_number, barcode, notes } });
+    await Promise.all(units.map(u =>
+      api(`/api/equipment/${equipmentId}/units`, { method: 'POST', body: u })
+    ));
+    // Also bump quantity on the parent item to match
+    const item = ITEMS.find(i => i.id === equipmentId);
+    if (item) {
+      await api(`/api/equipment/${equipmentId}`, { method: 'PUT', body: { quantity: (item.quantity || 1) + units.length } });
+    }
     closeModal();
-    toast('Unit added', 'success');
+    toast(`${units.length} unit${units.length !== 1 ? 's' : ''} added`, 'success');
+    await loadItems();
     loadUnits(equipmentId);
   } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
-function editUnit(equipmentId, uid, serial, barcode, notes) {
+function editUnit(equipmentId, uid, serial, barcode, notes, name) {
   showModal(`
-    <div style="padding:20px 24px">
-      <div style="font-size:15px;font-weight:700;margin-bottom:16px">Edit Unit</div>
-      <div class="form-group"><label>Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(serial)}"></div>
-      <div class="form-group"><label>Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(barcode)}"></div>
-      <div class="form-group"><label>Notes</label><input id="editUnitNotes" class="form-input" value="${esc(notes)}"></div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn-primary" onclick="saveEditUnit(${equipmentId},${uid})">Save</button>
+    <div class="modal-title">Edit Unit</div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Unit Name</label><input id="editUnitName" class="form-input" value="${esc(name || '')}"></div>
+      <div class="form-group"><label class="form-label">Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(serial)}"></div>
+      <div class="form-group"><label class="form-label">Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(barcode)}"></div>
+      <div class="form-group"><label class="form-label">Notes</label><input id="editUnitNotes" class="form-input" value="${esc(notes)}"></div>
+      <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveEditUnit(${equipmentId},${uid})">Save</button>
       </div>
     </div>
   `);
@@ -1049,8 +1095,9 @@ async function saveEditUnit(equipmentId, uid) {
   const serial_number = document.getElementById('editUnitSerial')?.value.trim() || '';
   const barcode       = document.getElementById('editUnitBarcode')?.value.trim() || '';
   const notes         = document.getElementById('editUnitNotes')?.value.trim() || '';
+  const name          = document.getElementById('editUnitName')?.value.trim() || '';
   try {
-    await api(`/api/equipment/units/${uid}`, { method: 'PUT', body: { serial_number, barcode, notes } });
+    await api(`/api/equipment/units/${uid}`, { method: 'PUT', body: { serial_number, barcode, notes, name } });
     closeModal();
     toast('Unit updated', 'success');
     loadUnits(equipmentId);
