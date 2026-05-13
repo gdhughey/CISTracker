@@ -1835,21 +1835,21 @@ async function deleteItem(id) {
   }
 }
 
-// Shared label printer — 40mm × 30mm thermal stock.
+// Shared label printer — 30mm × 40mm thermal stock (portrait).
 // Pass the label API response object plus item metadata.
 function doPrintLabel(label, name, category, serial) {
   const frame = document.createElement('iframe');
-  frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:40mm;height:30mm;border:none;';
+  frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:30mm;height:40mm;border:none;';
   document.body.appendChild(frame);
   const doc = frame.contentDocument;
   doc.write(`<html><head><style>
-    @page{size:40mm 30mm;margin:0;}
+    @page{size:30mm 40mm portrait;margin:0;}
     *{box-sizing:border-box;}
-    body{margin:0;padding:1.5mm;font-family:Arial,sans-serif;display:flex;gap:1.5mm;align-items:center;width:40mm;height:30mm;overflow:hidden;}
-    .qr{width:21mm;height:21mm;flex-shrink:0;}
-    .info{flex:1;overflow:hidden;display:flex;flex-direction:column;gap:1px;}
+    body{margin:0;padding:1.5mm;font-family:Arial,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5mm;width:30mm;height:40mm;overflow:hidden;}
+    .qr{width:24mm;height:24mm;flex-shrink:0;}
+    .info{width:100%;overflow:hidden;display:flex;flex-direction:column;gap:1px;align-items:center;text-align:center;}
     .lab{font-size:5pt;color:#555;font-weight:600;letter-spacing:.2px;}
-    .name{font-size:6pt;font-weight:700;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;}
+    .name{font-size:6pt;font-weight:700;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
     .id{font-family:monospace;font-size:7pt;font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;}
     .sub{font-size:5pt;color:#555;white-space:nowrap;overflow:hidden;}
   </style></head><body>
