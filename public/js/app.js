@@ -4,6 +4,8 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 let ME = null;           // current user
+// owner role has inventory management powers (add/edit/delete) but not user/audit admin
+function isMeAdmin() { return ME && (ME.role === 'admin' || ME.role === 'owner'); }
 let ITEMS = [];          // all equipment
 let MODELS = [];
 let CATEGORIES = [];
@@ -297,6 +299,8 @@ async function showApp() {
   // Admin features
   if (ME.role === 'admin') {
     document.getElementById('adminNav').style.display = '';
+  }
+  if (isMeAdmin()) {
     document.getElementById('addItemBtn').style.display = '';
   }
   // Load data
@@ -507,13 +511,13 @@ function closeMobileSidebar() {
 
 async function loadItems() {
   try {
-    const isAdmin = ME && ME.role === 'admin';
+    const canManage = isMeAdmin();
     const adminEmpty = Promise.resolve({});
     const [{ items }, adminModels, adminCats, adminLocs] = await Promise.all([
       api('/api/equipment'),
-      isAdmin ? api('/api/admin/models')     : adminEmpty,
-      isAdmin ? api('/api/admin/categories') : adminEmpty,
-      isAdmin ? api('/api/admin/locations')  : adminEmpty,
+      canManage ? api('/api/admin/models')     : adminEmpty,
+      canManage ? api('/api/admin/categories') : adminEmpty,
+      canManage ? api('/api/admin/locations')  : adminEmpty,
     ]);
     ITEMS = items;
     MODELS = adminModels.models || [];
@@ -911,7 +915,7 @@ function updateActionBar() {
   const selCount = document.getElementById('selCount');
   if (selCount) selCount.textContent = `${n} selected`;
   const delBtn = document.getElementById('bulkDeleteBtn');
-  if (delBtn) delBtn.style.display = (ME && ME.role === 'admin') ? '' : 'none';
+  if (delBtn) delBtn.style.display = isMeAdmin() ? '' : 'none';
 }
 
 async function bulkDelete() {
@@ -955,8 +959,10 @@ function _openBulkPrintWindow(labels) {
   const labelsHtml = labels.map(l => `
     <div class="label-block">
       <img class="label-qr" src="${l.qr_data_url}" alt="QR">
-      <div class="label-id">${esc(l.asset_id)}</div>
-      <div class="label-name">${esc(l.name)}</div>
+      <div class="label-text">
+        <div class="label-id">${esc(l.asset_id)}</div>
+        <div class="label-name">${esc(l.name)}</div>
+      </div>
     </div>
   `).join('');
 
@@ -966,34 +972,39 @@ function _openBulkPrintWindow(labels) {
 <meta charset="utf-8">
 <title>Labels — CISTracker</title>
 <style>
-  @page { margin: 4mm; size: 50mm 25mm landscape; }
+  @page { margin: 2mm; size: 50mm 25mm landscape; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: monospace; background: #fff; }
   .label-block {
     display: flex;
     align-items: center;
-    gap: 3mm;
-    width: 42mm;
-    height: 17mm;
+    gap: 2mm;
+    width: 46mm;
+    height: 21mm;
     padding: 2mm;
     page-break-inside: avoid;
     break-inside: avoid;
+    border-bottom: 0.5px dashed #ccc;
   }
-  .label-qr { width: 13mm; height: 13mm; display: block; }
-  .label-id { font-size: 7pt; font-weight: bold; letter-spacing: 0.02em; }
-  .label-name { font-size: 6pt; color: #333; margin-top: 1mm; max-width: 26mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .label-qr { width: 14mm; height: 14mm; flex-shrink: 0; display: block; }
+  .label-text { overflow: hidden; }
+  .label-id { font-size: 7.5pt; font-weight: bold; letter-spacing: 0.02em; white-space: nowrap; }
+  .label-name { font-size: 6pt; color: #333; margin-top: 1mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28mm; }
+  @media print { .label-block { border-bottom: none; } }
 </style>
 </head>
-<body>
-${labelsHtml}
-<script>window.onload = function() { window.print(); }<\/script>
-</body>
+<body>${labelsHtml}</body>
 </html>`;
 
-  const w = window.open('', '_blank', 'width=800,height=600');
-  if (!w) { toast('Popup blocked — allow popups for this site', 'error'); return; }
-  w.document.write(html);
-  w.document.close();
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, '_blank');
+  if (!w) { toast('Popup blocked — allow popups for this site and try again', 'error'); URL.revokeObjectURL(url); return; }
+  // Trigger print once the window has loaded, then clean up the blob URL
+  w.addEventListener('load', () => {
+    w.print();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  });
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────
