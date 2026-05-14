@@ -1786,7 +1786,7 @@ async function confirmReturn(id) {
 
 // ── Add item modal ─────────────────────────────────────────────────────
 function openAddItemModal() {
-  const isAdmin = ME?.role === 'admin';
+  const isAdmin = isMeAdmin();
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <div class="modal-title">${isAdmin ? 'Add Equipment' : 'Request New Item'}</div>
@@ -1916,7 +1916,7 @@ async function submitAddItem() {
       };
 
   try {
-    if (ME?.role === 'admin') {
+    if (isMeAdmin()) {
       let createdItems = [];
       if (units) {
         // Create ONE parent item with full quantity, then attach units individually
