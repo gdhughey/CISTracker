@@ -41,22 +41,6 @@ app.use(loadSession);
 app.use(audit);
 app.use(issueToken);
 
-// Temporary request logger — remove after debugging
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api')) {
-    const user = req.user ? `${req.user.username}(${req.user.role})` : 'anon';
-    const orig = res.json.bind(res);
-    res.json = (body) => {
-      const ok = res.statusCode < 400;
-      if (!ok || req.path.startsWith('/api/equipment') || req.path.startsWith('/api/admin')) {
-        console.log(`[REQ] ${req.method} ${req.path} user=${user} → ${res.statusCode}${ok ? '' : ' ' + JSON.stringify(body)}`);
-      }
-      return orig(body);
-    };
-  }
-  next();
-});
-
 // Static frontend.
 // No-store on HTML/JS so users never run stale code after a deploy.
 // Other static assets (css, fonts, images) fall through to defaults.
