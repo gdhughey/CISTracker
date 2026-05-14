@@ -43,12 +43,14 @@ app.use(issueToken);
 
 // Temporary request logger — remove after debugging
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api') && !['GET','HEAD','OPTIONS'].includes(req.method)) {
+  if (req.path.startsWith('/api')) {
     const user = req.user ? `${req.user.username}(${req.user.role})` : 'anon';
-    const csrf = req.get('x-csrf-token') ? 'csrf:ok' : 'csrf:MISSING';
     const orig = res.json.bind(res);
     res.json = (body) => {
-      console.log(`[REQ] ${req.method} ${req.path} user=${user} ${csrf} → ${res.statusCode} ${JSON.stringify(body).slice(0,120)}`);
+      const ok = res.statusCode < 400;
+      if (!ok || req.path.startsWith('/api/equipment') || req.path.startsWith('/api/admin')) {
+        console.log(`[REQ] ${req.method} ${req.path} user=${user} → ${res.statusCode}${ok ? '' : ' ' + JSON.stringify(body)}`);
+      }
       return orig(body);
     };
   }
