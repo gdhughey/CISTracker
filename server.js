@@ -41,6 +41,20 @@ app.use(loadSession);
 app.use(audit);
 app.use(issueToken);
 
+// Temporary request logger — remove after debugging
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api') && !['GET','HEAD','OPTIONS'].includes(req.method)) {
+    const user = req.user ? `${req.user.username}(${req.user.role})` : 'anon';
+    const csrf = req.get('x-csrf-token') ? 'csrf:ok' : 'csrf:MISSING';
+    const orig = res.json.bind(res);
+    res.json = (body) => {
+      console.log(`[REQ] ${req.method} ${req.path} user=${user} ${csrf} → ${res.statusCode} ${JSON.stringify(body).slice(0,120)}`);
+      return orig(body);
+    };
+  }
+  next();
+});
+
 // Static frontend.
 // No-store on HTML/JS so users never run stale code after a deploy.
 // Other static assets (css, fonts, images) fall through to defaults.
