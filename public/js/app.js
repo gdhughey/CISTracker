@@ -511,18 +511,18 @@ function closeMobileSidebar() {
 
 async function loadItems() {
   try {
-    const canManage = isMeAdmin();
-    const adminEmpty = Promise.resolve({});
-    const [{ items }, adminModels, adminCats, adminLocs] = await Promise.all([
-      api('/api/equipment'),
-      canManage ? api('/api/admin/models')     : adminEmpty,
-      canManage ? api('/api/admin/categories') : adminEmpty,
-      canManage ? api('/api/admin/locations')  : adminEmpty,
-    ]);
+    const { items } = await api('/api/equipment');
     ITEMS = items;
-    MODELS = adminModels.models || [];
-    CATEGORIES = adminCats.categories || [];
-    LOCATIONS_LIST = adminLocs.locations || [];
+    if (isMeAdmin()) {
+      const [modelsRes, catsRes, locsRes] = await Promise.allSettled([
+        api('/api/admin/models'),
+        api('/api/admin/categories'),
+        api('/api/admin/locations'),
+      ]);
+      if (modelsRes.status === 'fulfilled') MODELS = modelsRes.value.models || [];
+      if (catsRes.status === 'fulfilled')   CATEGORIES = catsRes.value.categories || [];
+      if (locsRes.status === 'fulfilled')   LOCATIONS_LIST = locsRes.value.locations || [];
+    }
     buildFilters();
     renderItems();
   } catch (err) {
@@ -995,11 +995,21 @@ function _openBulkPrintWindow(labels) {
   @media print { .label-block { border-bottom: none; } }
 </style>
 </head>
-<body>${labelsHtml}</body>
+<body>${labelsHtml}
+<script>
+  var imgs = document.querySelectorAll('img');
+  var loaded = 0;
+  function tryPrint() { if (++loaded >= imgs.length) window.print(); }
+  if (imgs.length === 0) { window.print(); }
+  else { imgs.forEach(function(img) {
+    if (img.complete) tryPrint();
+    else { img.onload = tryPrint; img.onerror = tryPrint; }
+  }); }
+</script>
+</body>
 </html>`);
   w.document.close();
   w.focus();
-  setTimeout(() => w.print(), 250);
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────
