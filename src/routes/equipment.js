@@ -55,14 +55,14 @@ router.get('/', (req, res) => {
 // Full activity log is admin-only.
 // Optionally filter by equipment_id (?equipment_id=123) so the detail
 // panel can fetch history for one item without scanning the whole log.
-router.get('/log', requireRole('admin'), (req, res) => {
+router.get('/log', requireRole(['admin', 'owner']), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   const equipmentId = req.query.equipment_id ? parseInt(req.query.equipment_id, 10) : undefined;
   const userId      = req.query.user_id      ? parseInt(req.query.user_id, 10)      : undefined;
   res.json({ entries: equipmentService.getLog({ limit, equipmentId, userId }) });
 });
 
-router.delete('/log', requireRole('admin'), (req, res) => {
+router.delete('/log', requireRole(['admin', 'owner']), (req, res) => {
   equipmentService.clearLog();
   req.audit('clear_log', null);
   res.json({ ok: true });
@@ -70,7 +70,7 @@ router.delete('/log', requireRole('admin'), (req, res) => {
 
 // Suggest the next CIS-NNNNNN asset ID. Admin-only since adding inventory
 // items is an admin task.
-router.get('/next-asset-id', requireRole('admin'), (req, res) => {
+router.get('/next-asset-id', requireRole(['admin', 'owner']), (req, res) => {
   res.json({ asset_id: equipmentService.nextAssetId() });
 });
 
@@ -110,7 +110,7 @@ router.get('/:id(\\d+)', (req, res) => {
   res.json({ item });
 });
 
-router.post('/', requireRole('admin'), validate(createSchema), (req, res) => {
+router.post('/', requireRole(['admin', 'owner']), validate(createSchema), (req, res) => {
   const body = { ...req.body };
   if (!body.barcode) body.barcode = equipmentService.nextAssetId();
   const item = equipmentService.create(body);
@@ -118,14 +118,14 @@ router.post('/', requireRole('admin'), validate(createSchema), (req, res) => {
   res.status(201).json({ item });
 });
 
-router.put('/:id(\\d+)', requireRole('admin'), validate(updateSchema), (req, res) => {
+router.put('/:id(\\d+)', requireRole(['admin', 'owner']), validate(updateSchema), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const item = equipmentService.update(id, req.body);
   req.audit('equipment_update', String(id));
   res.json({ item });
 });
 
-router.delete('/:id(\\d+)', requireRole('admin'), (req, res) => {
+router.delete('/:id(\\d+)', requireRole(['admin', 'owner']), (req, res) => {
   const id = parseInt(req.params.id, 10);
   equipmentService.remove(id);
   req.audit('equipment_delete', String(id));
@@ -133,7 +133,7 @@ router.delete('/:id(\\d+)', requireRole('admin'), (req, res) => {
 });
 
 // Bulk delete — admin only. Body: { ids: [1, 2, 3, ...] }
-router.delete('/bulk', requireRole('admin'), (req, res, next) => {
+router.delete('/bulk', requireRole(['admin', 'owner']), (req, res, next) => {
   try {
     const raw = req.body && req.body.ids;
     if (!Array.isArray(raw) || raw.length === 0) {
@@ -210,7 +210,7 @@ const batchCheckinSchema = z.object({
   notes: z.string().max(500).optional().transform(v => stripHtml(v || '')),
 });
 
-router.post('/batch-checkin', requireRole('admin'), validate(batchCheckinSchema), (req, res, next) => {
+router.post('/batch-checkin', requireRole(['admin', 'owner']), validate(batchCheckinSchema), (req, res, next) => {
   try {
     const results = equipmentService.batchCheckin(req.body.equipment_ids, req.user, req.body.notes || '');
     req.audit('batch_checkin', null, { count: results.filter(r => r.success).length });
@@ -279,7 +279,7 @@ router.get('/:id(\\d+)/units', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/:id(\\d+)/units', requireRole('admin'), validate(unitSchema), (req, res, next) => {
+router.post('/:id(\\d+)/units', requireRole(['admin', 'owner']), validate(unitSchema), (req, res, next) => {
   try {
     const item = equipmentService.getById(parseInt(req.params.id, 10));
     if (!item) return res.status(404).json({ error: 'Equipment not found' });
@@ -289,7 +289,7 @@ router.post('/:id(\\d+)/units', requireRole('admin'), validate(unitSchema), (req
   } catch (err) { next(err); }
 });
 
-router.put('/units/:uid(\\d+)', requireRole('admin'), validate(unitSchema), (req, res, next) => {
+router.put('/units/:uid(\\d+)', requireRole(['admin', 'owner']), validate(unitSchema), (req, res, next) => {
   try {
     const unit = equipmentUnitService.update(parseInt(req.params.uid, 10), req.body);
     req.audit('unit_update', String(unit.equipment_id));
@@ -297,7 +297,7 @@ router.put('/units/:uid(\\d+)', requireRole('admin'), validate(unitSchema), (req
   } catch (err) { next(err); }
 });
 
-router.delete('/units/:uid(\\d+)', requireRole('admin'), (req, res, next) => {
+router.delete('/units/:uid(\\d+)', requireRole(['admin', 'owner']), (req, res, next) => {
   try {
     equipmentUnitService.remove(parseInt(req.params.uid, 10));
     res.json({ ok: true });
