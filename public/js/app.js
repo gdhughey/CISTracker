@@ -507,16 +507,18 @@ function closeMobileSidebar() {
 
 async function loadItems() {
   try {
-    const [{ items }, { models }, { categories }, { locations }] = await Promise.all([
+    const isAdmin = ME && ME.role === 'admin';
+    const adminEmpty = Promise.resolve({});
+    const [{ items }, adminModels, adminCats, adminLocs] = await Promise.all([
       api('/api/equipment'),
-      api('/api/admin/models'),
-      api('/api/admin/categories'),
-      api('/api/admin/locations'),
+      isAdmin ? api('/api/admin/models')     : adminEmpty,
+      isAdmin ? api('/api/admin/categories') : adminEmpty,
+      isAdmin ? api('/api/admin/locations')  : adminEmpty,
     ]);
     ITEMS = items;
-    MODELS = models;
-    CATEGORIES = categories;
-    LOCATIONS_LIST = locations;
+    MODELS = adminModels.models || [];
+    CATEGORIES = adminCats.categories || [];
+    LOCATIONS_LIST = adminLocs.locations || [];
     buildFilters();
     renderItems();
   } catch (err) {
