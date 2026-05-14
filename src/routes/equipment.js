@@ -3,7 +3,6 @@ const express = require('express');
 const QRCode = require('qrcode');
 const { z } = require('zod');
 const equipmentService = require('../services/equipmentService');
-const equipmentUnitService = require('../services/equipmentUnitService');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { stripHtml } = require('../utils/sanitize');
@@ -11,17 +10,13 @@ const { stripHtml } = require('../utils/sanitize');
 const router = express.Router();
 
 const createSchema = z.object({
-  name:          z.string().min(1).max(200).transform(stripHtml),
-  type:          z.string().max(100).optional().transform(v => stripHtml(v || '')),
+  name: z.string().min(1).max(200).transform(stripHtml),
+  type: z.string().max(100).optional().transform(v => stripHtml(v || '')),
   serial_number: z.string().max(100).optional().transform(v => stripHtml(v || '')),
-  barcode:       z.string().max(100).optional().transform(v => stripHtml(v || '')),
-  category:      z.string().max(100).optional().transform(v => stripHtml(v || '')),
-  location:      z.string().max(200).optional().transform(v => stripHtml(v || '')),
-  location_id:   z.number().int().positive().optional().nullable(),
-  model_id:      z.number().int().positive().optional().nullable(),
-  notes:          z.string().max(2000).optional().transform(v => stripHtml(v || '')),
-  product_number: z.string().max(200).optional().transform(v => stripHtml(v || '')),
-  quantity:       z.number().int().min(1).max(10000).optional().default(1),
+  barcode: z.string().max(100).optional().transform(v => stripHtml(v || '')),
+  category: z.string().max(100).optional().transform(v => stripHtml(v || '')),
+  location: z.string().max(200).optional().transform(v => stripHtml(v || '')),
+  notes: z.string().max(2000).optional().transform(v => stripHtml(v || '')),
 });
 
 const updateSchema = createSchema.partial();
@@ -41,7 +36,9 @@ router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const status = req.query.status;
+  // Admins see everything; users see all items (needed for browse).
   const items = equipmentService.listAll({ status });
+  // Attach queue counts — one query for all items instead of one per item
   try {
     const queueService = require('../services/queueService');
     const queueLengths = queueService.allQueueLengths();
@@ -58,8 +55,7 @@ router.get('/', (req, res) => {
 router.get('/log', requireRole('admin'), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   const equipmentId = req.query.equipment_id ? parseInt(req.query.equipment_id, 10) : undefined;
-  const userId      = req.query.user_id      ? parseInt(req.query.user_id, 10)      : undefined;
-  res.json({ entries: equipmentService.getLog({ limit, equipmentId, userId }) });
+  res.json({ entries: equipmentService.getLog({ limit, equipmentId }) });
 });
 
 router.delete('/log', requireRole('admin'), (req, res) => {
@@ -111,9 +107,7 @@ router.get('/:id(\\d+)', (req, res) => {
 });
 
 router.post('/', requireRole('admin'), validate(createSchema), (req, res) => {
-  const body = { ...req.body };
-  if (!body.barcode) body.barcode = equipmentService.nextAssetId();
-  const item = equipmentService.create(body);
+  const item = equipmentService.create(req.body);
   req.audit('equipment_create', String(item.id), { name: item.name });
   res.status(201).json({ item });
 });
@@ -132,48 +126,44 @@ router.delete('/:id(\\d+)', requireRole('admin'), (req, res) => {
   res.json({ ok: true });
 });
 
-const batchCheckoutSchema = z.object({
-  equipment_ids: z.array(z.number().int().positive()).min(1).max(50),
-  notes: z.string().max(500).optional().transform(v => stripHtml(v || '')),
-  for_user_id: z.number().int().positive().optional(),
-  duration_days: z.number().int().min(1).max(30).optional().default(7),
-});
-
-router.post('/batch-checkout', validate(batchCheckoutSchema), (req, res, next) => {
+// Bulk delete — admin only. Body: { ids: [1, 2, 3, ...] }
+router.delete('/bulk', requireRole('admin'), (req, res, next) => {
   try {
-    let borrower = { id: req.user.id, username: req.user.username };
-    if (req.body.for_user_id && req.body.for_user_id !== req.user.id) {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Only admins can check out on behalf of another user' });
-      }
-      const target = require('../services/userService').getById(req.body.for_user_id);
-      if (!target) return res.status(404).json({ error: 'Selected user not found' });
-      borrower = { id: target.id, username: target.username };
+    const raw = req.body && req.body.ids;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
     }
-    const results = equipmentService.batchCheckout(
-      req.body.equipment_ids,
-      borrower.id,
-      borrower.username,
-      req.body.notes,
-      'Manual',
-      req.user.id,
-      req.body.duration_days,
-    );
-    req.audit('batch_checkout', null, { count: results.filter(r => r.success).length, for_user: borrower.username });
-    res.json({ results });
+    const ids = raw.map(v => parseInt(v, 10)).filter(n => Number.isFinite(n) && n > 0);
+    if (ids.length === 0) return res.status(400).json({ error: 'No valid ids provided' });
+    if (ids.length > 500) return res.status(400).json({ error: 'Cannot delete more than 500 items at once' });
+    equipmentService.bulkRemove(ids);
+    req.audit('equipment_bulk_delete', null, { count: ids.length, ids });
+    res.json({ deleted: ids.length });
   } catch (err) { next(err); }
 });
 
-const batchCheckinSchema = z.object({
-  equipment_ids: z.array(z.number().int().positive()).min(1).max(50),
-  notes: z.string().max(500).optional().transform(v => stripHtml(v || '')),
-});
-
-router.post('/batch-checkin', requireRole('admin'), validate(batchCheckinSchema), (req, res, next) => {
+// Bulk label generation — returns QR data for multiple items.
+// Query: ?ids=1,2,3 (comma-separated, max 200)
+router.get('/labels/bulk', async (req, res, next) => {
   try {
-    const results = equipmentService.batchCheckin(req.body.equipment_ids, req.user, req.body.notes || '');
-    req.audit('batch_checkin', null, { count: results.filter(r => r.success).length });
-    res.json({ results });
+    const raw = String(req.query.ids || '').split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0);
+    if (raw.length === 0) return res.status(400).json({ error: 'ids is required' });
+    if (raw.length > 200) return res.status(400).json({ error: 'Cannot generate more than 200 labels at once' });
+    const labels = [];
+    for (const id of raw) {
+      const item = equipmentService.getById(id);
+      if (!item) continue;
+      const code = (item.barcode || '').trim();
+      if (!code) continue;
+      const qr = await QRCode.toDataURL(code, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        scale: 8,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      });
+      labels.push({ asset_id: code, name: item.name, qr_data_url: qr });
+    }
+    res.json({ labels });
   } catch (err) { next(err); }
 });
 
@@ -219,47 +209,6 @@ router.post('/:id(\\d+)/checkin', validate(checkoutSchema), (req, res, next) => 
       item: result.item,
       nextInQueue: result.nextInQueue ? { username: result.nextInQueue.username } : null,
     });
-  } catch (err) { next(err); }
-});
-
-// ── Equipment Units (per-unit serial/barcode under a qty>1 parent) ──────────
-const unitSchema = z.object({
-  serial_number: z.string().max(200).optional().transform(v => stripHtml(v || '')),
-  barcode:       z.string().max(200).optional().transform(v => stripHtml(v || '')),
-  notes:         z.string().max(500).optional().transform(v => stripHtml(v || '')),
-  name:          z.string().max(200).optional().transform(v => stripHtml(v || '')),
-});
-
-router.get('/:id(\\d+)/units', (req, res, next) => {
-  try {
-    const item = equipmentService.getById(parseInt(req.params.id, 10));
-    if (!item) return res.status(404).json({ error: 'Equipment not found' });
-    res.json({ units: equipmentUnitService.listByEquipment(item.id) });
-  } catch (err) { next(err); }
-});
-
-router.post('/:id(\\d+)/units', requireRole('admin'), validate(unitSchema), (req, res, next) => {
-  try {
-    const item = equipmentService.getById(parseInt(req.params.id, 10));
-    if (!item) return res.status(404).json({ error: 'Equipment not found' });
-    const unit = equipmentUnitService.create(item.id, req.body);
-    req.audit('unit_add', String(item.id), { serial: unit.serial_number });
-    res.status(201).json({ unit });
-  } catch (err) { next(err); }
-});
-
-router.put('/units/:uid(\\d+)', requireRole('admin'), validate(unitSchema), (req, res, next) => {
-  try {
-    const unit = equipmentUnitService.update(parseInt(req.params.uid, 10), req.body);
-    req.audit('unit_update', String(unit.equipment_id));
-    res.json({ unit });
-  } catch (err) { next(err); }
-});
-
-router.delete('/units/:uid(\\d+)', requireRole('admin'), (req, res, next) => {
-  try {
-    equipmentUnitService.remove(parseInt(req.params.uid, 10));
-    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

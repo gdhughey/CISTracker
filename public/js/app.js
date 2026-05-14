@@ -5,16 +5,12 @@
 
 let ME = null;           // current user
 let ITEMS = [];          // all equipment
-let MODELS = [];
-let CATEGORIES = [];
-let LOCATIONS_LIST = [];
 let CSRF = '';           // CSRF token
 let currentView = 'inventory';
 let statusFilter = 'all';
 let catFilter = 'All';
 let locFilter = 'All';
 let ticketFilter = 'all';
-let _allTickets  = [];
 let _pendingPrint = null; // label queued for printing from add-item modal
 
 // Inventory rendering — show rows in batches to avoid blocking the main thread
@@ -22,41 +18,9 @@ const RENDER_BATCH = 150;
 let renderVisible = []; // filtered item list (not yet all in DOM)
 let renderShown = 0;    // how many rows are currently rendered
 
-// Mass checkout cart
-const _cart = new Set(); // Set of equipment IDs
-
-// Mass return cart
-const _returnCart = new Set(); // Set of equipment IDs to return
-
-// ── Live refresh ────────────────────────────────────────────────────────
-let _refreshInterval = null;
-const REFRESH_MS = 90_000; // 90 seconds
-
-const VIEW_REFRESH = {
-  inventory:       () => loadItems(),
-  checkinout:      () => loadCheckinout(),
-  overdue:         () => loadOverdue(),
-  tickets:         () => loadTickets(),
-  queue:           () => loadMyQueue(),
-  users:           () => loadUsers(),
-  locations:       () => loadLocations(),
-  audit:           () => loadAudit(),
-  'service-tickets': () => loadServiceTickets(),
-  'inv-audit':     () => loadAuditView(),
-};
-
-function startRefreshInterval() {
-  stopRefreshInterval();
-  const fn = VIEW_REFRESH[currentView];
-  if (!fn) return;
-  _refreshInterval = setInterval(() => {
-    if (document.visibilityState === 'visible') fn();
-  }, REFRESH_MS);
-}
-
-function stopRefreshInterval() {
-  if (_refreshInterval) { clearInterval(_refreshInterval); _refreshInterval = null; }
-}
+// Multi-select state
+let selectionMode = false;
+let selectedIds = new Set();
 
 // ── UTC helper ─────────────────────────────────────────────────────────
 function utc(d) {
@@ -95,7 +59,6 @@ async function api(url, opts = {}) {
   // Grab CSRF from response cookie
   const csrfCookie = document.cookie.split(';').find(c => c.trim().startsWith('csrf_token='));
   if (csrfCookie) CSRF = csrfCookie.split('=')[1];
-  if (res.status === 401) { window.location.href = '/'; return; }
   if (!res.ok) throw { status: res.status, ...(typeof data === 'object' ? data : { error: data }) };
   return data;
 }
@@ -137,17 +100,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch {
     showLogin();
   }
-
-  // Live refresh: resume/pause on tab visibility changes
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      const fn = VIEW_REFRESH[currentView];
-      if (fn) fn();
-      startRefreshInterval();
-    } else {
-      stopRefreshInterval();
-    }
-  });
 });
 
 // ── Auth ───────────────────────────────────────────────────────────────
@@ -297,11 +249,9 @@ async function showApp() {
   }
   // Load data
   initTableScroll();
-  const adminLoads = ME.role === 'admin' ? [loadOverdueCount(), loadTicketCounts(), loadSvcTicketBadge()] : [];
+  const adminLoads = ME.role === 'admin' ? [loadOverdueCount(), loadTicketCounts()] : [];
   await Promise.all([loadItems(), updateQueueBadge(), ...adminLoads]);
   switchView('inventory');
-  // Keep session alive — silent ping every 4 minutes so idle users aren't logged out
-  setInterval(() => api('/api/auth/me').catch(() => {}), 4 * 60 * 1000);
   // First-time onboarding tour — only fires once per user/browser
   maybeStartTour();
 }
@@ -454,7 +404,6 @@ function switchView(view) {
   // Stop any active QR scan when leaving the checkinout view
   if (view !== 'checkinout' && window._stopScan) { window._stopScan(); window._stopScan = null; }
   currentView = view;
-  startRefreshInterval();
   // Hide all views
   document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
   const target = document.getElementById('view-' + view);
@@ -481,11 +430,8 @@ function switchView(view) {
   if (view === 'queue') loadMyQueue();
   if (view === 'users') loadUsers();
   if (view === 'locations') loadLocations();
-  if (view === 'categories') loadCategories();
   if (view === 'audit') loadAudit();
   if (view === 'passkeys') loadPasskeys();
-  if (view === 'service-tickets') loadServiceTickets();
-  if (view === 'inv-audit') loadAuditView();
 }
 
 function toggleMobileSidebar() {
@@ -503,104 +449,59 @@ function closeMobileSidebar() {
 
 async function loadItems() {
   try {
-    const [{ items }, { models }, { categories }, { locations }] = await Promise.all([
-      api('/api/equipment'),
-      api('/api/admin/models'),
-      api('/api/admin/categories'),
-      api('/api/admin/locations'),
-    ]);
-    ITEMS = items;
-    MODELS = models;
-    CATEGORIES = categories;
-    LOCATIONS_LIST = locations;
-    buildFilters();
+    const data = await api('/api/equipment');
+    ITEMS = data.items || [];
+    buildCatChips();
+    buildLocChips();
     renderItems();
   } catch (err) {
-    toast('Failed to load inventory', 'error');
+    console.error('Failed to load items', err);
   }
 }
 
 function computeStats(items) {
   items = items || ITEMS;
-  let total = 0, available = 0, out = 0, overdue = 0;
+  let available = 0, out = 0, overdue = 0;
   for (const item of items) {
-    const qty = item.quantity || 1;
-    const coCount = item.checked_out_count || 0;
-    const avail = Math.max(0, qty - coCount);
-    total += qty;
-    if (qty > 1) {
-      available += avail;
-      out += coCount;
-    } else {
-      const st = getItemStatus(item);
-      if (st === 'available') available++;
-      else if (st === 'overdue') overdue++;
-      else if (st === 'checked_out') out++;
-    }
+    const st = getItemStatus(item);
+    if (st === 'available') available++;
+    else if (st === 'overdue') overdue++;
+    else if (st === 'checked_out') out++;
   }
-  document.getElementById('statTotal').textContent = total.toLocaleString();
-  document.getElementById('statAvailable').textContent = available.toLocaleString();
-  document.getElementById('statOut').textContent = out.toLocaleString();
-  document.getElementById('statOverdue').textContent = overdue.toLocaleString();
+  document.getElementById('statTotal').textContent = items.length;
+  document.getElementById('statAvailable').textContent = available;
+  document.getElementById('statOut').textContent = out;
+  document.getElementById('statOverdue').textContent = overdue;
 }
 
-function setCatFilter(c) {
-  catFilter = c;
-  buildFilters();
-  renderItems();
-}
-
-function setLocFilter(l) {
-  locFilter = l;
-  buildFilters();
-  renderItems();
-}
-
-function buildFilters() {
-  // Category chips — from managed categories table
-  const catContainer = document.getElementById('catChips');
-  if (catContainer) {
-    catContainer.innerHTML =
-      `<button class="chip${catFilter === 'All' ? ' active' : ''}" onclick="setCatFilter('All')">All</button>` +
-      CATEGORIES.map(c =>
-        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter('${c.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(c.name)}</button>`
-      ).join('');
-  }
-
-  // Location chips — collapse into dropdown when > 5 locations
-  const locWrap = document.getElementById('locChipsWrap');
-  if (locWrap) {
-    const managedLocs = LOCATIONS_LIST;
-    const managedNames = new Set(managedLocs.map(l => l.name.toLowerCase()));
-    const freeTextNames = [...new Set(
-      ITEMS.map(i => i.location).filter(s => s && !managedNames.has(s.toLowerCase()))
-    )].sort();
-    const allLocNames = [...managedLocs.map(l => l.name), ...freeTextNames];
-    if (allLocNames.length === 0) {
-      locWrap.innerHTML = '';
-    } else {
-      const chipsHtml =
-        `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
-        allLocNames.map(name =>
-          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter('${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(name)}</button>`
-        ).join('');
-      if (allLocNames.length > 5) {
-        const activeLabel = locFilter !== 'All' ? ` · ${esc(locFilter)}` : '';
-        locWrap.innerHTML = `
-          <details id="locDetails" class="loc-filter-details"${locFilter !== 'All' ? ' open' : ''}>
-            <summary class="loc-filter-summary">📍 Location${activeLabel}</summary>
-            <div class="cat-chips" style="padding:6px 24px 10px">${chipsHtml}</div>
-          </details>`;
-      } else {
-        locWrap.innerHTML = `<div class="cat-chips">${chipsHtml}</div>`;
-      }
-    }
+function buildCatChips() {
+  const cats = new Set(['All']);
+  for (const item of ITEMS) if (item.category) cats.add(item.category);
+  const container = document.getElementById('catChips');
+  container.innerHTML = '';
+  for (const c of cats) {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (c === catFilter ? ' active' : '');
+    chip.textContent = c;
+    chip.onclick = () => { catFilter = c; buildCatChips(); renderItems(); };
+    container.appendChild(chip);
   }
 }
 
-// Keep old names as aliases for any callers still using them
-function buildCatChips() { buildFilters(); }
-function buildLocChips() { buildFilters(); }
+function buildLocChips() {
+  const locs = new Set(['All']);
+  for (const item of ITEMS) if (item.location) locs.add(item.location);
+  const container = document.getElementById('locChips');
+  container.innerHTML = '';
+  if (locs.size <= 1) return; // no locations set, hide the row
+  for (const l of locs) {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (l === locFilter ? ' active' : '');
+    chip.textContent = l;
+    chip.onclick = () => { locFilter = l; buildLocChips(); renderItems(); };
+    container.appendChild(chip);
+  }
+}
 
 function getItemStatus(item) {
   if (item.status === 'available') return 'available';
@@ -614,29 +515,6 @@ function getItemStatus(item) {
     }
   }
   return item.status === 'checked_out' ? 'checked_out' : item.status;
-}
-
-// Returns HTML for an availability pill for bulk (qty>1) items.
-// tier: green ≥67%, amber 34–66%, red ≤33%
-function availPill(item) {
-  const qty = item.quantity || 1;
-  const out = item.checked_out_count || 0;
-  const avail = Math.max(0, qty - out);
-  const pct = qty > 0 ? avail / qty : 1;
-  const tier = pct >= 0.67 ? 'green' : pct >= 0.34 ? 'amber' : 'red';
-  return `<span class="avail-pill ap-${tier}"><span class="dot"></span>${avail} / ${qty} avail</span>`;
-}
-
-// Returns availability bar HTML for the detail panel.
-function availBar(item) {
-  const qty = item.quantity || 1;
-  const out = item.checked_out_count || 0;
-  const avail = Math.max(0, qty - out);
-  const pct = qty > 0 ? Math.round((avail / qty) * 100) : 100;
-  const tier = pct >= 67 ? 'green' : pct >= 34 ? 'amber' : 'red';
-  return `
-    <div class="avail-bar-wrap"><div class="avail-bar-fill ab-${tier}" style="width:${pct}%"></div></div>
-    <div class="avail-bar-label"><strong>${avail}</strong> of <strong>${qty}</strong> units available · <strong>${out}</strong> currently out</div>`;
 }
 
 function fmtDue(due_date) {
@@ -653,51 +531,20 @@ function setStatusFilter(s) {
   renderItems();
 }
 
-// Smart search — splits query into tokens, each must match (substring OR 1-char fuzzy for 4+ char tokens)
-function searchMatch(hay, query) {
-  if (!query) return true;
-  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const h = hay.toLowerCase();
-  return tokens.every(tok => {
-    if (h.includes(tok)) return true;
-    if (tok.length < 4) return false;
-    // Fuzzy: check if any word in haystack is within edit distance 1
-    const hayWords = h.split(/[\s\-_./]+/);
-    return hayWords.some(w => w.length >= tok.length - 1 && w.length <= tok.length + 1 && editDist(tok, w) <= 1);
-  });
-}
-function editDist(a, b) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
-  return dp[m][n];
-}
-
 function filterItems() { renderItems(); }
 
 function renderItems() {
-  const q = (document.getElementById('searchInput').value || '').trim();
+  const q = (document.getElementById('searchInput').value || '').toLowerCase();
   // Build filtered list
   renderVisible = [];
   for (const item of ITEMS) {
     const st = getItemStatus(item);
-    if (statusFilter !== 'all') {
-      // Bulk items with some units out should appear under the "Out" filter
-      const isPartiallyOut = (item.quantity || 1) > 1 && (item.checked_out_count || 0) > 0;
-      if (st !== statusFilter && !(statusFilter === 'checked_out' && isPartiallyOut)) continue;
-    }
+    if (statusFilter !== 'all' && st !== statusFilter) continue;
     if (catFilter !== 'All' && item.category !== catFilter) continue;
-    if (locFilter !== 'All') {
-      const loc = LOCATIONS_LIST.find(l => l.name === locFilter);
-      if (!loc) { if (item.location !== locFilter) continue; }
-      else if (item.location_id !== loc.id && item.location !== locFilter) continue;
-    }
+    if (locFilter !== 'All' && item.location !== locFilter) continue;
     if (q) {
-      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location} ${item.product_number || ''}`;
-      if (!searchMatch(hay, q)) continue;
+      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location}`.toLowerCase();
+      if (!hay.includes(q)) continue;
     }
     renderVisible.push(item);
   }
@@ -723,8 +570,6 @@ function renderBatch() {
     const st = getItemStatus(item);
     const tr = document.createElement('tr');
     tr.onclick = () => openDetail(item.id);
-    const isBulk = (item.quantity || 1) > 1;
-    const coCount = item.checked_out_count || 0;
     const statusLabel = st === 'available' ? 'Available' : st === 'checked_out' ? 'Checked Out' : 'Overdue';
     let subLine = '';
     if (st !== 'available' && item.checked_out_username) {
@@ -735,34 +580,22 @@ function renderBatch() {
     if (item.queue_length > 0) {
       queueLine = `<div class="cell-queue">⏳ ${item.queue_length} in queue</div>`;
     }
-    // For bulk items, show "X / Y avail" pill instead of plain status badge
-    const statusCell = isBulk
-      ? availPill(item)
-      : `<span class="status-badge status-${st}"><span class="dot"></span>${statusLabel}</span>`;
-    // For bulk items: "Take 1" if any available; "Return 1" if any checked out
-    const availNow = isBulk ? Math.max(0, (item.quantity || 1) - coCount) : 0;
-    let actionCell;
-    if (isBulk) {
-      const takeBtn  = availNow > 0
-        ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Take 1</button>`
-        : '';
-      const retBtn   = coCount > 0
-        ? `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return 1</button>`
-        : '';
-      actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">${takeBtn}${retBtn}</div>`;
-    } else {
-      actionCell = st === 'available'
-        ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Check Out</button><button class="btn-cart${_cart.has(item.id) ? ' in-cart' : ''}" id="cartBtn-${item.id}" title="${_cart.has(item.id) ? 'Remove from cart' : 'Add to cart'}" onclick="event.stopPropagation();toggleCart(${item.id})">🛒</button>`
-        : `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return</button>`;
-    }
+    const checkCell = selectionMode
+      ? `<td class="cell-check" onclick="event.stopPropagation()"><input type="checkbox" class="row-check" ${selectedIds.has(item.id) ? 'checked' : ''} onchange="toggleSelectItem(${item.id},this.checked)"></td>`
+      : '';
+    tr.className = selectionMode && selectedIds.has(item.id) ? 'row-selected' : '';
     tr.innerHTML = `
+      ${checkCell}
       <td class="cell-id">${esc(item.barcode || 'CIS-' + String(item.id).padStart(6,'0'))}</td>
       <td><div class="cell-name">${esc(item.name)}</div>${subLine}${queueLine}</td>
       <td>${esc(item.category || '—')}</td>
       <td>${esc(item.location || '—')}</td>
-      <td style="text-align:center;font-weight:600;color:${isBulk ? 'var(--accent)' : 'var(--text-muted)'}">${item.quantity > 1 ? item.quantity : '1'}</td>
-      <td>${statusCell}</td>
-      <td>${actionCell}</td>
+      <td><span class="status-badge status-${st}"><span class="dot"></span>${statusLabel}</span></td>
+      <td>
+        ${selectionMode ? '' : st === 'available'
+          ? `<button class="btn-outline btn-sm" onclick="event.stopPropagation();openCheckoutModal(${item.id})">Check Out</button>`
+          : `<button class="btn-outline btn-sm btn-green" onclick="event.stopPropagation();openReturnModal(${item.id})">Return</button>`}
+      </td>
     `;
     frag.appendChild(tr);
   }
@@ -789,6 +622,198 @@ function initTableScroll() {
       renderBatch();
     }
   }, { passive: true });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SELECTION MODE
+// ═══════════════════════════════════════════════════════════════════════
+
+function toggleSelectionMode() {
+  if (selectionMode) exitSelectionMode();
+  else enterSelectionMode();
+}
+
+function enterSelectionMode() {
+  selectionMode = true;
+  selectedIds.clear();
+  document.getElementById('selectModeBtn').textContent = 'Cancel';
+  document.getElementById('selectModeBtn').classList.add('btn-red');
+  document.getElementById('selectionToolbar').classList.remove('hidden');
+  // Inject checkbox column into table header
+  const hdr = document.getElementById('tableHeaderRow');
+  if (!hdr.querySelector('.th-check')) {
+    const th = document.createElement('th');
+    th.className = 'th-check';
+    th.style.width = '36px';
+    hdr.prepend(th);
+  }
+  // Populate filter selects
+  _populateSelFilterDropdowns();
+  renderItems();
+  updateActionBar();
+}
+
+function exitSelectionMode() {
+  selectionMode = false;
+  selectedIds.clear();
+  document.getElementById('selectModeBtn').textContent = 'Select';
+  document.getElementById('selectModeBtn').classList.remove('btn-red');
+  document.getElementById('selectionToolbar').classList.add('hidden');
+  document.getElementById('bulkActionBar').classList.add('hidden');
+  // Remove checkbox column from header
+  const hdr = document.getElementById('tableHeaderRow');
+  const thCheck = hdr.querySelector('.th-check');
+  if (thCheck) thCheck.remove();
+  document.getElementById('selectAllCheck').checked = false;
+  renderItems();
+}
+
+function _populateSelFilterDropdowns() {
+  const cats = new Set(), locs = new Set();
+  for (const item of ITEMS) {
+    if (item.category) cats.add(item.category);
+    if (item.location) locs.add(item.location);
+  }
+  const catSel = document.getElementById('selByCatFilter');
+  catSel.innerHTML = '<option value="">Category…</option>' +
+    [...cats].sort().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  const locSel = document.getElementById('selByLocFilter');
+  locSel.innerHTML = '<option value="">Location…</option>' +
+    [...locs].sort().map(l => `<option value="${esc(l)}">${esc(l)}</option>`).join('');
+}
+
+function toggleSelectItem(id, checked) {
+  if (checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  // Update row highlight
+  const rows = document.querySelectorAll('#itemsBody tr');
+  rows.forEach(tr => {
+    const cb = tr.querySelector('.row-check');
+    if (cb) tr.className = cb.checked ? 'row-selected' : '';
+  });
+  // Sync header checkbox state
+  const allVisible = renderVisible.every(i => selectedIds.has(i.id));
+  document.getElementById('selectAllCheck').checked = allVisible && renderVisible.length > 0;
+  updateActionBar();
+}
+
+function toggleSelectAll(checked) {
+  // Only acts on currently visible (filtered) items
+  for (const item of renderVisible) {
+    if (checked) selectedIds.add(item.id);
+    else selectedIds.delete(item.id);
+  }
+  // Re-render to update checkboxes; preserve scroll by only updating checked state
+  document.querySelectorAll('#itemsBody .row-check').forEach(cb => {
+    const id = parseInt(cb.closest('tr') ? cb.getAttribute('onchange').match(/\d+/)[0] : 0, 10);
+    cb.checked = selectedIds.has(id);
+    cb.closest('tr').className = cb.checked ? 'row-selected' : '';
+  });
+  updateActionBar();
+}
+
+function selectByFilter(field, value) {
+  if (!value) return;
+  for (const item of ITEMS) {
+    if (item[field] === value) selectedIds.add(item.id);
+  }
+  renderItems(); // re-render to show new checked state
+  updateActionBar();
+  toast(`Selected all items in ${field}: ${value}`, 'success');
+}
+
+function updateActionBar() {
+  const n = selectedIds.size;
+  const bar = document.getElementById('bulkActionBar');
+  if (n === 0) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  document.getElementById('bulkCount').textContent = `${n} item${n !== 1 ? 's' : ''} selected`;
+  document.getElementById('selCount').textContent = `${n} selected`;
+  // Delete only for admins
+  const delBtn = document.getElementById('bulkDeleteBtn');
+  if (delBtn) delBtn.style.display = (ME && ME.role === 'admin') ? '' : 'none';
+}
+
+async function bulkDelete() {
+  const ids = [...selectedIds];
+  if (ids.length === 0) return;
+  const confirmed = confirm(`Delete ${ids.length} item${ids.length !== 1 ? 's' : ''}? This cannot be undone.`);
+  if (!confirmed) return;
+  const btn = document.getElementById('bulkDeleteBtn');
+  btn.disabled = true;
+  try {
+    await api('/api/equipment/bulk', { method: 'DELETE', body: JSON.stringify({ ids }) });
+    toast(`Deleted ${ids.length} item${ids.length !== 1 ? 's' : ''}`, 'success');
+    exitSelectionMode();
+    await loadItems();
+  } catch (err) {
+    toast(err.message || 'Delete failed', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function bulkPrintLabels() {
+  const ids = [...selectedIds];
+  if (ids.length === 0) return;
+  const btn = document.querySelector('#bulkActionBar .btn-primary');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  try {
+    const { labels } = await api(`/api/equipment/labels/bulk?ids=${ids.join(',')}`);
+    if (!labels || labels.length === 0) { toast('No printable labels (items may have no barcode)', 'error'); return; }
+    _openBulkPrintWindow(labels);
+  } catch (err) {
+    toast(err.message || 'Could not load labels', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Print Labels';
+  }
+}
+
+function _openBulkPrintWindow(labels) {
+  const labelsHtml = labels.map(l => `
+    <div class="label-block">
+      <img class="label-qr" src="${l.qr_data_url}" alt="QR">
+      <div class="label-id">${esc(l.asset_id)}</div>
+      <div class="label-name">${esc(l.name)}</div>
+    </div>
+  `).join('');
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Labels — CISTracker</title>
+<style>
+  @page { margin: 4mm; size: 50mm 25mm landscape; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: monospace; background: #fff; }
+  .label-block {
+    display: flex;
+    align-items: center;
+    gap: 3mm;
+    width: 42mm;
+    height: 17mm;
+    padding: 2mm;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .label-qr { width: 13mm; height: 13mm; display: block; }
+  .label-id { font-size: 7pt; font-weight: bold; letter-spacing: 0.02em; }
+  .label-name { font-size: 6pt; color: #333; margin-top: 1mm; max-width: 26mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+${labelsHtml}
+<script>window.onload = function() { window.print(); }<\/script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank', 'width=800,height=600');
+  if (!w) { toast('Popup blocked — allow popups for this site', 'error'); return; }
+  w.document.write(html);
+  w.document.close();
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────
@@ -835,11 +860,11 @@ async function openDetail(id) {
   try {
     const { entries } = await api(`/api/equipment/log?equipment_id=${id}&limit=10`);
     const itemEntries = (entries || []);
-    historyHtml = `
-      <div class="detail-section" id="itemHistorySection">
-        <h4>History</h4>
-        ${itemEntries.length > 0
-          ? itemEntries.map(e => `
+    if (itemEntries.length > 0) {
+      historyHtml = `
+        <div class="detail-section">
+          <h4>History</h4>
+          ${itemEntries.map(e => `
             <div class="history-item">
               <div class="history-dot ${e.action}"></div>
               <div>
@@ -847,12 +872,10 @@ async function openDetail(id) {
                 <div class="history-date">${fmtDateTime(e.created_at)}</div>
               </div>
             </div>
-          `).join('')
-          : '<p style="color:var(--text-muted);font-size:12px;padding:8px 0">No history yet.</p>'}
-      </div>`;
-  } catch {
-    historyHtml = '<div class="detail-section" id="itemHistorySection"><h4>History</h4><p style="color:var(--text-muted);font-size:12px;padding:8px 0">No history yet.</p></div>';
-  }
+          `).join('')}
+        </div>`;
+    }
+  } catch {}
 
   panel.innerHTML = `
     <div class="detail-header">
@@ -867,10 +890,6 @@ async function openDetail(id) {
       <h4>Details</h4>
       <div class="meta-row"><span class="label">Serial</span><span class="value" style="font-family:var(--mono);font-size:12px">${esc(item.serial_number || '—')}</span></div>
       <div class="meta-row"><span class="label">Category</span><span class="value">${esc(item.category || '—')}</span></div>
-      ${item.quantity > 1 ? `<div class="meta-row"><span class="label">Quantity</span><span class="value" style="color:var(--accent);font-weight:600">${item.quantity}</span></div>` : ''}
-      ${item.quantity > 1 ? `<div class="meta-row"><span class="label">Available</span><span class="value" style="font-family:var(--sans)">${availPill(item)}</span></div>` : ''}
-      ${item.quantity > 1 ? `<div style="padding:2px 0 8px">${availBar(item)}</div>` : ''}
-      ${item.quantity > 1 ? `<div style="padding-top:4px"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px">Units</div><div id="unitsList-${item.id}" style="color:var(--text-muted);font-size:12px">Loading…</div></div>` : ''}
       <div class="meta-row"><span class="label">Type</span><span class="value">${esc(item.type || '—')}</span></div>
       <div class="meta-row"><span class="label">Location</span><span class="value">${esc(item.location || '—')}</span></div>
       ${st !== 'available' ? `
@@ -880,18 +899,9 @@ async function openDetail(id) {
       ` : ''}
     </div>
     <div class="detail-action">
-      ${(item.quantity || 1) > 1
-        ? (() => {
-            const _avail = Math.max(0, (item.quantity || 1) - (item.checked_out_count || 0));
-            const _out   = item.checked_out_count || 0;
-            return [
-              _avail > 0 ? `<button class="btn-primary" style="flex:1" onclick="openCheckoutModal(${id})">Take 1</button>` : '',
-              _out   > 0 ? `<button class="btn-outline btn-green" style="flex:1;justify-content:center" onclick="openReturnModal(${id})">Return 1</button>` : '',
-            ].join('');
-          })()
-        : st === 'available'
-          ? `<button class="btn-primary" onclick="openCheckoutModal(${id})">Check Out This Item</button>`
-          : `<button class="btn-outline btn-green" style="width:100%;justify-content:center" onclick="openReturnModal(${id})">Return This Item</button>`}
+      ${st === 'available'
+        ? `<button class="btn-primary" onclick="openCheckoutModal(${id})">Check Out This Item</button>`
+        : `<button class="btn-outline btn-green" style="width:100%;justify-content:center" onclick="openReturnModal(${id})">Return This Item</button>`}
     </div>
     ${queueHtml}
     ${historyHtml}
@@ -907,240 +917,10 @@ async function openDetail(id) {
     ` : ''}
   `;
   document.getElementById('detailOverlay').classList.add('open');
-  if (item.quantity > 1) loadUnits(item.id);
 }
 
 function closeDetail() {
   document.getElementById('detailOverlay').classList.remove('open');
-}
-
-// ── Equipment Units (per-unit serial/barcode under qty>1 items) ───────────
-async function loadUnits(equipmentId) {
-  const el = document.getElementById(`unitsList-${equipmentId}`);
-  if (!el) return;
-  try {
-    const { units } = await api(`/api/equipment/${equipmentId}/units`);
-    renderUnits(equipmentId, units);
-  } catch {
-    el.innerHTML = '<span style="color:var(--red)">Failed to load units</span>';
-  }
-}
-
-function renderUnits(equipmentId, units) {
-  const el = document.getElementById(`unitsList-${equipmentId}`);
-  if (!el) return;
-  const isAdminUser = ME.role === 'admin';
-  const parentItem  = ITEMS.find(i => i.id === equipmentId);
-  const hasAvail    = parentItem
-    ? Math.max(0, (parentItem.quantity || 1) - (parentItem.checked_out_count || 0)) > 0
-    : true;
-  el.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:4px;width:100%">
-      ${units.length === 0
-        ? `<span style="color:var(--text-muted);font-size:12px">No individual units recorded.</span>`
-        : units.map(u => {
-            const label   = u.barcode || u.serial_number || ('Unit #' + u.id);
-            const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
-            return `
-              <div id="unitRow-${u.id}" style="display:flex;align-items:center;gap:6px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px;padding:6px 10px">
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:12px;font-weight:600;font-family:var(--mono);color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(u.barcode || '—')}</div>
-                  ${u.serial_number ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">SN: ${esc(u.serial_number)}</div>` : ''}
-                  ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);font-family:var(--sans);margin-top:1px">${esc(u.notes)}</div>` : ''}
-                </div>
-                <div style="display:flex;gap:3px;flex-shrink:0;align-items:center">
-                  ${hasAvail ? `<button class="btn-outline btn-sm btn-green" style="padding:3px 9px;font-size:11px;white-space:nowrap" onclick="openUnitCheckoutModal(${equipmentId},'${noteVal.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}','${label.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">Check Out</button>` : ''}
-                  ${isAdminUser ? `
-                    <button style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);cursor:pointer;font-size:14px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:border-color .15s,color .15s" title="More options" onclick="toggleUnitMenu(${u.id})">⋮</button>
-                    <div id="unitMenu-${u.id}" style="display:none;gap:3px">
-                      <button class="btn-outline btn-sm" style="padding:3px 7px;font-size:11px" onclick="editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}','${(u.name||'').replace(/'/g,"\\'")}')">Edit</button>
-                      <button class="btn-outline btn-sm btn-red" style="padding:3px 6px;font-size:11px" onclick="deleteUnit(${equipmentId},${u.id})">✕</button>
-                    </div>
-                  ` : ''}
-                </div>
-              </div>`;
-          }).join('')}
-      ${isAdminUser ? `
-        <button class="btn-outline btn-sm" style="margin-top:4px;font-size:12px;align-self:flex-start" onclick="addUnit(${equipmentId})">+ Add Unit</button>
-      ` : ''}
-    </div>
-  `;
-}
-
-function toggleUnitMenu(uid) {
-  const menu = document.getElementById('unitMenu-' + uid);
-  if (!menu) return;
-  const open = menu.style.display === 'flex';
-  // Close all open menus first
-  document.querySelectorAll('[id^="unitMenu-"]').forEach(m => { m.style.display = 'none'; });
-  if (!open) menu.style.display = 'flex';
-}
-
-// Checkout modal pre-loaded for a specific unit (opened from the units list in the detail panel)
-async function openUnitCheckoutModal(equipmentId, unitNoteVal, unitLabel) {
-  const item = ITEMS.find(i => i.id === equipmentId);
-  if (!item) return;
-  const avail = Math.max(0, (item.quantity || 1) - (item.checked_out_count || 0));
-  if (avail <= 0) { toast('No units available', 'error'); return; }
-  const isAdmin = ME.role === 'admin';
-  const defaultDays = 7;
-  const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
-  const defaultDueStr = defaultDue.toLocaleDateString('en-US', { month:'short', day:'numeric' });
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-      <span style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase">Check Out Unit</span>
-      <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1" onclick="closeModal()">×</button>
-    </div>
-    <div class="modal-name">${esc(item.name)}</div>
-    <div style="display:inline-flex;align-items:center;gap:6px;margin:6px 0 14px;background:var(--accent-soft);border:1px solid rgba(99,102,241,0.25);border-radius:6px;padding:5px 10px;font-size:12px;font-family:var(--mono);color:var(--accent)">${esc(unitLabel)}</div>
-    <div class="modal-body" id="coStep1">
-      <input type="hidden" id="coUnitNote" value="${esc(unitNoteVal)}">
-      ${isAdmin ? `
-        <div class="form-group">
-          <label>Borrower</label>
-          <select id="coBorrower" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
-            <option value="">Loading users…</option>
-          </select>
-        </div>
-      ` : `
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Checking out to <strong style="color:var(--text)">${esc(ME.username)}</strong></div>
-      `}
-      <div class="form-group">
-        <label id="durationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
-        <div class="slider-wrap">
-          <div class="slider-tooltip" id="coTooltip">${defaultDays}d</div>
-          <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}" oninput="updateDurationLabel(this.value)">
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px">
-          <span>1d</span><span>7d</span><span>14d</span><span>30d</span>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" id="bulkCoBtn" onclick="confirmCheckout(${equipmentId})">Check Out</button>
-      </div>
-    </div>
-    <div id="coSuccess" class="hidden" style="text-align:center;padding:24px 0">
-      <div class="success-icon">✓</div>
-      <div style="font-size:17px;font-weight:600">Checked Out!</div>
-      <div style="font-size:13px;color:var(--text-muted);margin-top:6px">${esc(item.name)} — ${esc(unitLabel)}</div>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-  if (isAdmin) loadUserSelect();
-  requestAnimationFrame(() => updateDurationLabel(defaultDays));
-}
-
-function addUnit(equipmentId) {
-  const item = ITEMS.find(i => i.id === equipmentId);
-  const baseName = item?.name || '';
-  showModal(`
-    <div class="modal-title">Add Units</div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">How many units to add?</label>
-        <input id="bulkUnitQty" class="form-input" type="number" min="1" max="500" value="1"
-          oninput="renderBulkUnitRows(${equipmentId}, '${esc(baseName).replace(/'/g,"\\'")}')">
-      </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Name, serial &amp; barcode per unit — leave blank for any you don't have yet.</div>
-      <div id="bulkUnitRows" style="max-height:300px;overflow-y:auto;padding-right:4px"></div>
-      <div class="form-actions" style="margin-top:12px">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" onclick="saveNewUnit(${equipmentId})">Add Units</button>
-      </div>
-    </div>
-  `);
-  renderBulkUnitRows(equipmentId, baseName);
-}
-
-function renderBulkUnitRows(equipmentId, baseName) {
-  const qty = Math.max(1, parseInt(document.getElementById('bulkUnitQty')?.value, 10) || 1);
-  const container = document.getElementById('bulkUnitRows');
-  if (!container) return;
-  const existing = [...container.querySelectorAll('.bulk-unit-row')];
-  const currentCount = existing.length;
-  if (qty > currentCount) {
-    for (let i = currentCount; i < qty; i++) {
-      const div = document.createElement('div');
-      div.className = 'bulk-unit-row';
-      div.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px';
-      div.innerHTML = `
-        <div style="display:grid;grid-template-columns:28px 1fr;gap:6px;align-items:center;margin-bottom:5px">
-          <span style="font-size:11px;color:var(--text-muted);text-align:right;font-weight:600">${i+1}</span>
-          <input class="form-input bur-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}">
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-          <input class="form-input bur-serial" placeholder="Serial #" style="font-size:12px">
-          <input class="form-input bur-barcode" placeholder="Asset ID / Barcode" style="font-size:12px">
-        </div>`;
-      container.appendChild(div);
-    }
-  } else {
-    while (container.children.length > qty) container.removeChild(container.lastChild);
-  }
-}
-
-async function saveNewUnit(equipmentId) {
-  const rows = document.querySelectorAll('#bulkUnitRows .bulk-unit-row');
-  if (!rows.length) { toast('No units to add', 'error'); return; }
-  const units = [...rows].map(r => ({
-    name:          r.querySelector('.bur-name')?.value.trim() || '',
-    serial_number: r.querySelector('.bur-serial')?.value.trim() || '',
-    barcode:       r.querySelector('.bur-barcode')?.value.trim() || '',
-  }));
-  try {
-    await Promise.all(units.map(u =>
-      api(`/api/equipment/${equipmentId}/units`, { method: 'POST', body: u })
-    ));
-    // Also bump quantity on the parent item to match
-    const item = ITEMS.find(i => i.id === equipmentId);
-    if (item) {
-      await api(`/api/equipment/${equipmentId}`, { method: 'PUT', body: { quantity: (item.quantity || 1) + units.length } });
-    }
-    closeModal();
-    toast(`${units.length} unit${units.length !== 1 ? 's' : ''} added`, 'success');
-    await loadItems();
-    loadUnits(equipmentId);
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-function editUnit(equipmentId, uid, serial, barcode, notes, name) {
-  showModal(`
-    <div class="modal-title">Edit Unit</div>
-    <div class="modal-body">
-      <div class="form-group"><label class="form-label">Unit Name</label><input id="editUnitName" class="form-input" value="${esc(name || '')}"></div>
-      <div class="form-group"><label class="form-label">Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(serial)}"></div>
-      <div class="form-group"><label class="form-label">Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(barcode)}"></div>
-      <div class="form-group"><label class="form-label">Notes</label><input id="editUnitNotes" class="form-input" value="${esc(notes)}"></div>
-      <div class="form-actions">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" onclick="saveEditUnit(${equipmentId},${uid})">Save</button>
-      </div>
-    </div>
-  `);
-}
-
-async function saveEditUnit(equipmentId, uid) {
-  const serial_number = document.getElementById('editUnitSerial')?.value.trim() || '';
-  const barcode       = document.getElementById('editUnitBarcode')?.value.trim() || '';
-  const notes         = document.getElementById('editUnitNotes')?.value.trim() || '';
-  const name          = document.getElementById('editUnitName')?.value.trim() || '';
-  try {
-    await api(`/api/equipment/units/${uid}`, { method: 'PUT', body: { serial_number, barcode, notes, name } });
-    closeModal();
-    toast('Unit updated', 'success');
-    loadUnits(equipmentId);
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-async function deleteUnit(equipmentId, uid) {
-  if (!confirm('Delete this unit?')) return;
-  try {
-    await api(`/api/equipment/units/${uid}`, { method: 'DELETE' });
-    toast('Unit deleted', 'info');
-    loadUnits(equipmentId);
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
 // ── Queue actions ──────────────────────────────────────────────────────
@@ -1220,92 +1000,9 @@ async function updateQueueBadge() {
 }
 
 // ── Checkout modal ─────────────────────────────────────────────────────
-async function openCheckoutModal(id) {
+function openCheckoutModal(id) {
   const item = ITEMS.find(i => i.id === id);
   if (!item) return;
-
-  // Bulk item: show unit picker so user can choose which specific unit to take
-  if ((item.quantity || 1) > 1) {
-    const avail = Math.max(0, (item.quantity || 1) - (item.checked_out_count || 0));
-    if (avail <= 0) { toast('No units available', 'error'); return; }
-    const isAdmin = ME.role === 'admin';
-    const defaultDays = 7;
-    const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
-    const defaultDueStr = defaultDue.toLocaleDateString('en-US', { month:'short', day:'numeric' });
-    const modal = document.getElementById('modalContent');
-    modal.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-        <span style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase">Check Out Unit</span>
-        <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1" onclick="closeModal()">×</button>
-      </div>
-      <div class="modal-name">${esc(item.name)}</div>
-      <div class="modal-id" style="margin-bottom:14px">${esc(item.barcode || 'ID-' + item.id)}</div>
-      <div class="modal-body" id="coStep1">
-        <div class="form-group">
-          <label style="margin-bottom:6px;display:block">Select Unit <span style="color:var(--text-muted);font-weight:400">(${avail} available)</span></label>
-          <div id="bulkUnitList" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding-right:2px">
-            <div style="color:var(--text-muted);font-size:12px;padding:8px 0">Loading units…</div>
-          </div>
-          <input type="hidden" id="coUnitNote" value="">
-        </div>
-        ${isAdmin ? `
-          <div class="form-group">
-            <label>Borrower</label>
-            <select id="coBorrower" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
-              <option value="">Loading users…</option>
-            </select>
-          </div>
-        ` : `
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Checking out to <strong style="color:var(--text)">${esc(ME.username)}</strong></div>
-        `}
-        <div class="form-group">
-          <label id="durationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
-          <div class="slider-wrap">
-            <div class="slider-tooltip" id="coTooltip">${defaultDays}d</div>
-            <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}" oninput="updateDurationLabel(this.value)">
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px">
-            <span>1d</span><span>7d</span><span>14d</span><span>30d</span>
-          </div>
-        </div>
-        <div class="form-actions">
-          <button class="btn-outline" onclick="closeModal()">Cancel</button>
-          <button class="btn-primary" id="bulkCoBtn" onclick="confirmCheckout(${id})">Check Out</button>
-        </div>
-      </div>
-      <div id="coSuccess" class="hidden" style="text-align:center;padding:24px 0">
-        <div class="success-icon">✓</div>
-        <div style="font-size:17px;font-weight:600">Checked Out!</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-top:6px">${esc(item.name)}</div>
-      </div>
-    `;
-    document.getElementById('modalOverlay').classList.add('open');
-    if (isAdmin) loadUserSelect();
-    requestAnimationFrame(() => updateDurationLabel(defaultDays));
-    // Load units async and render picker
-    loadBulkUnitPicker(id);
-    return;
-  }
-
-  let unitSelectHtml = '';
-
-  if (item.model_id) {
-    try {
-      const { units } = await api(`/api/admin/models/${item.model_id}`);
-      const available = (units || []).filter(u => u.status === 'available');
-      if (!available.length) { toast('No units available for this model', 'error'); return; }
-      unitSelectHtml = `
-        <div class="form-group">
-          <label class="form-label">Select Unit</label>
-          <select id="checkoutUnitId" class="form-input">
-            ${available.map(u =>
-              `<option value="${u.id}">${esc(u.barcode || u.serial_number || 'Unit #' + u.id)}${u.serial_number && u.barcode ? ' (' + esc(u.serial_number) + ')' : ''}</option>`
-            ).join('')}
-          </select>
-        </div>`;
-    } catch { toast('Failed to load units', 'error'); return; }
-  }
-
   const modal = document.getElementById('modalContent');
   const isAdmin = ME.role === 'admin';
   // Default due date label
@@ -1319,7 +1016,6 @@ async function openCheckoutModal(id) {
     </div>
     <div class="modal-name">${esc(item.name)}</div>
     <div class="modal-id" style="margin-bottom:16px">${esc(item.barcode || 'ID-' + item.id)}</div>
-    ${unitSelectHtml}
     <div class="modal-body" id="coStep1">
       <div class="form-group">
         <label>Borrower Name</label>
@@ -1334,12 +1030,10 @@ async function openCheckoutModal(id) {
       </div>
       <div class="form-group">
         <label id="durationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
-        <div class="slider-wrap">
-          <div class="slider-tooltip" id="coTooltip">${defaultDays}d</div>
-          <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}"
-            oninput="updateDurationLabel(this.value)">
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px">
+        <input id="coDuration" type="range" min="1" max="30" value="${defaultDays}"
+          style="width:100%;accent-color:var(--accent);cursor:pointer;margin:6px 0"
+          oninput="updateDurationLabel(this.value)">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:2px">
           <span>1d</span><span>7d</span><span>14d</span><span>30d</span>
         </div>
       </div>
@@ -1356,7 +1050,6 @@ async function openCheckoutModal(id) {
   `;
   document.getElementById('modalOverlay').classList.add('open');
   if (isAdmin) loadUserSelect();
-  requestAnimationFrame(() => updateDurationLabel(defaultDays));
 }
 
 function updateDurationLabel(days) {
@@ -1366,64 +1059,6 @@ function updateDurationLabel(days) {
   const dueStr = due.toLocaleDateString('en-US', { month:'short', day:'numeric' });
   const el = document.getElementById('durationLabel');
   if (el) el.textContent = `Duration — ${days} day${days !== 1 ? 's' : ''} (due ${dueStr})`;
-  const slider = document.getElementById('coDuration');
-  if (slider) {
-    const pct = ((days - 1) / 29) * 100;
-    slider.style.background = `linear-gradient(to right, #6366f1 0%, #8b5cf6 ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`;
-    const tooltip = document.getElementById('coTooltip');
-    if (tooltip) {
-      const thumbW = 22;
-      const offset = thumbW / 2 - (pct / 100) * thumbW;
-      tooltip.style.left = `calc(${pct}% + ${offset}px)`;
-      tooltip.textContent = days + 'd';
-    }
-  }
-}
-
-async function loadBulkUnitPicker(equipmentId) {
-  const container = document.getElementById('bulkUnitList');
-  if (!container) return;
-  try {
-    const { units } = await api(`/api/equipment/${equipmentId}/units`);
-    if (!units || units.length === 0) {
-      // No individual units recorded — offer "Any available unit"
-      container.innerHTML = `
-        <div class="unit-pick-card selected" id="unitCard-any" onclick="selectBulkUnit('any','')">
-          <div style="font-size:13px;font-weight:600">Any available unit</div>
-          <div style="font-size:11px;color:var(--text-muted)">No individual units tracked for this item</div>
-        </div>`;
-      document.getElementById('coUnitNote').value = '';
-      return;
-    }
-    // "Any" option first, then individual units
-    const anyCard = `
-      <div class="unit-pick-card" id="unitCard-any" onclick="selectBulkUnit('any','')">
-        <div style="font-size:13px;font-weight:500;color:var(--text-muted)">Any available unit</div>
-      </div>`;
-    const unitCards = units.map(u => {
-      const label = u.barcode || u.serial_number || ('Unit #' + u.id);
-      const sub   = [u.barcode ? u.barcode : null, u.serial_number ? 'SN: ' + u.serial_number : null, u.notes || null]
-                      .filter(Boolean).join(' · ');
-      const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
-      return `
-        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id},'${noteVal.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
-          <div style="font-size:12px;font-weight:600;font-family:var(--mono);color:var(--text)">${esc(label)}</div>
-          ${sub ? `<div style="font-size:11px;color:var(--text-muted)">${esc(sub)}</div>` : ''}
-        </div>`;
-    }).join('');
-    container.innerHTML = anyCard + unitCards;
-  } catch {
-    container.innerHTML = `<div style="color:var(--red);font-size:12px">Failed to load units</div>`;
-  }
-}
-
-function selectBulkUnit(uid, noteVal) {
-  // Highlight selected card
-  document.querySelectorAll('#bulkUnitList .unit-pick-card').forEach(el => el.classList.remove('selected'));
-  const card = document.getElementById('unitCard-' + uid);
-  if (card) card.classList.add('selected');
-  const noteInput = document.getElementById('coUnitNote');
-  if (noteInput) noteInput.value = noteVal || '';
 }
 
 async function loadUserSelect() {
@@ -1445,26 +1080,19 @@ async function loadUserSelect() {
 }
 
 async function confirmCheckout(id) {
-  const btn = document.getElementById('bulkCoBtn') || document.querySelector('#coStep1 .btn-primary');
-  if (btn) btn.disabled = true;
   try {
-    const unitIdEl  = document.getElementById('checkoutUnitId');
-    const unitNote  = document.getElementById('coUnitNote');
-    const targetId  = unitIdEl ? parseInt(unitIdEl.value, 10) : id;
     const days = parseInt(document.getElementById('coDuration')?.value || '7', 10);
     const body = { source: 'Manual', duration_days: days };
-    if (unitNote && unitNote.value) body.notes = 'Unit: ' + unitNote.value;
     if (ME.role === 'admin') {
       const sel = document.getElementById('coBorrower');
       if (sel && sel.value) body.for_user_id = parseInt(sel.value, 10);
     }
-    await api(`/api/equipment/${targetId}/checkout`, { method: 'POST', body });
+    await api(`/api/equipment/${id}/checkout`, { method: 'POST', body });
     document.getElementById('coStep1').classList.add('hidden');
     document.getElementById('coSuccess').classList.remove('hidden');
     setTimeout(() => { closeModal(); loadItems(); closeDetail(); }, 1400);
   } catch (err) {
     toast(err.error || 'Checkout failed', 'error');
-    if (btn) btn.disabled = false;
   }
 }
 
@@ -1472,49 +1100,7 @@ async function confirmCheckout(id) {
 function openReturnModal(id) {
   const item = ITEMS.find(i => i.id === id);
   if (!item) return;
-  const isBulk = (item.quantity || 1) > 1;
   const modal = document.getElementById('modalContent');
-
-  if (isBulk) {
-    // Bulk return: no single borrower to show; just confirm returning 1 unit
-    const out = item.checked_out_count || 0;
-    if (out <= 0) { toast('No units are currently checked out', 'error'); return; }
-    const willRemain = out - 1;
-    const willAvail = Math.max(0, (item.quantity || 1) - willRemain);
-    modal.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <div class="modal-title">Return 1 Unit</div>
-          <div class="modal-name">${esc(item.name)}</div>
-          <div class="modal-id">${esc(item.barcode || 'ID-' + item.id)}</div>
-        </div>
-        <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px" onclick="closeModal()">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="summary-card">
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Current stock status</div>
-          <div style="font-size:14px;font-weight:600;margin-bottom:8px">
-            <span style="color:var(--amber)">${out}</span> unit${out !== 1 ? 's' : ''} out · <span style="color:var(--green)">${Math.max(0, (item.quantity||1) - out)}</span> available
-          </div>
-          <div style="font-size:12px;color:var(--text-muted)">After return → <strong style="color:var(--green)">${willAvail}</strong> available</div>
-        </div>
-        ${item.queue_length > 0 ? `<div class="info-strip" style="background:var(--purple-soft);border-color:rgba(167,139,250,0.2);color:var(--purple)">📣 ${item.queue_length} person(s) in queue — next will be notified</div>` : ''}
-        <div class="form-actions">
-          <button class="btn-outline" onclick="closeModal()">Cancel</button>
-          <button class="btn-outline btn-green" style="flex:2" id="bulkRetBtn" onclick="confirmReturn(${id})">Confirm Return</button>
-        </div>
-      </div>
-      <div id="retSuccess" class="hidden" style="text-align:center;padding:24px 0">
-        <div class="success-icon">✓</div>
-        <div style="font-size:17px;font-weight:600">Returned!</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-top:6px">${esc(item.name)}</div>
-        <div id="retQueueMsg" class="hidden" style="margin-top:8px;font-size:13px;color:var(--purple)"></div>
-      </div>
-    `;
-    document.getElementById('modalOverlay').classList.add('open');
-    return;
-  }
-
   modal.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div>
@@ -1569,46 +1155,35 @@ async function confirmReturn(id) {
 }
 
 // ── Add item modal ─────────────────────────────────────────────────────
-function openAddItemModal() {
-  const isAdmin = ME?.role === 'admin';
+async function openAddItemModal() {
+  let nextId = '';
+  try { const d = await api('/api/equipment/next-asset-id'); nextId = d.asset_id; } catch {}
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <div class="modal-title">${isAdmin ? 'Add Equipment' : 'Request New Item'}</div>
-    ${!isAdmin ? '<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Your request will be sent to an admin for approval.</p>' : ''}
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div class="modal-title">Add New Item</div>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--accent);background:var(--accent-soft);padding:4px 10px;border-radius:6px">${esc(nextId)}</span>
+    </div>
+    <input type="hidden" id="addBarcode" value="${esc(nextId)}">
     <div class="modal-body" id="addStep1">
-      <div class="form-group"><label class="form-label">Name <span style="color:var(--red)">*</span></label>
-        <input id="addName" class="form-input" placeholder="e.g. HP EliteBook 840" autofocus></div>
-      <div class="form-group"><label class="form-label">Category</label>
-        <select id="addCat" class="form-input">
-          <option value="">— Select category —</option>
-          ${CATEGORIES.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}
+      <div class="form-group"><label>Item Name *</label><input id="addName" required></div>
+      <div class="form-group"><label>Category</label>
+        <select id="addCat" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
+          <option value="">Select…</option>
+          <option>Computers</option><option>Components</option><option>GPUs</option>
+          <option>Networking</option><option>Peripherals</option><option>Cables</option>
+          <option>Storage</option><option>Cases</option><option>Adapters</option>
+          <option>PSU Cables</option><option>Infrastructure</option><option>Tools</option>
+          <option>Books</option><option>Other</option>
         </select>
-        <input id="addCatNew" class="form-input" placeholder="Or type a new category name" style="margin-top:6px">
       </div>
-      <div class="form-group"><label class="form-label">Quantity</label>
-        <input id="addQty" class="form-input" type="number" min="1" max="10000" value="1" placeholder="1" oninput="onAddQtyChange()"></div>
-      <div class="form-group"><label class="form-label">Product Number</label>
-        <input id="addProductNumber" class="form-input" placeholder="Optional — model/part number"></div>
-      <div id="addSingleUnit">
-        <div class="form-group"><label class="form-label">Serial Number</label>
-          <input id="addSerial" class="form-input" placeholder="Optional"></div>
-        <div class="form-group"><label class="form-label">Asset ID / Barcode</label>
-          <input id="addBarcode" class="form-input" placeholder="Optional"></div>
-      </div>
-      <div id="addMultiUnits" class="hidden">
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Enter serial &amp; barcode for each unit — leave blank for units you don't have that info for yet.</div>
-        <div id="addUnitRows" style="max-height:280px;overflow-y:auto;padding-right:4px"></div>
-      </div>
-      <div class="form-group"><label class="form-label">Location</label>
-        <select id="addLocId" class="form-input">
-          <option value="">— None —</option>
-          ${LOCATIONS_LIST.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('')}
-        </select></div>
-      <div class="form-group"><label class="form-label">Notes</label>
-        <input id="addNotes" class="form-input" placeholder="Optional"></div>
+      <div class="form-group"><label>Location</label><input id="addLoc" placeholder="e.g. Shelf A1"></div>
+      <div class="form-group"><label>Serial / Asset Number</label><input id="addSerial" class="mono" placeholder="Optional"></div>
+      <div class="form-group"><label>Notes</label><textarea id="addNotes" rows="2"></textarea></div>
+      <div class="info-strip">A QR label will be ready to print after creation.</div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" onclick="submitAddItem()">${isAdmin ? 'Add Item' : 'Submit Request'}</button>
+        <button class="btn-primary" onclick="submitAddItem()">Create & Print Label →</button>
       </div>
     </div>
     <div id="addStep2" class="hidden"></div>
@@ -1616,151 +1191,52 @@ function openAddItemModal() {
   document.getElementById('modalOverlay').classList.add('open');
 }
 
-function onAddQtyChange() {
-  const qty = parseInt(document.getElementById('addQty')?.value, 10) || 1;
-  const single = document.getElementById('addSingleUnit');
-  const multi  = document.getElementById('addMultiUnits');
-  const rows   = document.getElementById('addUnitRows');
-  if (qty > 1) {
-    single?.classList.add('hidden');
-    multi?.classList.remove('hidden');
-    // Build/update unit rows — preserve existing values
-    const existing = rows ? [...rows.querySelectorAll('.unit-row')] : [];
-    const currentCount = existing.length;
-    const baseName = document.getElementById('addName')?.value.trim() || '';
-    if (rows) {
-      if (qty > currentCount) {
-        for (let i = currentCount; i < qty; i++) {
-          const div = document.createElement('div');
-          div.className = 'unit-row';
-          div.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px';
-          div.innerHTML = `
-            <div style="display:grid;grid-template-columns:28px 1fr;gap:6px;align-items:center;margin-bottom:5px">
-              <span style="font-size:11px;color:var(--text-muted);text-align:right;font-weight:600">${i+1}</span>
-              <input class="form-input unit-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}">
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-              <input class="form-input unit-serial" placeholder="Serial #" style="font-size:12px">
-              <input class="form-input unit-barcode" placeholder="Asset ID / Barcode" style="font-size:12px">
-            </div>`;
-          rows.appendChild(div);
-        }
-      } else {
-        while (rows.children.length > qty) rows.removeChild(rows.lastChild);
-      }
-    }
-  } else {
-    single?.classList.remove('hidden');
-    multi?.classList.add('hidden');
-  }
-}
-
 async function submitAddItem() {
-  const name = document.getElementById('addName')?.value.trim();
-  if (!name) { toast('Name is required', 'error'); return; }
-
-  const catSelect = document.getElementById('addCat')?.value.trim();
-  const catNew    = document.getElementById('addCatNew')?.value.trim();
-  const category  = catNew || catSelect || '';
-  const locIdVal  = document.getElementById('addLocId')?.value;
-  const location_id = locIdVal ? parseInt(locIdVal, 10) : null;
-  const locName   = location_id ? (LOCATIONS_LIST.find(l => l.id === location_id)?.name || '') : '';
-  const qty       = Math.max(1, parseInt(document.getElementById('addQty')?.value, 10) || 1);
-
-  // Collect per-unit serial/barcode if multi-unit mode
-  let units = null;
-  if (qty > 1) {
-    const unitRows = document.querySelectorAll('#addUnitRows .unit-row');
-    const collected = [...unitRows].map(r => ({
-      name:          r.querySelector('.unit-name')?.value.trim() || '',
-      serial_number: r.querySelector('.unit-serial')?.value.trim() || '',
-      barcode:       r.querySelector('.unit-barcode')?.value.trim() || '',
-    }));
-    const hasAny = collected.some(u => u.name || u.serial_number || u.barcode);
-    if (hasAny) units = collected;
-  }
-
-  const basePayload = {
-    name,
-    category,
-    location: locName,
-    location_id,
-    notes: document.getElementById('addNotes')?.value.trim() || '',
-    product_number: document.getElementById('addProductNumber')?.value.trim() || '',
-  };
-
-  // Single unit or bulk-no-serials: use existing single payload
-  const payload = units
-    ? basePayload  // individual unit payloads built below
-    : {
-        ...basePayload,
-        serial_number: document.getElementById('addSerial')?.value.trim() || '',
-        barcode:       document.getElementById('addBarcode')?.value.trim() || '',
-        quantity: qty,
-      };
-
+  const name = document.getElementById('addName').value.trim();
+  if (!name) { toast('Item name is required', 'error'); return; }
   try {
-    if (ME?.role === 'admin') {
-      let createdItems = [];
-      if (units) {
-        // Create ONE parent item with full quantity, then attach units individually
-        const { item } = await api('/api/equipment', { method: 'POST', body: { ...basePayload, quantity: units.length } });
-        createdItems.push(item);
-        await Promise.all(units.map(u =>
-          api(`/api/equipment/${item.id}/units`, { method: 'POST', body: u })
-        ));
-        toast(`${name} added with ${units.length} units`, 'success');
-        closeModal();
-        loadItems();
-      } else {
-        // Single row (qty=1) or bulk row (qty>1, no individual serials)
-        const { item } = await api('/api/equipment', { method: 'POST', body: payload });
-        createdItems = [item];
-        toast(qty > 1 ? `Added ${qty}× ${item.name}` : 'Item added', 'success');
-        // Show label step only for single items
-        if (qty === 1) {
-          try {
-            const label = await api(`/api/equipment/${item.id}/label`);
-            _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
-            document.getElementById('addStep1').classList.add('hidden');
-            const step2 = document.getElementById('addStep2');
-            step2.classList.remove('hidden');
-            step2.innerHTML = `
-              <div class="success-icon" style="margin-bottom:12px">✓</div>
-              <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
-              <div class="label-preview">
-                <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
-                <div class="label-info">
-                  <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
-                  <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
-                  <div class="label-id">${esc(label.asset_id)}</div>
-                  <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
-                <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
-              </div>
-            `;
-          } catch {
-            toast('Item created but label failed to load', 'info');
-            closeModal();
-            loadItems();
-          }
-        } else {
-          closeModal();
-          loadItems();
-        }
-      }
-    } else {
-      await api('/api/service-tickets', {
-        method: 'POST',
-        body: { type: 'add_item', payload: units ? { ...basePayload, units, quantity: qty } : payload },
-      });
-      toast('Request submitted — pending admin approval', 'success');
+    const body = {
+      name,
+      barcode: document.getElementById('addBarcode').value.trim(),
+      category: document.getElementById('addCat').value,
+      location: document.getElementById('addLoc').value.trim(),
+      serial_number: document.getElementById('addSerial').value.trim(),
+      notes: document.getElementById('addNotes').value.trim(),
+    };
+    const { item } = await api('/api/equipment', { method: 'POST', body });
+    toast('Item created!', 'success');
+    // Show label step
+    try {
+      const label = await api(`/api/equipment/${item.id}/label`);
+      _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
+      document.getElementById('addStep1').classList.add('hidden');
+      const step2 = document.getElementById('addStep2');
+      step2.classList.remove('hidden');
+      step2.innerHTML = `
+        <div class="success-icon" style="margin-bottom:12px">✓</div>
+        <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
+        <div class="label-preview">
+          <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
+          <div class="label-info">
+            <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
+            <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
+            <div class="label-id">${esc(label.asset_id)}</div>
+            <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
+          <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
+        </div>
+      `;
+    } catch (labelErr) {
+      toast('Item created but label failed to load', 'info');
       closeModal();
     }
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
+    loadItems();
+  } catch (err) {
+    toast(err.error || 'Failed to create item', 'error');
+  }
 }
 
 // ── Edit / Delete / Print ──────────────────────────────────────────────
@@ -1774,18 +1250,8 @@ async function editItem(id) {
     <div class="modal-name">${esc(item.name)}</div>
     <div class="modal-body">
       <div class="form-group"><label>Name</label><input id="editName" value="${esc(item.name)}"></div>
-      <div class="form-group"><label>Category</label>
-        <select id="editCat" class="form-input">
-          <option value="">— None —</option>
-          ${CATEGORIES.map(c => `<option value="${esc(c.name)}"${item.category === c.name ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group"><label>Location</label>
-        <select id="editLocId" class="form-input">
-          <option value="">— None —</option>
-          ${LOCATIONS_LIST.map(l => `<option value="${l.id}"${item.location_id === l.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}
-        </select>
-      </div>
+      <div class="form-group"><label>Category</label><input id="editCat" value="${esc(item.category || '')}"></div>
+      <div class="form-group"><label>Location</label><input id="editLoc" value="${esc(item.location || '')}" placeholder="e.g. Shelf A1"></div>
       <div class="form-group"><label>Serial Number</label><input id="editSerial" class="mono" value="${esc(item.serial_number || '')}"></div>
       <div class="form-group"><label>Barcode</label><input id="editBarcode" class="mono" value="${esc(item.barcode || '')}"></div>
       <div class="form-group"><label>Notes</label><textarea id="editNotes" rows="2">${esc(item.notes || '')}</textarea></div>
@@ -1800,16 +1266,12 @@ async function editItem(id) {
 
 async function submitEdit(id) {
   try {
-    const editLocIdVal = document.getElementById('editLocId')?.value;
-    const editLocationId = editLocIdVal ? parseInt(editLocIdVal, 10) : null;
-    const editLocName = editLocationId ? (LOCATIONS_LIST.find(l => l.id === editLocationId)?.name || '') : '';
     await api(`/api/equipment/${id}`, {
       method: 'PUT',
       body: {
         name: document.getElementById('editName').value,
         category: document.getElementById('editCat').value,
-        location: editLocName,
-        location_id: editLocationId,
+        location: document.getElementById('editLoc').value,
         serial_number: document.getElementById('editSerial').value,
         barcode: document.getElementById('editBarcode').value,
         notes: document.getElementById('editNotes').value,
@@ -1835,21 +1297,21 @@ async function deleteItem(id) {
   }
 }
 
-// Shared label printer — 30mm × 40mm thermal stock (portrait).
+// Shared label printer — 40mm × 30mm thermal stock.
 // Pass the label API response object plus item metadata.
 function doPrintLabel(label, name, category, serial) {
   const frame = document.createElement('iframe');
-  frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:30mm;height:40mm;border:none;';
+  frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:40mm;height:30mm;border:none;';
   document.body.appendChild(frame);
   const doc = frame.contentDocument;
   doc.write(`<html><head><style>
-    @page{size:30mm 40mm portrait;margin:0;}
+    @page{size:40mm 30mm;margin:0;}
     *{box-sizing:border-box;}
-    body{margin:0;padding:1.5mm;font-family:Arial,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5mm;width:30mm;height:40mm;overflow:hidden;}
-    .qr{width:24mm;height:24mm;flex-shrink:0;}
-    .info{width:100%;overflow:hidden;display:flex;flex-direction:column;gap:1px;align-items:center;text-align:center;}
+    body{margin:0;padding:1.5mm;font-family:Arial,sans-serif;display:flex;gap:1.5mm;align-items:center;width:40mm;height:30mm;overflow:hidden;}
+    .qr{width:21mm;height:21mm;flex-shrink:0;}
+    .info{flex:1;overflow:hidden;display:flex;flex-direction:column;gap:1px;}
     .lab{font-size:5pt;color:#555;font-weight:600;letter-spacing:.2px;}
-    .name{font-size:6pt;font-weight:700;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+    .name{font-size:6pt;font-weight:700;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;}
     .id{font-family:monospace;font-size:7pt;font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;}
     .sub{font-size:5pt;color:#555;white-space:nowrap;overflow:hidden;}
   </style></head><body>
@@ -1907,15 +1369,13 @@ async function loadCheckinout() {
   }
   container.innerHTML = outItems.map(item => {
     const st = getItemStatus(item);
-    const inReturnCart = _returnCart.has(item.id);
     return `
-      <div class="out-item" id="returnRow-${item.id}">
+      <div class="out-item">
         <div style="width:6px;height:6px;border-radius:50%;background:${st === 'overdue' ? 'var(--red)' : 'var(--amber)'}"></div>
         <div class="item-info">
           <div class="item-name">${esc(item.name)}</div>
           <div class="item-meta">${esc(item.checked_out_username || '—')} · ${fmtDate(item.checked_out_at)}</div>
         </div>
-        ${isAdmin ? `<button class="btn-cart${inReturnCart ? ' in-cart' : ''}" id="returnCartBtn-${item.id}" title="${inReturnCart ? 'Remove from return cart' : 'Add to return cart'}" onclick="event.stopPropagation();toggleReturnCart(${item.id})">↩</button>` : ''}
         <button class="btn-outline btn-sm btn-green" onclick="openReturnModal(${item.id})">Return</button>
       </div>
     `;
@@ -1923,12 +1383,12 @@ async function loadCheckinout() {
 }
 
 function manualSearchItems() {
-  const q = (document.getElementById('manualSearch').value || '').trim();
+  const q = (document.getElementById('manualSearch').value || '').toLowerCase();
   const container = document.getElementById('manualResults');
   if (!q) { container.innerHTML = ''; return; }
   const results = ITEMS.filter(i => {
-    const hay = `${i.name} ${i.barcode} ${i.serial_number} ${i.category} ${i.product_number || ''}`;
-    return searchMatch(hay, q);
+    const hay = `${i.name} ${i.barcode} ${i.serial_number} ${i.category}`.toLowerCase();
+    return hay.includes(q);
   }).slice(0, 20);
   container.innerHTML = results.map(item => {
     const st = getItemStatus(item);
@@ -2184,56 +1644,24 @@ async function loadTickets() {
   const container = document.getElementById('ticketList');
   try {
     const { tickets } = await api('/api/tickets');
-    _allTickets = tickets || [];
-
-    // Update stat counters
-    const counts = { all: _allTickets.length, open: 0, in_progress: 0, resolved: 0 };
-    _allTickets.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
-    const tStatAll        = document.getElementById('tStatAll');
-    const tStatOpen       = document.getElementById('tStatOpen');
-    const tStatInProgress = document.getElementById('tStatInProgress');
-    const tStatResolved   = document.getElementById('tStatResolved');
-    if (tStatAll)        tStatAll.textContent        = counts.all;
-    if (tStatOpen)       tStatOpen.textContent       = counts.open;
-    if (tStatInProgress) tStatInProgress.textContent = counts.in_progress;
-    if (tStatResolved)   tStatResolved.textContent   = counts.resolved;
-
-    const filtered = ticketFilter === 'all' ? _allTickets : _allTickets.filter(t => t.status === ticketFilter);
-    if (!filtered.length) {
-      const emptyLabels = {
-        all:         ['No IT tickets yet.',      'Submit a request using the + New Ticket button above.'],
-        open:        ['No open tickets.',         'All caught up!'],
-        in_progress: ['Nothing in progress.',     'Open tickets that are being worked on appear here.'],
-        resolved:    ['No resolved tickets.',     'Resolved tickets will appear here.'],
-      };
-      const [title, sub] = emptyLabels[ticketFilter] || emptyLabels.all;
-      container.innerHTML = `
-        <div class="svc-empty">
-          <div class="svc-empty-icon">🖥️</div>
-          <div class="svc-empty-title">${title}</div>
-          <div class="svc-empty-sub">${sub}</div>
-        </div>`;
+    const filtered = ticketFilter === 'all' ? tickets : tickets.filter(t => t.status === ticketFilter);
+    if (!filtered || filtered.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="icon">🎫</div><h3>No tickets</h3><p>All clear!</p></div>';
       return;
     }
     container.innerHTML = filtered.map(t => `
-      <div class="ticket-card prio-${t.status}" onclick="openTicket(${t.id})">
-        <div>
-          <div class="ticket-top">
-            <span class="ticket-id">#${t.id}</span>
-            <span class="ticket-subject">${esc(t.subject)}</span>
-            <div class="priority-dot priority-${t.priority}" title="${t.priority}"></div>
-          </div>
-          <div class="ticket-bottom">
-            <span>${esc(t.reporter_username)}</span>
-            <span class="stc-meta-dot">·</span>
-            <span>${fmtDate(t.created_at)}</span>
-            ${t.assigned_username ? `<span class="stc-meta-dot">·</span><span style="color:${t.assigned_to === ME?.id ? 'var(--green)' : 'var(--accent)'}">👤 ${esc(t.assigned_username)}</span>` : ''}
-            ${t.comment_count > 0 ? `<span class="stc-meta-dot">·</span><span>💬 ${t.comment_count}</span>` : ''}
-          </div>
+      <div class="ticket-card" onclick="openTicket(${t.id})">
+        <div class="ticket-top">
+          <span class="ticket-id">#${t.id}</span>
+          <span class="ticket-subject">${esc(t.subject)}</span>
+          <div class="priority-dot priority-${t.priority}" title="${t.priority}"></div>
         </div>
-        <div class="ticket-card-right">
+        <div class="ticket-bottom">
           <span class="ticket-status ${t.status}">${t.status.replace('_', ' ')}</span>
-          <span class="stc-ticket-num">#${t.id}</span>
+          <span>${esc(t.reporter_username)}</span>
+          <span>${fmtDate(t.created_at)}</span>
+          ${t.assigned_username ? `<span style="color:${t.assigned_to === ME.id ? 'var(--green)' : 'var(--purple)'}">👤 ${esc(t.assigned_username)}</span>` : '<span style="color:var(--text-muted)">unassigned</span>'}
+          ${t.comment_count > 0 ? `<span>💬 ${t.comment_count}</span>` : ''}
         </div>
       </div>
     `).join('');
@@ -2244,8 +1672,9 @@ async function loadTickets() {
 
 function setTicketFilter(f) {
   ticketFilter = f;
-  document.querySelectorAll('#ticketStats .svc-stat-card').forEach(el =>
-    el.classList.toggle('active', el.getAttribute('onclick').includes(`'${f}'`)));
+  document.querySelectorAll('#ticketStatusChips .chip').forEach(el => {
+    el.classList.toggle('active', el.dataset.tstatus === f);
+  });
   loadTickets();
 }
 
@@ -3046,124 +2475,8 @@ async function deleteLocation(id) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  CATEGORIES (admin)
-// ═══════════════════════════════════════════════════════════════════════
-
-async function loadCategories() {
-  const container = document.getElementById('categoriesList');
-  if (!container) return;
-  try {
-    const { categories } = await api('/api/admin/categories');
-    CATEGORIES = categories;
-    buildFilters();
-    if (!categories.length) {
-      container.innerHTML = '<div class="empty-state"><p>No categories yet. Add your first category above.</p></div>';
-      return;
-    }
-    container.innerHTML = categories.map(cat => `
-      <div class="user-row" onclick="openEditCategoryModal(${cat.id})" style="cursor:pointer">
-        <div class="user-info">
-          <div class="user-name">${esc(cat.name)}</div>
-        </div>
-      </div>
-    `).join('');
-  } catch {
-    container.innerHTML = '<div class="empty-state"><p>Failed to load categories</p></div>';
-  }
-}
-
-function openCreateCategoryModal() {
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="modal-title">Add Category</div>
-    <div class="form-group">
-      <label class="form-label">Name <span style="color:var(--red)">*</span></label>
-      <input id="catName" class="form-input" placeholder="e.g. Laptops" autofocus>
-    </div>
-    <div class="form-actions">
-      <button class="btn-outline" onclick="closeModal()">Cancel</button>
-      <button class="btn-primary" onclick="submitCreateCategory()">Add Category</button>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-async function submitCreateCategory() {
-  const name = document.getElementById('catName')?.value.trim();
-  if (!name) { toast('Name is required', 'error'); return; }
-  try {
-    await api('/api/admin/categories', { method: 'POST', body: { name } });
-    toast('Category added', 'success');
-    closeModal();
-    loadCategories();
-  } catch (err) { toast(err.error || 'Failed to add category', 'error'); }
-}
-
-function openEditCategoryModal(id) {
-  const cat = CATEGORIES.find(c => c.id === id);
-  if (!cat) { toast('Category not found', 'error'); return; }
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="modal-title">Edit Category</div>
-    <div class="form-group">
-      <label class="form-label">Name <span style="color:var(--red)">*</span></label>
-      <input id="catName" class="form-input" value="${esc(cat.name)}">
-    </div>
-    <div class="form-actions" style="justify-content:space-between">
-      <button class="btn-outline btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteCategory(${cat.id})">Delete</button>
-      <div style="display:flex;gap:8px">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" onclick="submitEditCategory(${cat.id})">Save</button>
-      </div>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-async function submitEditCategory(id) {
-  const name = document.getElementById('catName')?.value.trim();
-  if (!name) { toast('Name is required', 'error'); return; }
-  try {
-    await api(`/api/admin/categories/${id}`, { method: 'PUT', body: { name } });
-    toast('Category updated', 'success');
-    closeModal();
-    loadCategories();
-  } catch (err) { toast(err.error || 'Failed to update', 'error'); }
-}
-
-async function deleteCategory(id) {
-  if (!confirm('Delete this category? Equipment using it will lose their category assignment.')) return;
-  try {
-    await api(`/api/admin/categories/${id}`, { method: 'DELETE' });
-    toast('Category deleted', 'success');
-    closeModal();
-    loadCategories();
-  } catch (err) { toast(err.error || 'Failed to delete', 'error'); }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 //  AUDIT LOG (admin)
 // ═══════════════════════════════════════════════════════════════════════
-
-const LOGIN_ACTIONS = new Set(['login_success','login_success_mfa','login_failed','login_mfa_required','mfa_failed','logout','register']);
-
-function parseUserAgent(ua) {
-  if (!ua) return '';
-  let os = '';
-  if (/Windows NT 10|Windows 11/.test(ua))      os = 'Windows';
-  else if (/Windows/.test(ua))                   os = 'Windows';
-  else if (/iPhone|iPad/.test(ua))               os = /iPad/.test(ua) ? 'iPad' : 'iPhone';
-  else if (/Android/.test(ua))                   os = 'Android';
-  else if (/Mac OS X/.test(ua))                  os = 'Mac';
-  else if (/Linux/.test(ua))                     os = 'Linux';
-  let browser = '';
-  if (/Edg\//.test(ua))                          browser = 'Edge';
-  else if (/OPR\/|Opera/.test(ua))               browser = 'Opera';
-  else if (/Chrome\//.test(ua))                  browser = 'Chrome';
-  else if (/Firefox\//.test(ua))                 browser = 'Firefox';
-  else if (/Safari\//.test(ua))                  browser = 'Safari';
-  return [browser, os].filter(Boolean).join(' · ');
-}
 
 async function loadAudit() {
   const container = document.getElementById('auditList');
@@ -3173,50 +2486,17 @@ async function loadAudit() {
       container.innerHTML = '<div class="empty-state"><p>No audit entries</p></div>';
       return;
     }
-    container.innerHTML = entries.map(e => {
-      const targetHtml = e.target
-        ? `<a href="#" class="audit-link" onclick="handleAuditTarget(event,${JSON.stringify(e.action)},${JSON.stringify(e.target)})">${esc(e.target)}</a>`
-        : '—';
-      const userHtml = e.username
-        ? `<a href="#" class="audit-link" onclick="openUserFromAudit(event,${e.user_id || 0})">${esc(e.username)}</a>`
-        : '—';
-      const isLogin = LOGIN_ACTIONS.has(e.action);
-      const ipHtml = isLogin && e.ip_address
-        ? `<span class="audit-ip">📍 ${esc(e.ip_address)}</span>`
-        : '';
-      const deviceHtml = isLogin && e.user_agent
-        ? `<span class="audit-device">${esc(parseUserAgent(e.user_agent))}</span>`
-        : '';
-      return `
-        <div class="audit-row">
-          <span class="action">${esc(e.action)}</span>
-          <span class="target">${targetHtml}</span>
-          <span style="font-size:11px;color:var(--text-muted)">${userHtml}</span>
-          <span class="date">${fmtDateTime(e.created_at)}</span>
-          ${ipHtml || deviceHtml ? `<span class="audit-meta">${ipHtml}${deviceHtml}</span>` : '<span></span>'}
-        </div>`;
-    }).join('');
+    container.innerHTML = entries.map(e => `
+      <div class="audit-row">
+        <span class="action">${esc(e.action)}</span>
+        <span class="target">${esc(e.target || '—')}</span>
+        <span style="font-size:11px;color:var(--text-muted)">${esc(e.ip_address || '')}</span>
+        <span class="date">${fmtDateTime(e.created_at)}</span>
+      </div>
+    `).join('');
   } catch {
     container.innerHTML = '<div class="empty-state"><p>Failed to load audit log</p></div>';
   }
-}
-
-function handleAuditTarget(e, action, target) {
-  e.preventDefault();
-  const equipmentActions = ['checkout','checkin','equipment_create','equipment_update','equipment_delete','clear_log'];
-  if (equipmentActions.includes(action)) {
-    const id = parseInt(target, 10);
-    if (!isNaN(id)) { openDetail(id); return; }
-  }
-}
-
-async function openUserFromAudit(e, userId) {
-  e.preventDefault();
-  if (!userId) return;
-  try {
-    switchView('users');
-    setTimeout(() => openUserDetail(userId), 300);
-  } catch { toast('Failed to open user', 'error'); }
 }
 
 // ── Util ───────────────────────────────────────────────────────────────
@@ -3324,25 +2604,17 @@ async function loadPasskeys() {
 
 async function registerPasskey() {
   if (!swa()) { toast('Passkey support not loaded — refresh the page', 'error'); return; }
-  if (!window.PublicKeyCredential) { toast('This browser does not support passkeys', 'error'); return; }
+  if (!window.PublicKeyCredential) { toast('Browser does not support passkeys', 'error'); return; }
   try {
     const options = await api('/api/passkey/register-options', { method: 'POST', body: {} });
     let attestation;
     try {
       attestation = await swa().startRegistration({ optionsJSON: options });
     } catch (err) {
-      if (err && err.name === 'AbortError') return; // user cancelled via browser UI
-      if (err && err.name === 'NotAllowedError') {
-        toast('Browser blocked passkey registration — make sure you\'re on HTTPS and your device has Windows Hello, Face ID, or a security key set up.', 'error');
-        return;
-      }
-      if (err && err.name === 'InvalidStateError') {
-        toast('This device\'s passkey is already registered on your account.', 'error');
-        return;
-      }
+      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) return; // user cancelled
       throw err;
     }
-    const deviceName = prompt('Name this passkey (e.g. "Windows PC", "iPhone 15"):', '') || '';
+    const deviceName = prompt('Name this passkey (e.g. "iPhone 15", "Lab desktop"):', '') || '';
     await api('/api/passkey/register-verify', {
       method: 'POST',
       body: { response: attestation, deviceName: deviceName.trim() },
@@ -3376,1178 +2648,6 @@ async function deletePasskey(id, name) {
     loadPasskeys();
   } catch (err) {
     toast(err.error || 'Failed to remove passkey', 'error');
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  SERVICE TICKETS
-// ═══════════════════════════════════════════════════════════════════════
-
-let _svcTickets = [];
-let _svcFilter = 'all';
-
-function setSvcTicketFilter(f) {
-  _svcFilter = f;
-  document.querySelectorAll('#svcStats .svc-stat-card').forEach(c =>
-    c.classList.toggle('active', c.getAttribute('onclick').includes(`'${f}'`)));
-  renderSvcTickets();
-}
-
-async function loadServiceTickets() {
-  const container = document.getElementById('svcTicketList');
-  if (!container) return;
-  try {
-    const { tickets } = await api('/api/service-tickets');
-    _svcTickets = tickets;
-    renderSvcTickets();
-    loadSvcTicketBadge();
-  } catch { container.innerHTML = '<div class="empty-state"><p>Failed to load service tickets</p></div>'; }
-}
-
-async function loadSvcTicketBadge() {
-  if (ME?.role !== 'admin') return;
-  try {
-    const { pending } = await api('/api/service-tickets/counts');
-    const badge = document.getElementById('svcTicketBadge');
-    if (!badge) return;
-    if (pending > 0) { badge.textContent = pending; badge.classList.remove('hidden'); }
-    else badge.classList.add('hidden');
-  } catch {}
-}
-
-function renderSvcTickets() {
-  const container = document.getElementById('svcTicketList');
-  if (!container) return;
-
-  // Update stat counters
-  const counts = { all: _svcTickets.length, pending: 0, approved: 0, rejected: 0 };
-  _svcTickets.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
-  const statAll      = document.getElementById('svcStatAll');
-  const statPending  = document.getElementById('svcStatPending');
-  const statApproved = document.getElementById('svcStatApproved');
-  const statRejected = document.getElementById('svcStatRejected');
-  if (statAll)      statAll.textContent      = counts.all;
-  if (statPending)  statPending.textContent  = counts.pending;
-  if (statApproved) statApproved.textContent = counts.approved;
-  if (statRejected) statRejected.textContent = counts.rejected;
-
-  const filtered = _svcFilter === 'all' ? _svcTickets : _svcTickets.filter(t => t.status === _svcFilter);
-
-  if (!filtered.length) {
-    const emptyLabels = {
-      all:      ['No service tickets yet.',     'Submit a request using the + New Request button above.'],
-      pending:  ['No pending tickets.',         'All caught up — no requests awaiting approval.'],
-      approved: ['No approved tickets.',        'Approved requests will appear here.'],
-      rejected: ['No rejected tickets.',        'Rejected requests will appear here.'],
-    };
-    const [title, sub] = emptyLabels[_svcFilter] || emptyLabels.all;
-    container.innerHTML = `
-      <div class="svc-empty">
-        <div class="svc-empty-icon">🎫</div>
-        <div class="svc-empty-title">${title}</div>
-        <div class="svc-empty-sub">${sub}</div>
-      </div>`;
-    return;
-  }
-
-  const typeIcon  = { add_item: '📦', quantity_change: '🔢', other: '💬', inventory_discrepancy: '🔍' };
-  const typeLabel = { add_item: 'Add Item', quantity_change: 'Qty Change', other: 'Other', inventory_discrepancy: 'Discrepancy Report' };
-  const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' };
-
-  container.innerHTML = filtered.map(t => {
-    const payload = typeof t.payload === 'string' ? JSON.parse(t.payload) : (t.payload || {});
-    const summary  = payload.name || payload.subject || typeLabel[t.type] || t.type;
-    const icon     = typeIcon[t.type]  || '🎫';
-    const tLabel   = typeLabel[t.type] || t.type;
-    const sLabel   = statusLabel[t.status] || t.status;
-    return `
-      <div class="svc-ticket-card status-${t.status}" onclick="openSvcTicket(${t.id})">
-        <div class="stc-icon type-${t.type}">${icon}</div>
-        <div class="stc-body">
-          <div class="stc-title">${esc(summary)}</div>
-          <div class="stc-meta">
-            <span>${esc(tLabel)}</span>
-            <span class="stc-meta-dot">·</span>
-            <span>${esc(t.requester_username)}</span>
-            <span class="stc-meta-dot">·</span>
-            <span>${fmtDate(t.created_at)}</span>
-          </div>
-        </div>
-        <div class="stc-right">
-          <span class="svc-status ${t.status}">${sLabel}</span>
-          <span class="stc-ticket-num">#${t.id}</span>
-        </div>
-      </div>`;
-  }).join('');
-}
-
-async function openSvcTicket(id) {
-  const t = _svcTickets.find(x => x.id === id);
-  if (!t) return;
-  const payload = typeof t.payload === 'string' ? JSON.parse(t.payload) : (t.payload || {});
-
-  let detailHtml;
-  if (t.type === 'inventory_discrepancy') {
-    const discs = payload.discrepancies || [];
-    const rows = discs.map(d => {
-      const diff = d.counted_qty - d.expected_qty;
-      const diffColor = diff < 0 ? 'var(--red)' : 'var(--green)';
-      const diffStr = diff > 0 ? `+${diff}` : String(diff);
-      return `<tr>
-        <td style="padding:8px 12px;color:var(--text)">${esc(d.item_name)}</td>
-        <td style="padding:8px 12px;text-align:center;color:var(--text-muted)">${d.expected_qty}</td>
-        <td style="padding:8px 12px;text-align:center;color:var(--text-muted)">${d.counted_qty}</td>
-        <td style="padding:8px 12px;text-align:center;font-weight:700;color:${diffColor}">${diffStr}</td>
-        <td style="padding:8px 12px;font-size:12px;color:var(--text-muted)">${esc(d.notes || '')}</td>
-      </tr>`;
-    }).join('');
-    detailHtml = `
-      <div class="detail-section" style="margin-top:12px">
-        <div class="meta-row"><span class="label">Audit #</span><span class="value">${esc(String(payload.audit_id || ''))}</span></div>
-        <div class="meta-row"><span class="label">Closed by</span><span class="value">${esc(payload.closed_by || '')}</span></div>
-        ${payload.audit_notes ? `<div class="meta-row"><span class="label">Audit notes</span><span class="value">${esc(payload.audit_notes)}</span></div>` : ''}
-      </div>
-      <div style="margin-top:14px;overflow-x:auto">
-        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid var(--border);border-radius:8px;overflow:hidden;border-collapse:collapse">
-          <thead>
-            <tr style="background:var(--bg-surface)">
-              <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Item</th>
-              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Expected</th>
-              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Counted</th>
-              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Diff</th>
-              <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Notes</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-  } else {
-    detailHtml = `<div class="detail-section" style="margin-top:12px">${
-      Object.entries(payload)
-        .filter(([, v]) => v !== '' && v != null)
-        .map(([k, v]) => `<div class="meta-row"><span class="label">${esc(k)}</span><span class="value">${esc(String(v))}</span></div>`)
-        .join('')
-    }</div>`;
-  }
-
-  const typeLabels = { add_item: 'Add Item', quantity_change: 'Qty Change', other: 'Other', inventory_discrepancy: 'Discrepancy Report' };
-  const adminActions = ME?.role === 'admin' && t.status === 'pending' ? `
-    <div class="form-group" style="margin-top:16px">
-      <label class="form-label">Admin Notes</label>
-      <input id="svcAdminNotes" class="form-input" placeholder="Optional notes">
-    </div>
-    <div class="form-actions">
-      <button class="btn-outline btn-red" onclick="rejectSvcTicket(${id})">Reject</button>
-      <button class="btn-primary" onclick="approveSvcTicket(${id})">Approve</button>
-    </div>` : `<div style="margin-top:12px;font-size:13px;color:var(--text-muted)">${t.admin_notes ? 'Admin notes: ' + esc(t.admin_notes) : ''}</div>`;
-
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="modal-title">Service Ticket #${t.id}</div>
-    <div class="detail-section">
-      <div class="meta-row"><span class="label">Type</span><span class="value">${esc(typeLabels[t.type] || t.type)}</span></div>
-      <div class="meta-row"><span class="label">Status</span><span class="value"><span class="svc-status ${t.status}">${t.status}</span></span></div>
-      <div class="meta-row"><span class="label">Requested by</span><span class="value">${esc(t.requester_username)}</span></div>
-      <div class="meta-row"><span class="label">Date</span><span class="value">${fmtDateTime(t.created_at)}</span></div>
-    </div>
-    ${detailHtml}
-    ${adminActions}`;
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-async function approveSvcTicket(id) {
-  const notes = document.getElementById('svcAdminNotes')?.value.trim() || '';
-  try {
-    await api(`/api/service-tickets/${id}/approve`, { method: 'POST', body: { admin_notes: notes } });
-    toast('Ticket approved', 'success');
-    closeModal();
-    loadServiceTickets();
-    loadItems();
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-async function rejectSvcTicket(id) {
-  const notes = document.getElementById('svcAdminNotes')?.value.trim() || '';
-  try {
-    await api(`/api/service-tickets/${id}/reject`, { method: 'POST', body: { admin_notes: notes } });
-    toast('Ticket rejected', 'error');
-    closeModal();
-    loadServiceTickets();
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-function openNewServiceTicketModal() {
-  openAddItemModal();
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  INVENTORY AUDIT
-// ═══════════════════════════════════════════════════════════════════════
-
-let _activeAuditId = null;
-
-async function loadAuditView() {
-  const historyEl = document.getElementById('auditHistoryList');
-  const sessionEl = document.getElementById('auditSessionArea');
-  if (!historyEl || !sessionEl) return;
-
-  try {
-    const { audits } = await api('/api/inventory-audit');
-    const open = audits.find(a => a.status === 'open' && a.created_by === ME?.id);
-
-    if (open) {
-      _activeAuditId = open.id;
-      await refreshActiveAudit();
-    } else {
-      _activeAuditId = null;
-      sessionEl.innerHTML = `
-        <div class="svc-empty">
-          <div class="svc-empty-icon">📋</div>
-          <div class="svc-empty-title">No active audit</div>
-          <div class="svc-empty-sub">Click <strong>+ Start Audit</strong> to begin counting inventory and comparing against system quantities.</div>
-        </div>`;
-    }
-
-    const closed = audits.filter(a => a.status === 'closed');
-    historyEl.innerHTML = closed.length ? `
-      <div class="audit-section-heading">Past Audits</div>
-      ${closed.map(a => `
-        <div class="audit-history-card" onclick="openAuditHistory(${a.id})">
-          <div class="audit-history-icon">📋</div>
-          <div style="min-width:0;flex:1">
-            <div class="audit-history-title">Audit #${a.id}</div>
-            <div class="audit-history-meta">
-              <span>${esc(a.created_by_username)}</span>
-              <span class="stc-meta-dot">·</span>
-              <span>${fmtDate(a.created_at)}</span>
-              <span class="stc-meta-dot">·</span>
-              <span>${a.entry_count} entr${a.entry_count === 1 ? 'y' : 'ies'}</span>
-              ${a.notes ? `<span class="stc-meta-dot">·</span><span style="font-style:italic">${esc(a.notes)}</span>` : ''}
-            </div>
-          </div>
-          <div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
-            <button class="btn-outline btn-sm" onclick="editAuditNotes(${a.id},${JSON.stringify(esc(a.notes||''))})">Edit</button>
-            <button class="btn-outline btn-sm btn-red" onclick="deleteAudit(${a.id})">Delete</button>
-          </div>
-        </div>`).join('')}` : '';
-  } catch {
-    historyEl.innerHTML = '<div class="empty-state"><p>Failed to load audits</p></div>';
-  }
-}
-
-function startNewAudit() {
-  const totalItems = ITEMS.length;
-  const locOptions = LOCATIONS_LIST.map(l =>
-    `<option value="${l.id}">${esc(l.name)} (${ITEMS.filter(i => i.location_id === l.id).length} items)</option>`
-  ).join('');
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="modal-title" style="display:flex;align-items:center;gap:10px">
-      <span style="font-size:20px">📋</span>
-      <div>
-        <div>Start Inventory Audit</div>
-        <div style="font-size:12px;font-weight:400;color:var(--text-muted);margin-top:2px">Choose an audit type to begin</div>
-      </div>
-    </div>
-    <div class="modal-body">
-      <div class="audit-scope-row">
-        <span class="scope-icon">📍</span>
-        <label>Scope</label>
-        <select id="auditLocationScope">
-          <option value="">All locations — ${totalItems} item${totalItems !== 1 ? 's' : ''}</option>
-          ${locOptions}
-        </select>
-      </div>
-      <div class="audit-type-cards">
-        <div class="audit-type-card atc-checklist" onclick="_startChecklist()">
-          <div class="atc-icon-wrap">✅</div>
-          <div>
-            <div class="atc-title">Checklist Audit</div>
-            <div class="atc-desc">Pre-loads all inventory items as a checklist grouped by location. Verify each one and flag discrepancies.</div>
-          </div>
-          <div class="atc-cta">Start checklist →</div>
-        </div>
-        <div class="audit-type-card atc-manual" onclick="_startManual()">
-          <div class="atc-icon-wrap">✏️</div>
-          <div>
-            <div class="atc-title">Manual Audit</div>
-            <div class="atc-desc">Add items one by one as you count them. Best for spot-checks or partial audits.</div>
-          </div>
-          <div class="atc-cta">Start manual →</div>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-      </div>
-    </div>`;
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-async function _startChecklist() {
-  const scopeLocId = parseInt(document.getElementById('auditLocationScope')?.value || '', 10) || null;
-  closeModal();
-  try {
-    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: { type: 'checklist', scope_location_id: scopeLocId } });
-    _activeAuditId = audit.id;
-    const { entries } = await api(`/api/inventory-audit/${audit.id}/populate`, { method: 'POST', body: { location_id: scopeLocId } });
-    await refreshActiveAudit();
-    toast(`Checklist loaded — ${entries.length} items`, 'success');
-  } catch (err) { toast(err.error || 'Failed to start checklist', 'error'); }
-}
-
-async function _startManual() {
-  closeModal();
-  try {
-    const { audit } = await api('/api/inventory-audit', { method: 'POST', body: { type: 'manual' } });
-    _activeAuditId = audit.id;
-    await refreshActiveAudit();
-    toast('Audit started', 'success');
-  } catch (err) { toast(err.error || 'Failed to start audit', 'error'); }
-}
-
-async function refreshActiveAudit() {
-  if (!_activeAuditId) return;
-  const { audit, entries } = await api(`/api/inventory-audit/${_activeAuditId}`);
-  renderActiveAudit(audit, entries);
-}
-
-function renderActiveAudit(audit, entries) {
-  if (audit.type === 'checklist') { renderChecklistAudit(audit, entries); return; }
-  const el = document.getElementById('auditSessionArea');
-  if (!el) return;
-  const discClass = (exp, cnt) => {
-    const d = Math.abs(cnt - exp);
-    return d === 0 ? 'disc-ok' : d <= 2 ? 'disc-warn' : 'disc-bad';
-  };
-  const discLabel = (exp, cnt) => {
-    const d = cnt - exp;
-    return d === 0 ? '✓' : (d > 0 ? '+' : '') + d;
-  };
-
-  // Summary counts
-  const matched    = entries.filter(e => e.counted_qty === e.expected_qty).length;
-  const warnings   = entries.filter(e => e.counted_qty !== e.expected_qty && Math.abs(e.counted_qty - e.expected_qty) <= 2).length;
-  const discrepant = entries.filter(e => Math.abs(e.counted_qty - e.expected_qty) > 2).length;
-  const summaryHtml = entries.length ? `
-    <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-      <div style="background:rgba(16,212,160,.1);border:1px solid rgba(16,212,160,.3);border-radius:var(--r-sm);padding:8px 14px;font-size:13px">
-        <span style="color:var(--green);font-weight:700">${matched}</span>
-        <span style="color:var(--text-sec)"> / ${entries.length} match</span>
-      </div>
-      ${warnings ? `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--r-sm);padding:8px 14px;font-size:13px">
-        <span style="color:var(--amber);font-weight:700">${warnings}</span>
-        <span style="color:var(--text-sec)"> off by 1–2</span>
-      </div>` : ''}
-      ${discrepant ? `<div style="background:rgba(240,74,90,.1);border:1px solid rgba(240,74,90,.3);border-radius:var(--r-sm);padding:8px 14px;font-size:13px">
-        <span style="color:var(--red);font-weight:700">${discrepant}</span>
-        <span style="color:var(--text-sec)"> major discrepanc${discrepant === 1 ? 'y' : 'ies'}</span>
-      </div>` : ''}
-    </div>` : '';
-
-  el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:14px;color:var(--text-sec)">Audit #${audit.id} — open</span>
-        <button class="btn-outline btn-sm" onclick="editAuditNotes(${audit.id},${JSON.stringify(esc(audit.notes||''))})">Edit Notes</button>
-        <button class="btn-outline btn-sm btn-red" onclick="deleteAudit(${audit.id})">Delete</button>
-      </div>
-      <button class="btn-outline btn-sm" onclick="closeAuditSession(${audit.id})">Close Audit</button>
-    </div>
-    ${summaryHtml}
-    <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">
-      <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface);grid-template-columns:1fr 80px 80px 80px 60px">
-        <span>Item</span><span style="text-align:center">System</span><span style="text-align:center">Counted</span><span style="text-align:center">Status</span><span></span>
-      </div>
-      ${entries.length ? entries.map(e => {
-        const match = e.counted_qty === e.expected_qty;
-        const d = Math.abs(e.counted_qty - e.expected_qty);
-        const icon = match ? '✅' : d <= 2 ? '⚠️' : '❌';
-        const label = match ? 'Match' : (e.counted_qty > e.expected_qty ? '+' : '') + (e.counted_qty - e.expected_qty);
-        return `
-        <div class="audit-entry-row" style="${!match ? 'background:rgba(240,74,90,0.04);' : ''}grid-template-columns:1fr 80px 80px 80px 60px">
-          <span class="ae-name">${esc(e.item_name)}${e.category_name ? ' <span style="color:var(--text-muted)">(' + esc(e.category_name) + ')</span>' : ''}</span>
-          <span class="ae-num">${e.expected_qty}</span>
-          <span class="ae-num">${e.counted_qty}</span>
-          <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}" style="font-size:13px">${icon} ${label}</span>
-          <span style="text-align:center">
-            <button class="btn-outline btn-sm btn-red" style="padding:2px 7px;font-size:11px" onclick="deleteAuditEntry(${audit.id},${e.id})">✕</button>
-          </span>
-        </div>`;
-      }).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">No entries yet — add one below</div>'}
-    </div>
-    <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);padding:16px">
-      <div style="font-weight:600;font-size:13px;margin-bottom:12px">Add Entry</div>
-      <div class="form-group">
-        <label class="form-label">Item Name <span style="color:var(--red)">*</span></label>
-        <input id="auditItemName" class="form-input" list="auditModelSuggestions" placeholder="e.g. B450 Motherboard">
-        <datalist id="auditModelSuggestions">
-          ${MODELS.map(m => `<option value="${esc(m.name)}">`).join('')}
-        </datalist>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Category</label>
-        <select id="auditCatId" class="form-input">
-          <option value="">— None —</option>
-          ${CATEGORIES.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
-        </select>
-        <input id="auditCatNew" class="form-input" placeholder="Or type a new category name" style="margin-top:6px">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Quantity Counted <span style="color:var(--red)">*</span></label>
-        <input id="auditCountedQty" class="form-input" type="number" min="0" placeholder="0">
-      </div>
-      <div class="form-actions">
-        <button class="btn-primary" onclick="submitAuditEntry()">Save Entry</button>
-      </div>
-    </div>
-    <div style="margin-top:20px">
-      <button class="audit-finish-btn" onclick="closeAuditSession(${audit.id})">
-        ✓ Finish Audit
-      </button>
-      <div style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:8px">Closes this audit and saves all entries</div>
-    </div>`;
-}
-
-async function submitAuditEntry() {
-  if (!_activeAuditId) return;
-  const itemName   = document.getElementById('auditItemName')?.value.trim();
-  const countedQty = parseInt(document.getElementById('auditCountedQty')?.value || '0', 10);
-  const catIdVal   = document.getElementById('auditCatId')?.value;
-  const catNewVal  = document.getElementById('auditCatNew')?.value.trim();
-
-  if (!itemName) { toast('Item name is required', 'error'); return; }
-  if (isNaN(countedQty) || countedQty < 0) { toast('Enter a valid quantity', 'error'); return; }
-
-  let category_id = catIdVal ? parseInt(catIdVal, 10) : null;
-
-  if (catNewVal) {
-    try {
-      const { category } = await api('/api/admin/categories', { method: 'POST', body: { name: catNewVal } });
-      category_id = category.id;
-      CATEGORIES.push(category);
-    } catch (err) { toast(err.error || 'Failed to create category', 'error'); return; }
-  }
-
-  const model = MODELS.find(m => m.name.toLowerCase() === itemName.toLowerCase());
-
-  try {
-    await api(`/api/inventory-audit/${_activeAuditId}/entries`, {
-      method: 'POST',
-      body: { item_name: itemName, counted_qty: countedQty, category_id, model_id: model?.id || null },
-    });
-    toast('Entry saved', 'success');
-    await refreshActiveAudit();
-    // Clear inputs for next entry
-    const nameEl = document.getElementById('auditItemName');
-    const qtyEl  = document.getElementById('auditCountedQty');
-    if (nameEl) nameEl.value = '';
-    if (qtyEl)  qtyEl.value  = '';
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-// ── Checklist Audit ───────────────────────────────────────────────────
-let _clEntries    = [];
-let _clFilter     = 'all';
-let _clLocFilter  = 'all'; // location chip filter
-let _clSaveTimers = {};
-
-function renderChecklistAudit(audit, entries) {
-  const el = document.getElementById('auditSessionArea');
-  if (!el) return;
-  _clEntries = entries.map(e => ({ ...e }));
-
-  // Build unique location list from entries
-  const locMap = new Map(); // id (or null) -> name
-  for (const e of _clEntries) {
-    const key = e.location_id ?? null;
-    if (!locMap.has(key)) locMap.set(key, e.location_name || null);
-  }
-  const locKeys = [...locMap.keys()].sort((a, b) => {
-    if (a === null) return 1;
-    if (b === null) return -1;
-    return (locMap.get(a) || '').localeCompare(locMap.get(b) || '');
-  });
-  const hasLocations = locKeys.some(k => k !== null);
-
-  const scopeBadge = audit.scope_location_id
-    ? `<span style="font-size:12px;background:var(--accent-faint);color:var(--accent);border-radius:4px;padding:2px 7px;border:1px solid var(--accent)">📍 ${esc(entries.find(e => e.location_id === audit.scope_location_id)?.location_name || 'Location scoped')}</span>`
-    : '';
-
-  const locChips = hasLocations ? `
-    <div id="clLocChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
-      <button class="chip active" data-cll="all" onclick="setClLocFilter('all')">All Locations</button>
-      ${locKeys.map(k => {
-        const name = locMap.get(k) || 'Unassigned';
-        const cnt  = _clEntries.filter(e => (e.location_id ?? null) === k).length;
-        return `<button class="chip" data-cll="${k ?? 'null'}" onclick="setClLocFilter(${k === null ? 'null' : k})">${esc(name)} <span style="opacity:.6">(${cnt})</span></button>`;
-      }).join('')}
-    </div>` : '';
-
-  el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:14px;color:var(--text-sec)">Checklist Audit #${audit.id}</span>
-        ${scopeBadge}
-        <button class="btn-outline btn-sm" onclick="editAuditNotes(${audit.id},${JSON.stringify(esc(audit.notes||''))})">Edit Notes</button>
-        <button class="btn-outline btn-sm btn-red" onclick="deleteAudit(${audit.id})">Delete</button>
-      </div>
-      <button class="btn-outline btn-sm" onclick="closeAuditSession(${audit.id})">Close Audit</button>
-    </div>
-
-    <div class="cl-progress-wrap">
-      <div class="cl-progress-header">
-        <span class="cl-progress-label" id="clProgressLabel">0 / ${_clEntries.length} verified</span>
-        <span class="cl-progress-pct" id="clProgressPct">0%</span>
-      </div>
-      <div class="cl-progress-track"><div class="cl-progress-fill" id="clProgressFill" style="width:0%"></div></div>
-      <div class="cl-stats" id="clStats">
-        <div class="cl-stat"><div class="cl-stat-dot" style="background:var(--green)"></div><span id="clStatMatch">0 match</span></div>
-        <div class="cl-stat"><div class="cl-stat-dot" style="background:var(--amber)"></div><span id="clStatDisc">0 discrepancies</span></div>
-        <div class="cl-stat"><div class="cl-stat-dot" style="background:var(--border)"></div><span id="clStatUnchecked">${_clEntries.length} unchecked</span></div>
-      </div>
-    </div>
-
-    <div class="cl-controls">
-      <div class="search-box" style="flex:1;min-width:180px">
-        <span class="search-icon">🔍</span>
-        <input id="clSearch" type="search" placeholder="Search items…" oninput="renderClRows()">
-      </div>
-      <div id="clFilterChips" style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="chip active" data-clf="all"       onclick="setClFilter('all')">All</button>
-        <button class="chip"        data-clf="unchecked" onclick="setClFilter('unchecked')">Unchecked</button>
-        <button class="chip"        data-clf="match"     onclick="setClFilter('match')">Match</button>
-        <button class="chip"        data-clf="disc"      onclick="setClFilter('disc')">Discrepancy</button>
-      </div>
-    </div>
-    ${locChips}
-
-    <div class="cl-table">
-      <div class="cl-thead">
-        <span></span>
-        <span>Item</span>
-        <span style="text-align:center">System</span>
-        <span style="text-align:center">Your Count</span>
-        <span style="text-align:center">Status</span>
-      </div>
-      <div id="clRows"></div>
-    </div>
-    <div style="margin-top:20px">
-      <button class="audit-finish-btn" onclick="closeAuditSession(${audit.id})">
-        ✓ Finish Audit
-      </button>
-      <div style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:8px">Closes this audit and saves all entries</div>
-    </div>`;
-
-  _clFilter    = 'all';
-  _clLocFilter = 'all';
-  renderClRows();
-}
-
-function updateClProgress() {
-  const verified  = _clEntries.filter(e => e.verified).length;
-  const match     = _clEntries.filter(e => e.verified && e.counted_qty === e.expected_qty).length;
-  const disc      = _clEntries.filter(e => e.verified && e.counted_qty !== e.expected_qty).length;
-  const unchecked = _clEntries.filter(e => !e.verified).length;
-  const pct       = _clEntries.length ? Math.round(verified / _clEntries.length * 100) : 0;
-  const lbl = document.getElementById('clProgressLabel');
-  const pctEl = document.getElementById('clProgressPct');
-  const fill  = document.getElementById('clProgressFill');
-  const sm = document.getElementById('clStatMatch');
-  const sd = document.getElementById('clStatDisc');
-  const su = document.getElementById('clStatUnchecked');
-  if (lbl)  lbl.textContent  = `${verified} / ${_clEntries.length} verified`;
-  if (pctEl) pctEl.textContent = `${pct}%`;
-  if (fill)  fill.style.width  = `${pct}%`;
-  if (sm) sm.textContent = `${match} match`;
-  if (sd) sd.textContent = `${disc} discrepanc${disc === 1 ? 'y' : 'ies'}`;
-  if (su) su.textContent = `${unchecked} unchecked`;
-}
-
-function setClFilter(f) {
-  _clFilter = f;
-  document.querySelectorAll('#clFilterChips .chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.clf === f));
-  renderClRows();
-}
-
-function setClLocFilter(locId) {
-  _clLocFilter = locId;
-  document.querySelectorAll('#clLocChips .chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.cll === String(locId === null ? 'null' : locId)));
-  renderClRows();
-}
-
-function _entryRowHtml(e) {
-  const isMatch  = e.verified && e.counted_qty === e.expected_qty;
-  const isDisc   = e.verified && e.counted_qty !== e.expected_qty;
-  const bigDiff  = isDisc && Math.abs(e.counted_qty - e.expected_qty) > 2;
-  const rowCls   = isMatch ? 'state-match' : isDisc ? `state-disc${bigDiff ? ' big-diff' : ''}` : '';
-  const ckCls    = isMatch ? 'ck-match' : isDisc ? `ck-disc${bigDiff ? ' big-diff' : ''}` : '';
-  const ckIcon   = isMatch ? '✓' : isDisc ? '!' : '';
-  const diffCnt  = isDisc ? e.counted_qty - e.expected_qty : 0;
-  const statusHtml = isMatch
-    ? `<span class="cl-status s-match">✓ Match</span>`
-    : isDisc
-      ? `<span class="cl-status s-disc${bigDiff ? ' big-diff' : ''}">${diffCnt > 0 ? '+' : ''}${diffCnt}</span>`
-      : `<span class="cl-status s-none">—</span>`;
-  return `
-    <div class="cl-entry-wrap" id="clentry-${e.id}">
-      <div class="cl-row ${rowCls}">
-        <div class="cl-check ${ckCls}" onclick="clToggleCheck(${e.id})">${ckIcon}</div>
-        <div>
-          <div class="cl-name">${esc(e.item_name)}</div>
-          ${e.category_name ? `<div class="cl-cat">${esc(e.category_name)}</div>` : ''}
-        </div>
-        <div class="cl-sys-qty">${e.expected_qty}</div>
-        <div class="cl-count-wrap">
-          <input class="cl-count-input${isDisc ? (bigDiff ? ' big-diff' : ' differs') : ''}"
-            id="clcount-${e.id}" type="number" min="0"
-            value="${e.verified ? e.counted_qty : ''}"
-            placeholder="${e.expected_qty}"
-            oninput="clCountChange(${e.id})"
-            onclick="event.stopPropagation()">
-        </div>
-        ${statusHtml}
-      </div>
-      <div class="cl-reason-row${isDisc ? ' visible' : ''}" id="clreason-${e.id}">
-        <div class="cl-reason-label">⚠ Reason for discrepancy</div>
-        <textarea class="cl-reason-input" rows="2"
-          placeholder="Why does the count differ? (missing, damaged, wrong location…)"
-          oninput="clReasonChange(${e.id})"
-          onclick="event.stopPropagation()">${esc(e.notes || '')}</textarea>
-      </div>
-    </div>`;
-}
-
-function renderClRows() {
-  const tbody = document.getElementById('clRows');
-  if (!tbody) return;
-  const q = (document.getElementById('clSearch')?.value || '').toLowerCase();
-
-  const visible = _clEntries.filter(e => {
-    if (q && !`${e.item_name} ${e.category_name || ''} ${e.location_name || ''}`.toLowerCase().includes(q)) return false;
-    // location filter
-    if (_clLocFilter !== 'all') {
-      const wantNull = _clLocFilter === null || _clLocFilter === 'null';
-      if (wantNull) { if (e.location_id !== null && e.location_id !== undefined) return false; }
-      else if ((e.location_id ?? null) !== Number(_clLocFilter)) return false;
-    }
-    if (_clFilter === 'unchecked') return !e.verified;
-    if (_clFilter === 'match')     return  e.verified && e.counted_qty === e.expected_qty;
-    if (_clFilter === 'disc')      return  e.verified && e.counted_qty !== e.expected_qty;
-    return true;
-  });
-
-  if (!visible.length) {
-    tbody.innerHTML = `<div class="cl-empty">No items match this filter.</div>`;
-    return;
-  }
-
-  // Group by location for section headers
-  const groups = [];
-  let lastLocId = '__UNSET__';
-  for (const e of visible) {
-    const locId = e.location_id ?? null;
-    if (locId !== lastLocId) {
-      groups.push({ locId, locName: e.location_name || null, entries: [] });
-      lastLocId = locId;
-    }
-    groups[groups.length - 1].entries.push(e);
-  }
-
-  const showHeaders = groups.length > 1 || (groups.length === 1 && groups[0].locName !== null);
-
-  tbody.innerHTML = groups.map(g => {
-    const header = showHeaders
-      ? `<div class="cl-location-header">
-           <span class="cl-loc-icon">📍</span>
-           <span class="cl-loc-name">${esc(g.locName || 'Unassigned')}</span>
-           <span class="cl-loc-count">${g.entries.length} item${g.entries.length === 1 ? '' : 's'}</span>
-         </div>`
-      : '';
-    return header + g.entries.map(_entryRowHtml).join('');
-  }).join('');
-}
-
-function clToggleCheck(entryId) {
-  const entry = _clEntries.find(e => e.id === entryId);
-  if (!entry) return;
-  if (entry.verified) {
-    entry.verified    = 0;
-    entry.counted_qty = entry.expected_qty;
-    entry.notes       = '';
-  } else {
-    entry.verified    = 1;
-    entry.counted_qty = entry.expected_qty;
-  }
-  updateClProgress();
-  // Patch DOM in place for the touched row
-  const wrap = document.getElementById(`clentry-${entryId}`);
-  if (wrap) {
-    const isMatch = entry.verified && entry.counted_qty === entry.expected_qty;
-    const row = wrap.querySelector('.cl-row');
-    const ck  = wrap.querySelector('.cl-check');
-    if (row) row.className = `cl-row${isMatch ? ' state-match' : ''}`;
-    if (ck)  { ck.className = `cl-check${isMatch ? ' ck-match' : ''}`; ck.textContent = isMatch ? '✓' : ''; }
-    const countInput = wrap.querySelector('.cl-count-input');
-    if (countInput) { countInput.value = entry.verified ? entry.counted_qty : ''; countInput.className = 'cl-count-input'; }
-    const statusEl = wrap.querySelector('.cl-status');
-    if (statusEl) { statusEl.className = isMatch ? 'cl-status s-match' : 'cl-status s-none'; statusEl.textContent = isMatch ? '✓ Match' : '—'; }
-    const reasonRow = document.getElementById(`clreason-${entryId}`);
-    if (reasonRow) reasonRow.classList.remove('visible');
-  }
-  clScheduleSave(entryId);
-}
-
-function clCountChange(entryId) {
-  const entry = _clEntries.find(e => e.id === entryId);
-  const input = document.getElementById(`clcount-${entryId}`);
-  if (!entry || !input) return;
-  const val = input.value.trim();
-  if (val === '') { entry.verified = 0; entry.counted_qty = entry.expected_qty; updateClProgress(); clScheduleSave(entryId); return; }
-  const qty = parseInt(val, 10);
-  if (isNaN(qty) || qty < 0) return;
-  entry.counted_qty = qty;
-  entry.verified    = 1;
-  const differs  = qty !== entry.expected_qty;
-  const bigDiff  = differs && Math.abs(qty - entry.expected_qty) > 2;
-  input.className = `cl-count-input${bigDiff ? ' big-diff' : differs ? ' differs' : ''}`;
-  const reasonRow = document.getElementById(`clreason-${entryId}`);
-  if (reasonRow) reasonRow.classList.toggle('visible', differs);
-  const wrap = document.getElementById(`clentry-${entryId}`);
-  if (wrap) {
-    const row = wrap.querySelector('.cl-row');
-    const ck  = wrap.querySelector('.cl-check');
-    if (row) row.className = `cl-row${differs ? ` state-disc${bigDiff ? ' big-diff' : ''}` : ' state-match'}`;
-    if (ck)  { ck.className = `cl-check${differs ? ` ck-disc${bigDiff ? ' big-diff' : ''}` : ' ck-match'}`; ck.textContent = differs ? '!' : '✓'; }
-    const statusEl = wrap.querySelector('.cl-status');
-    const diff = qty - entry.expected_qty;
-    if (statusEl) { statusEl.className = differs ? `cl-status s-disc${bigDiff ? ' big-diff' : ''}` : 'cl-status s-match'; statusEl.textContent = differs ? `${diff > 0 ? '+' : ''}${diff}` : '✓ Match'; }
-  }
-  updateClProgress();
-  clScheduleSave(entryId);
-}
-
-function clReasonChange(entryId) {
-  const entry    = _clEntries.find(e => e.id === entryId);
-  const textarea = document.querySelector(`#clreason-${entryId} .cl-reason-input`);
-  if (!entry || !textarea) return;
-  entry.notes = textarea.value;
-  clScheduleSave(entryId);
-}
-
-function clScheduleSave(entryId) {
-  if (_clSaveTimers[entryId]) clearTimeout(_clSaveTimers[entryId]);
-  _clSaveTimers[entryId] = setTimeout(() => clSaveEntry(entryId), 600);
-}
-
-async function clSaveEntry(entryId) {
-  if (!_activeAuditId) return;
-  const entry = _clEntries.find(e => e.id === entryId);
-  if (!entry) return;
-  try {
-    await api(`/api/inventory-audit/${_activeAuditId}/entries/${entryId}`, {
-      method: 'PUT',
-      body: { counted_qty: entry.counted_qty, notes: entry.notes || '', verified: entry.verified },
-    });
-  } catch { toast('Auto-save failed', 'error'); }
-}
-
-async function closeAuditSession(id) {
-  try {
-    await api(`/api/inventory-audit/${id}/close`, { method: 'POST', body: {} });
-    _activeAuditId = null;
-    toast('Audit closed', 'success');
-    loadAuditView();
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-function editAuditNotes(id, currentNotes) {
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="modal-title">Edit Audit Notes</div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <input id="auditNotesInput" class="form-input" value="${currentNotes}" placeholder="Optional notes about this audit">
-      </div>
-      <div class="form-actions">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" onclick="saveAuditNotes(${id})">Save</button>
-      </div>
-    </div>`;
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-async function saveAuditNotes(id) {
-  const notes = document.getElementById('auditNotesInput')?.value.trim() || '';
-  try {
-    await api(`/api/inventory-audit/${id}`, { method: 'PUT', body: { notes } });
-    toast('Audit updated', 'success');
-    closeModal();
-    loadAuditView();
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-async function deleteAudit(id) {
-  if (!confirm(`Delete Audit #${id} and all its entries? This cannot be undone.`)) return;
-  try {
-    await api(`/api/inventory-audit/${id}`, { method: 'DELETE' });
-    if (_activeAuditId === id) _activeAuditId = null;
-    toast('Audit deleted', 'info');
-    loadAuditView();
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-async function deleteAuditEntry(auditId, entryId) {
-  try {
-    await api(`/api/inventory-audit/${auditId}/entries/${entryId}`, { method: 'DELETE' });
-    refreshActiveAudit();
-  } catch (err) { toast(err.error || 'Failed', 'error'); }
-}
-
-async function openAuditHistory(id) {
-  try {
-    const { audit, entries } = await api(`/api/inventory-audit/${id}`);
-    const discClass = (exp, cnt) => { const d = Math.abs(cnt - exp); return d === 0 ? 'disc-ok' : d <= 2 ? 'disc-warn' : 'disc-bad'; };
-    const matched    = entries.filter(e => e.counted_qty === e.expected_qty).length;
-    const discrepant = entries.filter(e => e.counted_qty !== e.expected_qty).length;
-    const modal = document.getElementById('modalContent');
-    modal.innerHTML = `
-      <div class="modal-title">Audit #${audit.id}</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-        ${fmtDate(audit.created_at)} · ${esc(audit.created_by_username)} · ${entries.length} entries
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <div style="background:rgba(16,212,160,.1);border:1px solid rgba(16,212,160,.3);border-radius:var(--r-sm);padding:6px 12px;font-size:12px">
-          <span style="color:var(--green);font-weight:700">${matched}</span>
-          <span style="color:var(--text-sec)"> matched</span>
-        </div>
-        ${discrepant ? `<div style="background:rgba(240,74,90,.1);border:1px solid rgba(240,74,90,.3);border-radius:var(--r-sm);padding:6px 12px;font-size:12px">
-          <span style="color:var(--red);font-weight:700">${discrepant}</span>
-          <span style="color:var(--text-sec)"> discrepanc${discrepant === 1 ? 'y' : 'ies'}</span>
-        </div>` : ''}
-      </div>
-      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-        <div class="audit-entry-row" style="font-weight:600;font-size:12px;color:var(--text-muted);background:var(--bg-surface)">
-          <span>Item</span><span style="text-align:center">System</span><span style="text-align:center">Counted</span><span style="text-align:center">Status</span>
-        </div>
-        ${entries.map(e => {
-          const match = e.counted_qty === e.expected_qty;
-          const icon  = match ? '✅' : Math.abs(e.counted_qty - e.expected_qty) <= 2 ? '⚠️' : '❌';
-          const label = match ? 'Match' : (e.counted_qty > e.expected_qty ? '+' : '') + (e.counted_qty - e.expected_qty);
-          return `
-          <div class="audit-entry-row" style="${!match ? 'background:rgba(240,74,90,0.04)' : ''}">
-            <span class="ae-name">${esc(e.item_name)}</span>
-            <span class="ae-num">${e.expected_qty}</span>
-            <span class="ae-num">${e.counted_qty}</span>
-            <span class="ae-diff ${discClass(e.expected_qty, e.counted_qty)}">${icon} ${label}</span>
-          </div>`;
-        }).join('')}
-      </div>
-      <div class="form-actions" style="margin-top:16px">
-        <button class="btn-outline" onclick="closeModal()">Close</button>
-      </div>`;
-    document.getElementById('modalOverlay').classList.add('open');
-  } catch { toast('Failed to load audit', 'error'); }
-}
-
-// ── Mass Checkout Cart ──────────────────────────────────────────────
-
-function toggleCart(id) {
-  if (_cart.has(id)) {
-    _cart.delete(id);
-  } else {
-    const item = ITEMS.find(i => i.id === id);
-    if (!item || getItemStatus(item) !== 'available') { toast('Item is not available', 'error'); return; }
-    _cart.add(id);
-  }
-  // Update button state in DOM if already rendered
-  const btn = document.getElementById(`cartBtn-${id}`);
-  if (btn) {
-    btn.classList.toggle('in-cart', _cart.has(id));
-    btn.title = _cart.has(id) ? 'Remove from cart' : 'Add to cart';
-  }
-  updateCartFab();
-}
-
-function updateCartFab() {
-  const fab = document.getElementById('cartFab');
-  const badge = document.getElementById('cartBadge');
-  if (!fab) return;
-  const n = _cart.size;
-  badge.textContent = n;
-  fab.classList.toggle('hidden', n === 0);
-}
-
-async function openCartModal() {
-  if (_cart.size === 0) return;
-  const ids = [..._cart];
-  const cartItems = ids.map(id => ITEMS.find(i => i.id === id)).filter(Boolean);
-
-  const modal = document.getElementById('modalContent');
-  const isAdmin = ME.role === 'admin';
-  const defaultDays = 7;
-  const defaultDue = new Date(); defaultDue.setDate(defaultDue.getDate() + defaultDays);
-  const defaultDueStr = defaultDue.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-  modal.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-      <div>
-        <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Mass Checkout</div>
-        <div style="font-size:16px;font-weight:700;color:var(--text)">${cartItems.length} item${cartItems.length !== 1 ? 's' : ''} selected</div>
-      </div>
-      <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px" onclick="closeModal()">×</button>
-    </div>
-
-    <div class="cart-item-list" id="cartItemList">
-      ${cartItems.map(item => `
-        <div class="cart-item-row" id="cartRow-${item.id}">
-          <div style="flex:1">
-            <div class="cart-item-name">${esc(item.name)}</div>
-            <div class="cart-item-id">${esc(item.barcode || 'ID-' + item.id)}</div>
-          </div>
-          <button class="cart-remove-btn" onclick="cartRemoveItem(${item.id})" title="Remove">✕</button>
-        </div>
-      `).join('')}
-    </div>
-
-    <div id="cartCheckoutForm">
-      ${isAdmin ? `
-        <div class="form-group">
-          <label class="form-label">Borrower</label>
-          <select id="cartBorrower" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px">
-            <option value="">Loading users…</option>
-          </select>
-        </div>
-      ` : `
-        <div class="form-group">
-          <label class="form-label">Borrower</label>
-          <div style="padding:10px 12px;border-radius:9px;background:var(--bg-surface);border:1px solid var(--border-input);color:var(--text-sec);font-size:13px">${esc(ME.username)}</div>
-        </div>
-      `}
-      <div class="form-group">
-        <label class="form-label" id="cartDurationLabel">Duration — ${defaultDays} days (due ${defaultDueStr})</label>
-        <div class="slider-wrap">
-          <div class="slider-tooltip" id="cartTooltip">${defaultDays}d</div>
-          <input id="cartDuration" type="range" min="1" max="30" value="${defaultDays}" oninput="updateCartDurationLabel(this.value)">
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:6px"><span>1d</span><span>7d</span><span>14d</span><span>30d</span></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes (optional)</label>
-        <input id="cartNotes" type="text" maxlength="500" placeholder="Add a note…" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px;box-sizing:border-box">
-      </div>
-      <div class="form-actions">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" id="cartSubmitBtn" onclick="confirmBatchCheckout()">Checkout ${cartItems.length} Item${cartItems.length !== 1 ? 's' : ''} →</button>
-      </div>
-    </div>
-
-    <div id="cartSuccess" class="hidden" style="text-align:center;padding:24px 0">
-      <div class="success-icon">✓</div>
-      <div style="font-size:17px;font-weight:600">Checked Out!</div>
-      <div id="cartSuccessMsg" style="font-size:13px;color:var(--text-muted);margin-top:6px"></div>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-  if (isAdmin) loadCartUserSelect();
-  requestAnimationFrame(() => updateCartDurationLabel(defaultDays));
-}
-
-function cartRemoveItem(id) {
-  _cart.delete(id);
-  const row = document.getElementById(`cartRow-${id}`);
-  if (row) row.remove();
-  const btn = document.getElementById(`cartBtn-${id}`);
-  if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
-  updateCartFab();
-  const remaining = document.querySelectorAll('#cartItemList .cart-item-row').length;
-  if (remaining === 0) { closeModal(); return; }
-  const submitBtn = document.getElementById('cartSubmitBtn');
-  if (submitBtn) submitBtn.textContent = `Checkout ${remaining} Item${remaining !== 1 ? 's' : ''} →`;
-}
-
-async function loadCartUserSelect() {
-  try {
-    const { users } = await api('/api/admin/users');
-    const sel = document.getElementById('cartBorrower');
-    if (!sel) return;
-    sel.innerHTML = users.map(u => `<option value="${u.id}">${esc(u.username)} (${u.role})</option>`).join('');
-    sel.value = ME.id;
-  } catch {
-    const sel = document.getElementById('cartBorrower');
-    if (sel) sel.innerHTML = '<option value="">Failed to load users</option>';
-  }
-}
-
-function updateCartDurationLabel(days) {
-  days = parseInt(days, 10);
-  const due = new Date(); due.setDate(due.getDate() + days);
-  const dueStr = due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const el = document.getElementById('cartDurationLabel');
-  if (el) el.textContent = `Duration — ${days} day${days !== 1 ? 's' : ''} (due ${dueStr})`;
-  const slider = document.getElementById('cartDuration');
-  if (slider) {
-    const pct = ((days - 1) / 29) * 100;
-    slider.style.background = `linear-gradient(to right, #6366f1 0%, #8b5cf6 ${pct}%, rgba(255,255,255,0.12) ${pct}%, rgba(255,255,255,0.12) 100%)`;
-    const tooltip = document.getElementById('cartTooltip');
-    if (tooltip) {
-      const thumbW = 22;
-      tooltip.style.left = `calc(${pct}% + ${thumbW / 2 - (pct / 100) * thumbW}px)`;
-      tooltip.textContent = days + 'd';
-    }
-  }
-}
-
-async function confirmBatchCheckout() {
-  const ids = [..._cart];
-  if (!ids.length) return;
-  const days = parseInt(document.getElementById('cartDuration')?.value || '7', 10);
-  const notes = (document.getElementById('cartNotes')?.value || '').trim();
-  const body = { equipment_ids: ids, duration_days: days, notes };
-  if (ME.role === 'admin') {
-    const sel = document.getElementById('cartBorrower');
-    if (sel && sel.value) body.for_user_id = parseInt(sel.value, 10);
-  }
-  const submitBtn = document.getElementById('cartSubmitBtn');
-  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Processing…'; }
-  try {
-    const { results } = await api('/api/equipment/batch-checkout', { method: 'POST', body });
-    const succeeded = results.filter(r => r.success).length;
-    const failed    = results.filter(r => !r.success);
-    // Clear cart for successfully checked-out items
-    for (const r of results) {
-      if (r.success) {
-        _cart.delete(r.id);
-        const btn = document.getElementById(`cartBtn-${r.id}`);
-        if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
-      }
-    }
-    updateCartFab();
-    // Show success state
-    document.getElementById('cartCheckoutForm').classList.add('hidden');
-    const cartItemList = document.getElementById('cartItemList');
-    if (cartItemList) cartItemList.style.display = 'none';
-    const successEl = document.getElementById('cartSuccess');
-    successEl.classList.remove('hidden');
-    let msg = `${succeeded} item${succeeded !== 1 ? 's' : ''} checked out successfully.`;
-    if (failed.length) msg += ` ${failed.length} item${failed.length !== 1 ? 's' : ''} could not be checked out.`;
-    document.getElementById('cartSuccessMsg').textContent = msg;
-    if (failed.length) {
-      const names = failed.map(r => { const it = ITEMS.find(i => i.id === r.id); return it ? it.name : `ID ${r.id}`; });
-      toast(`Failed: ${names.join(', ')}`, 'error');
-    }
-    setTimeout(() => { closeModal(); loadItems(); closeDetail(); }, 1800);
-  } catch (err) {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = `Checkout ${ids.length} Items →`; }
-    toast(err.error || 'Batch checkout failed', 'error');
-  }
-}
-
-// ── Mass Return Cart ─────────────────────────────────────────────────────
-function toggleReturnCart(id) {
-  if (_returnCart.has(id)) {
-    _returnCart.delete(id);
-  } else {
-    _returnCart.add(id);
-  }
-  const btn = document.getElementById(`returnCartBtn-${id}`);
-  if (btn) {
-    btn.classList.toggle('in-cart', _returnCart.has(id));
-    btn.title = _returnCart.has(id) ? 'Remove from return cart' : 'Add to return cart';
-  }
-  updateReturnFab();
-}
-
-function updateReturnFab() {
-  const fab = document.getElementById('returnFab');
-  const badge = document.getElementById('returnBadge');
-  const n = _returnCart.size;
-  if (fab) fab.classList.toggle('hidden', n === 0);
-  if (badge) badge.textContent = n;
-}
-
-function openReturnCartModal() {
-  if (_returnCart.size === 0) return;
-  const ids = [..._returnCart];
-  const returnItems = ids.map(id => ITEMS.find(i => i.id === id)).filter(Boolean);
-  showModal(`
-    <div style="padding:20px 24px 0">
-      <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Mass Return</div>
-      <div style="font-size:16px;font-weight:700;color:var(--text)">${returnItems.length} item${returnItems.length !== 1 ? 's' : ''} selected</div>
-    </div>
-    <div class="cart-item-list" style="padding:12px 24px 0" id="returnCartItemList">
-      ${returnItems.map(item => `
-        <div class="cart-item-row" id="returnCartRow-${item.id}">
-          <div style="flex:1;min-width:0">
-            <div class="cart-item-name">${esc(item.name)}</div>
-            <div class="cart-item-id">${esc(item.checked_out_username || '—')}</div>
-          </div>
-          <button class="cart-remove-btn" onclick="returnCartRemoveItem(${item.id})" title="Remove">✕</button>
-        </div>
-      `).join('')}
-    </div>
-    <div id="returnCartForm" style="padding:16px 24px 20px">
-      <input id="returnCartNotes" type="text" maxlength="500" placeholder="Add a note… (optional)" style="width:100%;padding:10px 12px;border-radius:9px;background:var(--bg-base);border:1px solid var(--border-input);color:var(--text);font-size:13px;box-sizing:border-box;margin-bottom:12px">
-      <button class="btn-primary" id="returnCartSubmitBtn" onclick="confirmBatchCheckin()" style="width:100%;background:var(--green,#16a34a)">Return ${returnItems.length} Item${returnItems.length !== 1 ? 's' : ''} →</button>
-    </div>
-    <div id="returnCartSuccess" class="hidden" style="text-align:center;padding:24px">
-      <div style="font-size:28px">✅</div>
-      <div id="returnCartSuccessMsg" style="font-size:13px;color:var(--text-muted);margin-top:6px"></div>
-    </div>
-  `);
-}
-
-function returnCartRemoveItem(id) {
-  _returnCart.delete(id);
-  const row = document.getElementById(`returnCartRow-${id}`);
-  if (row) row.remove();
-  const btn = document.getElementById(`returnCartBtn-${id}`);
-  if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to return cart'; }
-  updateReturnFab();
-  const remaining = document.querySelectorAll('#returnCartItemList .cart-item-row').length;
-  if (remaining === 0) closeModal();
-  const submitBtn = document.getElementById('returnCartSubmitBtn');
-  if (submitBtn) submitBtn.textContent = `Return ${remaining} Item${remaining !== 1 ? 's' : ''} →`;
-}
-
-async function confirmBatchCheckin() {
-  const ids = [..._returnCart];
-  if (!ids.length) return;
-  const notes = (document.getElementById('returnCartNotes')?.value || '').trim();
-  const body = { equipment_ids: ids, notes };
-  const submitBtn = document.getElementById('returnCartSubmitBtn');
-  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Processing…'; }
-  try {
-    const { results } = await api('/api/equipment/batch-checkin', { method: 'POST', body });
-    const succeeded = results.filter(r => r.success).length;
-    const failed    = results.filter(r => !r.success);
-    for (const r of results) {
-      if (r.success) {
-        _returnCart.delete(r.id);
-        const btn = document.getElementById(`returnCartBtn-${r.id}`);
-        if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to return cart'; }
-      }
-    }
-    updateReturnFab();
-    document.getElementById('returnCartForm')?.classList.add('hidden');
-    const listEl = document.getElementById('returnCartItemList');
-    if (listEl) listEl.style.display = 'none';
-    const successEl = document.getElementById('returnCartSuccess');
-    if (successEl) successEl.classList.remove('hidden');
-    let msg = `${succeeded} item${succeeded !== 1 ? 's' : ''} returned successfully.`;
-    if (failed.length) msg += ` ${failed.length} could not be returned.`;
-    const msgEl = document.getElementById('returnCartSuccessMsg');
-    if (msgEl) msgEl.textContent = msg;
-    if (failed.length) {
-      const names = failed.map(r => { const it = ITEMS.find(i => i.id === r.id); return it ? it.name : `ID ${r.id}`; });
-      toast(`Failed: ${names.join(', ')}`, 'error');
-    }
-    setTimeout(() => { closeModal(); loadCheckinout(); }, 1800);
-  } catch (err) {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = `Return ${ids.length} Items →`; }
-    toast(err.error || 'Batch return failed', 'error');
   }
 }
 
