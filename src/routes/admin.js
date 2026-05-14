@@ -31,7 +31,9 @@ function genTempPassword() {
 
 const router = express.Router();
 
-router.use(requireAuth, requireRole('admin'));
+// Owner role gets full inventory management access (models, categories, locations, overdue).
+// Pure admin-only routes (user management, audit log) re-apply requireRole('admin') individually.
+router.use(requireAuth, requireRole(['admin', 'owner']));
 
 const studentGroupEnum = z.enum(['am', 'pm', 'allday', 'staff', 'none']);
 
@@ -51,11 +53,11 @@ const updateUserSchema = z.object({
   email: z.string().email().max(254).optional(),
 });
 
-router.get('/users', (_req, res) => {
+router.get('/users', requireRole('admin'), (_req, res) => {
   res.json({ users: userService.listAll() });
 });
 
-router.get('/users/:id(\\d+)', (req, res) => {
+router.get('/users/:id(\\d+)', requireRole('admin'), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const user = userService.getById(id);
   if (!user) return res.status(404).json({ error: 'Not found' });
@@ -66,7 +68,7 @@ router.get('/users/:id(\\d+)', (req, res) => {
   });
 });
 
-router.post('/users', validate(createUserSchema), async (req, res) => {
+router.post('/users', requireRole('admin'), validate(createUserSchema), async (req, res) => {
   if (userService.getByUsername(req.body.username)) return res.status(409).json({ error: 'Username taken' });
   if (userService.getByEmail(req.body.email)) return res.status(409).json({ error: 'Email already registered' });
   const tempPw = genTempPassword();
@@ -79,7 +81,7 @@ router.post('/users', validate(createUserSchema), async (req, res) => {
   res.status(201).json({ user: userService.pickPublic(userService.getById(user.id)), tempPassword: tempPw });
 });
 
-router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
+router.put('/users/:id(\\d+)', requireRole('admin'), validate(updateUserSchema), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const user = userService.getById(id);
   if (!user) return res.status(404).json({ error: 'Not found' });
@@ -127,7 +129,7 @@ router.put('/users/:id(\\d+)', validate(updateUserSchema), async (req, res) => {
   res.json(result);
 });
 
-router.delete('/users/:id(\\d+)', (req, res) => {
+router.delete('/users/:id(\\d+)', requireRole('admin'), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (id === req.user.id) return res.status(400).json({ error: "You can't delete yourself" });
   const user = userService.getById(id);
@@ -146,7 +148,7 @@ const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 const VALID_ROLES_CSV  = new Set(['admin', 'user']);
 const VALID_GROUPS_CSV = new Set(['am', 'pm', 'allday', 'staff', 'none']);
 
-router.post('/users/import', csvUpload.single('file'), async (req, res) => {
+router.post('/users/import', requireRole('admin'), csvUpload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const text = req.file.buffer.toString('utf8');
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -204,7 +206,7 @@ router.get('/overdue', (req, res) => {
   res.json({ items: equipmentService.getOverdue(days) });
 });
 
-router.get('/audit', (req, res) => {
+router.get('/audit', requireRole('admin'), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   res.json({ entries: auditService.recent(limit) });
 });
