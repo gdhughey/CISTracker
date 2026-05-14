@@ -966,7 +966,9 @@ function _openBulkPrintWindow(labels) {
     </div>
   `).join('');
 
-  const html = `<!DOCTYPE html>
+  const w = window.open('', '_blank');
+  if (!w) { toast('Popup blocked — allow popups for this site and try again', 'error'); return; }
+  w.document.write(`<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -994,17 +996,10 @@ function _openBulkPrintWindow(labels) {
 </style>
 </head>
 <body>${labelsHtml}</body>
-</html>`;
-
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, '_blank');
-  if (!w) { toast('Popup blocked — allow popups for this site and try again', 'error'); URL.revokeObjectURL(url); return; }
-  // Trigger print once the window has loaded, then clean up the blob URL
-  w.addEventListener('load', () => {
-    w.print();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  });
+</html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 250);
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────
@@ -1933,6 +1928,8 @@ async function submitAddItem() {
         const { item } = await api('/api/equipment', { method: 'POST', body: payload });
         createdItems = [item];
         toast(qty > 1 ? `Added ${qty}× ${item.name}` : 'Item added', 'success');
+        // Always refresh the inventory immediately so the item appears in the list
+        loadItems();
         // Show label step only for single items
         if (qty === 1) {
           try {
@@ -1954,18 +1951,16 @@ async function submitAddItem() {
                 </div>
               </div>
               <div class="form-actions">
-                <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
-                <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
+                <button class="btn-outline" onclick="closeModal()">Skip</button>
+                <button class="btn-primary" onclick="printPendingLabel();closeModal()">🖨 Print Label</button>
               </div>
             `;
           } catch {
             toast('Item created but label failed to load', 'info');
             closeModal();
-            loadItems();
           }
         } else {
           closeModal();
-          loadItems();
         }
       }
     } else {
