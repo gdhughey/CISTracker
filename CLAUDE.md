@@ -362,3 +362,33 @@ cd /opt/CISTracker && sudo -u cistracker npm install
 | "audit" | Inventory audit system (`inventory_audits` + `audit_entries`) |
 | "build it" | Implement, commit, push. They'll deploy. |
 | "do it dont ask for permission" | Proceed with all tool calls and edits autonomously |
+
+---
+
+## Collaborators
+
+| Person | GitHub | Role |
+|--------|--------|------|
+| Garrett | @gdhughey | Primary dev |
+| _(add friend's GitHub handle here)_ | @??? | Collaborator |
+
+**How to use this file for pair work:**
+Both of you have Claude Code. This CLAUDE.md is the shared brain — both Claude sessions read it automatically at the start of every conversation. When you switch tasks or hand off to your friend, update the **Current Work** section below, then commit + push. Their Claude will pick it up on next open.
+
+---
+
+## Current Work
+
+> Keep this section current. When you start a task, update it and push. When you finish, check it off and push.
+
+- [ ] _(nothing in progress — add your task here)_
+
+**How to update:**
+```bash
+# Edit this file, then:
+cd /opt/CISTracker
+git add CLAUDE.md
+git commit -m "update: current work"
+git push
+```
+
