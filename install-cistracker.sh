@@ -30,23 +30,23 @@ set -euo pipefail
 # Usage (with scoped API token — more secure):
 #   sudo CF_API_TOKEN=<token> bash install-cistracker.sh
 #
-#   Scoped token needs Zone → DNS → Edit permission for cistracker.net.
+#   Scoped token needs Zone → DNS → Edit permission for your domain.
 #   Create one at: https://dash.cloudflare.com/profile/api-tokens
 #
 # Usage (LAN-only, no Cloudflare):
-#   sudo STATIC_IP=10.0.2.10 bash install-cistracker.sh
+#   sudo STATIC_IP=192.168.1.10 bash install-cistracker.sh
 #
 # All options (pass as env vars):
 #   CF_GLOBAL_API_KEY  Cloudflare Global API Key — enables Let's Encrypt DNS-01 (simplest)
-#   CF_EMAIL           Cloudflare account email (default: gdhughey0726@gmail.com)
+#   CF_EMAIL           Cloudflare account email (required when using global key)
 #   CF_API_TOKEN       Cloudflare scoped API token (Zone:DNS:Edit) — alternative to global key
 #   CERT_EMAIL         Email for Let's Encrypt account (default: admin@<DOMAIN>)
 #   STATIC_IP        Server's IP address (public or LAN, required for HTTPS)
-#   STATIC_NETMASK   CIDR prefix length (default: 16)
-#   GATEWAY          LAN default gateway (default: 10.0.255.1)
-#   DNS_SERVER       Primary DNS server IP (default: 10.0.2.1)
-#   DNS_SERVER_2     Secondary DNS server IP (default: 10.2.201.4, set to "" to omit)
-#   DOMAIN           App domain name (default: cistracker.net)
+#   STATIC_NETMASK   CIDR prefix length (default: 24)
+#   GATEWAY          LAN default gateway
+#   DNS_SERVER       Primary DNS server IP
+#   DNS_SERVER_2     Secondary DNS server IP (set to "" to omit)
+#   DOMAIN           App domain name (default: cistracker.example.com)
 #   SSH_EXTRA_PORT   Extra SSH port for Tailscale access (default: 2222)
 #   SKIP_TAILSCALE   Set to 1 to skip Tailscale install (default: 0)
 #   MKCERT_VERSION   mkcert binary version used for LAN-only fallback (default: v1.4.4)
@@ -60,15 +60,15 @@ NODE_MAJOR="${NODE_MAJOR:-20}"
 NPM_PRIMARY_REGISTRY="${NPM_PRIMARY_REGISTRY:-https://registry.npmjs.org/}"
 NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}"
 CF_API_TOKEN="${CF_API_TOKEN:-}"                        # Cloudflare scoped API token (Zone:DNS:Edit)
-CF_EMAIL="${CF_EMAIL:-gdhughey0726@gmail.com}"          # Cloudflare account email (used with global key)
+CF_EMAIL="${CF_EMAIL:-}"                               # Cloudflare account email (used with global key)
 CF_GLOBAL_API_KEY="${CF_GLOBAL_API_KEY:-}"              # Cloudflare Global API Key
 CERT_EMAIL="${CERT_EMAIL:-}"                            # Let's Encrypt account email (defaults to admin@DOMAIN)
-STATIC_IP="${STATIC_IP:-10.0.2.127}"
+STATIC_IP="${STATIC_IP:-}"
 STATIC_NETMASK="${STATIC_NETMASK:-24}"
-GATEWAY="${GATEWAY:-10.0.255.1}"
-DNS_SERVER="${DNS_SERVER:-10.0.2.1}"
-DNS_SERVER_2="${DNS_SERVER_2:-10.2.201.4}"
-DOMAIN="${DOMAIN:-cistracker.net}"
+GATEWAY="${GATEWAY:-}"
+DNS_SERVER="${DNS_SERVER:-}"
+DNS_SERVER_2="${DNS_SERVER_2:-}"
+DOMAIN="${DOMAIN:-cistracker.example.com}"
 SSH_EXTRA_PORT="${SSH_EXTRA_PORT:-2222}"
 SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
 MKCERT_VERSION="${MKCERT_VERSION:-v1.4.4}"  # used only when CF_API_TOKEN is absent
@@ -331,21 +331,6 @@ initialize_database() {
     sudo -u "${APP_USER}" npm run seed || warn "Seed command failed or data already exists. Continuing."
   fi
 
-  log "Running inventory seed v1 (Northeast closet)"
-  sudo -u "${APP_USER}" node scripts/seed-inventory.js \
-    || warn "seed-inventory.js failed or data already exists. Continuing."
-
-  log "Running inventory seed v2 (motherboards, GPUs, CPUs, RAM, storage, HP Compaqs)"
-  sudo -u "${APP_USER}" node scripts/seed-inventory-v2.js \
-    || warn "seed-inventory-v2.js failed or data already exists. Continuing."
-
-  log "Running inventory seed v3 (location backfill)"
-  sudo -u "${APP_USER}" node scripts/seed-inventory-v3.js \
-    || warn "seed-inventory-v3.js failed or data already exists. Continuing."
-
-  log "Running inventory seed v4 (Cisco 2600/2950, networking closet)"
-  sudo -u "${APP_USER}" node scripts/seed-inventory-v4.js \
-    || warn "seed-inventory-v4.js failed or data already exists. Continuing."
 }
 
 create_systemd_service() {
@@ -676,7 +661,7 @@ print_summary() {
       echo "  Auto-renewal: systemctl status certbot.timer"
       echo
       echo "Cloudflare SSL mode: set to 'Full (Strict)' in Cloudflare dashboard"
-      echo "  https://dash.cloudflare.com → cistracker.net → SSL/TLS → Overview"
+      echo "  https://dash.cloudflare.com → ${DOMAIN} → SSL/TLS → Overview"
       echo
     else
       echo "SSL: mkcert self-signed (LAN-only — not trusted by Cloudflare)"
@@ -711,7 +696,7 @@ print_summary() {
   echo
   if [[ -n "${CF_GLOBAL_API_KEY}" ]] || [[ -n "${CF_API_TOKEN}" ]]; then
     echo "1. Cloudflare SSL mode (one-time, if not already set):"
-    echo "   → dash.cloudflare.com → cistracker.net → SSL/TLS → Overview"
+    echo "   → dash.cloudflare.com → ${DOMAIN} → SSL/TLS → Overview"
     echo "   → Set mode to: Full (Strict)"
     echo
     echo "2. Verify certbot auto-renewal is scheduled:"
@@ -723,11 +708,11 @@ print_summary() {
     echo "   (should complete with no errors)"
     echo
   fi
-  echo "4. Re-import your users (lost with the RAID):"
+  echo "4. Import your users:"
   echo "   Option A — CSV import in the app:"
   echo "   → Log in as admin → Admin panel → Import Users → upload your CSV"
   echo
-  echo "   Option B — command line (if you have a users.csv backup):"
+  echo "   Option B — command line:"
   echo "   sudo -u ${APP_USER} node ${APP_DIR}/scripts/import-users.js /path/to/users.csv"
   echo
   echo "5. Send welcome emails to users after importing:"
