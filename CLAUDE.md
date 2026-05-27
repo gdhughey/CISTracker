@@ -6,7 +6,7 @@ This file is the orientation doc for any Claude session opening the CISTracker r
 
 ## What this is
 
-**CISTracker** is a self-hosted equipment checkout & inventory tracker for a high-school CyberLab. Single Node.js process backed by SQLite, served over HTTPS via nginx. Used in production; ~7,600 inventory items across 6 physical locations.
+**CISTracker** is a self-hosted equipment checkout & inventory tracker for a high-school CyberLab. Single Node.js process backed by SQLite, served over HTTPS via nginx. Used in production; ~4,700 total units across ~1,200 equipment records, 6 physical locations.
 
 Deployed at: **https://cistracker.net**
 
@@ -85,7 +85,20 @@ Frontend is **vanilla JS, no framework, no build step**. `public/js/app.js` is a
 │   ├── 018-checklist-audit.sql        # inventory_audits.type + audit_entries.verified
 │   ├── 019-equipment-units.sql        # equipment_units table (per-unit serial/barcode)
 │   ├── 020-quantity-checkout.sql      # equipment.checked_out_count for partial bulk checkouts
-│   └── 021-audit-location.sql        # audit_entries.location_id + inventory_audits.scope_location_id
+│   ├── 021-audit-location.sql         # audit_entries.location_id + inventory_audits.scope_location_id
+│   ├── 022-drop-items-locations.sql   # schema cleanup
+│   ├── 023-recreate-items-locations.sql # schema cleanup cont.
+│   ├── 024-discrepancy-ticket-type.sql  # discrepancy service ticket type
+│   ├── 026-storage-v2.sql             # storage_libraries, storage_folders, storage_shares, storage_files
+│   ├── 027-product-number.sql         # equipment.product_number column
+│   ├── 028-unit-name.sql              # equipment unit name tracking
+│   ├── 029-owner-role.sql             # owner role (admin-level except user management)
+│   ├── 030-word-blacklist.sql         # word_blacklist table (profanity filter)
+│   ├── 031-period-checkout.sql        # equipment.checkout_type (am/pm/allday) + period_settings table
+│   ├── 032-audit-trail.sql            # rebuilt checkout_log with wider action set + status tracking
+│   ├── 033-damage-tracking.sql        # needs_repair/damaged statuses + equipment.condition_notes
+│   ├── 034-reservations.sql           # reservations table (equipment booking)
+│   └── 035-group-key.sql              # equipment.group_key (named group membership)
 │
 ├── src/
 │   ├── config.js
@@ -112,6 +125,10 @@ Frontend is **vanilla JS, no framework, no build step**. `public/js/app.js` is a
 │   │   ├── userService.js, sessionService.js, mfaService.js, passkeyService.js
 │   │   ├── emailService.js, reminderService.js
 │   │   ├── ticketService.js, queueService.js, auditService.js
+│   │   ├── reservationService.js      # reservation CRUD + overlap detection
+│   │   ├── periodService.js           # am/pm auto-return cron + period settings
+│   │   ├── broadcastService.js        # admin broadcast banner
+│   │   └── profanityService.js        # word blacklist checking
 │   └── utils/sanitize.js
 │
 └── public/
@@ -132,17 +149,21 @@ users              id, username, email, password_hash, role, mfa_enabled, mfa_se
 sessions           id (hex), user_id (FK CASCADE), ip_address, user_agent,
                    created_at, last_seen, expires_at
 
-equipment          id, name, type, serial_number, barcode (CIS-NNNNNN), category, status,
+equipment          id, name, type, serial_number, barcode (CIS-NNNNNN), category, status
+                     CHECK(status IN ('available','checked_out','needs_repair','damaged')),
                    checked_out_by, checked_out_at, due_date, image_path, notes,
                    location (free text, legacy), location_id (FK → locations),
                    quantity (default 1), checked_out_count (partial checkout tracking),
-                   model_id (FK → models), created_at, updated_at
+                   model_id (FK → models), product_number,
+                   checkout_type CHECK('allday'|'am'|'pm'),
+                   condition_notes, group_key (named group membership, '' = standalone),
+                   created_at, updated_at
 
 equipment_units    id, equipment_id (FK CASCADE), serial_number, barcode, notes, created_at
                    -- Per-unit rows for qty>1 items. Each unit gets its own CIS barcode + serial.
 
-checkout_log       id, equipment_id, action ('checkout'|'checkin'), performed_by,
-                   checkout_user, notes, source, image_path, created_at
+checkout_log       id, equipment_id, action, performed_by, checkout_user, notes,
+                   source, image_path, status_before, status_after, delta_json, created_at
 
 audit_log          id, user_id (FK NULL on user delete — NOT cascade), action, target,
                    ip_address, user_agent, details (JSON), created_at
@@ -172,6 +193,15 @@ inventory_audits   id, created_by (FK → users), notes, type ('manual'|'checkli
 audit_entries      id, audit_id (FK CASCADE), model_id, category_id, item_name,
                    expected_qty, counted_qty, notes, verified (0/1),
                    location_id (FK → locations), created_at
+
+reservations       id, equipment_id (FK CASCADE), user_id (FK CASCADE),
+                   start_date, end_date, period ('am'|'pm'|'allday'),
+                   status ('pending'|'active'|'fulfilled'|'cancelled'),
+                   notes, created_at, updated_at
+
+period_settings    id (always 1), am_end_time, pm_end_time, timezone, school_days, updated_at
+
+word_blacklist     id, word (unique, case-insensitive), added_by, added_at
 ```
 
 **Critical trap:** `audit_log.user_id` is NOT `ON DELETE CASCADE`. When deleting a user, you must `UPDATE audit_log SET user_id = NULL WHERE user_id = ?` first or the delete fails on a FK constraint. See `userService.deleteUser` for the working pattern.
@@ -183,8 +213,19 @@ audit_entries      id, audit_id (FK CASCADE), model_id, category_id, item_name,
 - **Password login**: `POST /api/auth/login` → optionally returns `MFA_REQUIRED` → `POST /api/auth/mfa-verify` → session cookie
 - **Passkey login**: `POST /api/passkey/login-options` → WebAuthn → `POST /api/passkey/login-verify` → session cookie
 - **Lockout**: `loginLimiter` is a no-op shim. `failed_logins`/`locked_until` columns exist for forensics but are never enforced. Don't add code that reads them.
-- **Session timeouts**: idle = 15 min (sliding), absolute = 8 h from creation. Enforced in `sessionService.lookup`.
+- **Session timeouts**: idle = 60 min (sliding), absolute = 8 h from creation. Enforced in `sessionService.lookup`.
 - **CSRF**: every state-changing request needs `X-CSRF-Token` header = `csrf_token` cookie value. The frontend `api()` helper does this automatically.
+
+---
+
+## Roles
+
+| Role | Access |
+|------|--------|
+| `admin` | Full access including user management |
+| `owner` | Admin-level access to all equipment/ticket/audit features; cannot manage users |
+| `staff` | Standard checkout/checkin + tickets |
+| `user` | Checkout/checkin only |
 
 ---
 
@@ -208,6 +249,26 @@ audit_entries      id, audit_id (FK CASCADE), model_id, category_id, item_name,
 - `checked_out_count` tracks how many units of a bulk item are currently checked out. Status stays `available` until all units are out; shows in the inventory "Out" filter when `checked_out_count > 0`.
 - The detail panel renders all units for bulk items with per-unit Check Out button.
 
+### Groups
+- Items can belong to a named group (`group_key`). Items created via the group panel get `group_key` set; standalone items have `group_key = ''`.
+- The Groups view in the inventory panel shows all groups and their members.
+- Renaming a group updates `group_key` on all member items.
+
+### Damage tracking
+- Equipment statuses include `needs_repair` and `damaged` in addition to `available`/`checked_out`.
+- `condition_notes` field tracks damage descriptions.
+- Damage reports go through `POST /:id/damage`; repairs via `POST /:id/repair`.
+
+### Reservations
+- Users can reserve equipment for a date range with am/pm/allday period.
+- `reservationService` checks for overlapping reservations and blocks conflicts.
+- Reservation statuses: `pending` → `active` → `fulfilled` or `cancelled`.
+
+### Period checkout (am/pm)
+- `checkout_type` on equipment: `allday`, `am`, or `pm`.
+- `period_settings` table stores am/pm end times and school days.
+- `periodService` runs daily cron jobs to auto-return am/pm items at their end times.
+
 ### Mass checkout cart
 - Any available item gets a 🛒 button. Cart is a floating FAB showing count.
 - Cart supports up to 50 items. Batch checkout via `POST /api/equipment/checkout/batch`.
@@ -218,6 +279,10 @@ audit_entries      id, audit_id (FK CASCADE), model_id, category_id, item_name,
 ### Location + category filter chips
 - Inventory view has location chips and category chips — selecting one filters the table.
 - Location chips are built from `locations` table + free-text `equipment.location` fallback for items not linked to a managed location.
+
+### Broadcast banner
+- Admins/owners can push a persistent banner to all users via broadcast modal.
+- Banner persists until cleared by an admin. Polls every 30s.
 
 ---
 
@@ -250,27 +315,40 @@ audit_entries      id, audit_id (FK CASCADE), model_id, category_id, item_name,
 | Checklist audit broken | Duplicate `auditHistoryList` div in HTML | Removed duplicate div |
 | Production 502 on restart | nginx proxied requests during the ~2s app startup window | Not a bug — just timing; normal |
 | Page "bugs out" after idle | Stale data + potential CSRF drift + no 401 handling | Live refresh: 90s poll + visibilitychange + 401→redirect |
+| Inventory wiped for owner role | `loadItems` used `Promise.all` — admin 403 aborted entire load | Split with `Promise.allSettled`; only fail if equipment fetch fails |
+| Duplicate equipment on scan | `add_item` service ticket approval created equipment without dedupe check | Added 409 conflict detection in approval flow |
+| SQL injection in reservation overlap | `getOverlapping` built raw SQL with string concatenation | Parameterized queries |
+| Group rename didn't update group_key | Rename only updated display name, not `group_key` field | Fixed to update `group_key` on all group members |
 
 ---
 
 ## Recent feature timeline (most recent first)
 
-1. **Live refresh + audit by location** — 90s auto-refresh, tab-visibility refresh, 401 redirect; checklist audit groups by location with section headers, location filter chips, optional scope picker in Start Audit modal. (migration 021)
-2. **Per-unit checkout** — Check Out button per unit in detail panel, unit picker in bulk checkout modal, quantity-aware checkout logic. (migrations 019-020)
-3. **Mass return cart** — select multiple checked-out items and return them at once.
-4. **Mass checkout cart** — 🛒 button on available items, floating FAB, batch checkout up to 50 items.
-5. **Checklist audit** — pre-populates all inventory as a checklist, progress bar, verify/count/reason per row, filter by status. (migration 018)
-6. **Inventory audit system** — manual and checklist audit types, audit history, edit/delete. (migration 013)
-7. **Service tickets** — account change requests, equipment requests, admin approve/reject. Email notifications on new ticket.
-8. **Equipment units** — per-unit serial/barcode for qty>1 items, seeded from CIS Spring 2026 inventory sheets.
-9. **Inventory quantity** — `quantity` column on equipment, Qty column in table, per-serial rows in add-item modal.
-10. **Location filter chips** — location chips in inventory view built from `locations` table. (migration 017 re-seeded locations)
-11. **Location FK on equipment** — `equipment.location_id` links to managed `locations` table. (migration 011)
-12. **Models + categories tables** — managed lookup tables for equipment classification. (migrations 009-010, 014-015)
-13. **WebAuthn passkeys** — Face ID, Touch ID, Windows Hello, security keys. iCloud/Google passkeys sync across devices.
-14. **Login lockout removed** — both IP rate limit and per-account lockout are gone (user got locked out of their own server).
-15. **LAN-only HTTPS** — replaced Cloudflare Tunnel with nginx TLS, Tailscale for remote SSH on port 2222.
-16. **First-time onboarding tour** — localStorage-gated walkthrough. `replayTour()` on window to re-run.
+1. **Equipment groups** — items belong to named groups (`group_key`); group panel in inventory; rename propagates to all members. (migration 035)
+2. **Reservations** — equipment booking with date range + am/pm/allday period, overlap detection. Email reminders. (migration 034)
+3. **Damage tracking** — `needs_repair`/`damaged` statuses, `condition_notes`, damage/repair endpoints with role checks. (migration 033)
+4. **Audit trail expansion** — rebuilt `checkout_log` with wider action set, `status_before`/`status_after`, `delta_json`. (migration 032)
+5. **Period checkout** — `checkout_type` (am/pm/allday) on equipment, `period_settings` table, auto-return cron at configurable times. (migration 031)
+6. **Word blacklist** — profanity filter table, checked on equipment names and user-submitted content. (migration 030)
+7. **Owner role** — admin-level access to all features except user management. (migration 029)
+8. **Product number** — `product_number` column on equipment for manufacturer part numbers. (migration 027)
+9. **Broadcast banner** — admins can push a persistent banner to all logged-in users. Real-time poll every 30s.
+10. **Live refresh + audit by location** — 90s auto-refresh, tab-visibility refresh, 401 redirect; checklist audit groups by location with section headers, location filter chips, optional scope picker in Start Audit modal. (migration 021)
+11. **Per-unit checkout** — Check Out button per unit in detail panel, unit picker in bulk checkout modal, quantity-aware checkout logic. (migrations 019-020)
+12. **Mass return cart** — select multiple checked-out items and return them at once.
+13. **Mass checkout cart** — 🛒 button on available items, floating FAB, batch checkout up to 50 items.
+14. **Checklist audit** — pre-populates all inventory as a checklist, progress bar, verify/count/reason per row, filter by status. (migration 018)
+15. **Inventory audit system** — manual and checklist audit types, audit history, edit/delete. (migration 013)
+16. **Service tickets** — account change requests, equipment requests, admin approve/reject. Email notifications on new ticket.
+17. **Equipment units** — per-unit serial/barcode for qty>1 items, seeded from CIS Spring 2026 inventory sheets.
+18. **Inventory quantity** — `quantity` column on equipment, Qty column in table, per-serial rows in add-item modal.
+19. **Location filter chips** — location chips in inventory view built from `locations` table. (migration 017 re-seeded locations)
+20. **Location FK on equipment** — `equipment.location_id` links to managed `locations` table. (migration 011)
+21. **Models + categories tables** — managed lookup tables for equipment classification. (migrations 009-010, 014-015)
+22. **WebAuthn passkeys** — Face ID, Touch ID, Windows Hello, security keys. iCloud/Google passkeys sync across devices.
+23. **Login lockout removed** — both IP rate limit and per-account lockout are gone (user got locked out of their own server).
+24. **LAN-only HTTPS** — replaced Cloudflare Tunnel with nginx TLS, Tailscale for remote SSH on port 2222.
+25. **First-time onboarding tour** — localStorage-gated walkthrough. `replayTour()` on window to re-run.
 
 ---
 
@@ -282,7 +360,7 @@ audit_entries      id, audit_id (FK CASCADE), model_id, category_id, item_name,
 - ❌ **Don't hardcode personal email addresses** — use env vars (`RESEND_SUPPORT_FORWARD`, `RESEND_DROPPED_FORWARD`).
 - ❌ **Don't replace ZXing** with raw `getUserMedia` + `jsQR`. ZXing is the only thing that works cross-browser on iOS Safari.
 - ❌ **Don't add user-facing "CyberLab"** branding. The app is "CISTracker."
-- ❌ **Don't skip migrations.** Name them sequentially (`022-something.sql`) and they auto-run on boot.
+- ❌ **Don't skip migrations.** Name them sequentially (`036-something.sql`) and they auto-run on boot.
 - ❌ **Don't amend or force-push.** The server deploys blindly with `git pull` — rewritten history breaks the working tree.
 
 ---
@@ -304,6 +382,7 @@ audit_entries      id, audit_id (FK CASCADE), model_id, category_id, item_name,
 - Every mutation re-fetches from server (`loadItems()` etc.) — intentional. No optimistic updates. Simpler and LAN latency is fine.
 - Inline `onclick=` everywhere — refactoring to `addEventListener` would tighten CSP but isn't worth the diff.
 - `failed_logins` / `locked_until` columns stay in schema for forensics even though nothing reads them.
+- `loginLimiter` in rateLimit.js is intentionally a no-op pass-through. Do not re-enable it.
 
 ---
 
@@ -343,6 +422,9 @@ sudo journalctl -u cistracker -n 20 --no-pager | grep -i migrat
 sudo sqlite3 /opt/CISTracker/data/cyberlab.db
 # .tables  /  SELECT * FROM inventory_audits;  etc.
 
+# Manual DB backup (WAL-safe)
+sqlite3 /opt/CISTracker/data/cyberlab.db ".backup /home/cisadmin/cyberlab.db.bak-$(date +%Y%m%d-%H%M%S)"
+
 # npm install (only if package-lock changed)
 cd /opt/CISTracker && sudo -u cistracker npm install
 ```
@@ -356,7 +438,7 @@ cd /opt/CISTracker && sudo -u cistracker npm install
 | "deploy" / "push it" | I commit + push to main; they run the deploy command on the server |
 | "the server" | Ubuntu box at /opt/CISTracker, accessed via Tailscale SSH |
 | "the app" | https://cistracker.net |
-| "the inventory" | The `equipment` table (~7,600 rows) |
+| "the inventory" | The `equipment` table (~1,200 records, ~4,700 total units) |
 | "tickets" | IT support ticket system (`tickets` + `ticket_comments`) |
 | "service tickets" | Service request tickets (`service_tickets`) |
 | "audit" | Inventory audit system (`inventory_audits` + `audit_entries`) |
@@ -370,7 +452,7 @@ cd /opt/CISTracker && sudo -u cistracker npm install
 | Person | GitHub | Role |
 |--------|--------|------|
 | Garrett | @gdhughey | Primary dev |
-| _(add friend's GitHub handle here)_ | @??? | Collaborator |
+| Bryceson | @Pancakesyrup84 | Collaborator |
 
 **How to use this file for pair work:**
 Both of you have Claude Code. This CLAUDE.md is the shared brain — both Claude sessions read it automatically at the start of every conversation. When you switch tasks or hand off to your friend, update the **Current Work** section below, then commit + push. Their Claude will pick it up on next open.
@@ -391,4 +473,3 @@ git add CLAUDE.md
 git commit -m "update: current work"
 git push
 ```
-
