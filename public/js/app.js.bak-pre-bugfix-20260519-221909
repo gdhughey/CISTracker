@@ -37,12 +37,6 @@ let _openGroupItems = [];
 let _openGroupKey = '';
 const _groupPanelSelected = new Set();
 const _unitPanelSelected = new Set();
-// Cache of unit objects keyed by unit id — populated by renderUnits so that
-// click handlers can look up unit data by id instead of having user-controlled
-// fields (serial, barcode, notes, name) interpolated into onclick attributes.
-// That interpolation was an XSS sink: a serial with `";onclick="alert(1)`
-// could break out of the attribute and inject script.
-const _unitCache = new Map();
 
 // ── Live refresh ────────────────────────────────────────────────────────
 let _refreshInterval = null;
@@ -809,7 +803,7 @@ function buildFilters() {
     catContainer.innerHTML =
       `<button class="chip${catFilter === 'All' ? ' active' : ''}" onclick="setCatFilter('All')">All</button>` +
       CATEGORIES.map(c =>
-        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter(${jsArg(c.name)})">${esc(c.name)}</button>`
+        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter('${c.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(c.name)}</button>`
       ).join('');
   }
 
@@ -828,7 +822,7 @@ function buildFilters() {
       const chipsHtml =
         `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
         allLocNames.map(name =>
-          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter(${jsArg(name)})">${esc(name)}</button>`
+          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter('${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(name)}</button>`
         ).join('');
       if (allLocNames.length > 5) {
         const activeLabel = locFilter !== 'All' ? ` · ${esc(locFilter)}` : '';
@@ -1525,17 +1519,12 @@ async function renameGroup(key, items) {
   const newName = prompt(`Rename group "${key}" to:`, key);
   if (!newName || !newName.trim() || newName.trim() === key) return;
   const trimmed = newName.trim();
-  if (!confirm(`Rename "${key}" → "${trimmed}"?\nThis will update ${items.length} item${items.length > 1 ? 's' : ''}.`)) return;
+  if (!confirm(`Rename "${key}" → "${trimmed}"?\nThis will update ${items.length} item name${items.length > 1 ? 's' : ''}.`)) return;
   let failed = 0;
   for (const item of items) {
-    // Always update group_key so the group itself is renamed; also rewrite
-    // the visible name when it contains the old key so "#1 OldName" becomes
-    // "#1 NewName". Without the group_key change the items kept the old
-    // group_key and stayed grouped under the previous label after rename.
-    const newItemName = item.name.includes(key) ? item.name.replace(key, trimmed) : item.name;
-    const body = { group_key: trimmed };
-    if (newItemName !== item.name) body.name = newItemName;
-    try { await api(`/api/equipment/${item.id}`, { method: 'PUT', body }); }
+    const updated = item.name.includes(key) ? item.name.replace(key, trimmed) : item.name;
+    if (updated === item.name) continue;
+    try { await api(`/api/equipment/${item.id}`, { method: 'PUT', body: { name: updated } }); }
     catch { failed++; }
   }
   if (failed) toast(`${failed} item(s) failed to rename`, 'error');
@@ -1607,23 +1596,17 @@ async function confirmMoveItem(itemId) {
 
 async function addExistingToGroup(key) {
   const groupItemIds = new Set(_openGroupItems.map(i => i.id));
-  _addExistingAllItems = ITEMS.filter(i => !groupItemIds.has(i.id)).sort((a, b) => a.name.localeCompare(b.name));
-  if (!_addExistingAllItems.length) { toast('No other items to add', 'info'); return; }
+  const others = ITEMS.filter(i => !groupItemIds.has(i.id)).sort((a, b) => a.name.localeCompare(b.name));
+  if (!others.length) { toast('No other items to add', 'info'); return; }
+  const optionsHtml = others.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.barcode || 'CIS-' + String(i.id).padStart(6,'0'))})</option>`).join('');
   const nextNum = _openGroupItems.reduce((max, i) => { const m = i.name.match(/^#(\d+)/); return m ? Math.max(max, parseInt(m[1])) : max; }, 0) + 1;
-  const buildOptions = (items) => '<option value="">— Choose an item —</option>' +
-    items.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.barcode || 'CIS-' + String(i.id).padStart(6,'0'))})</option>`).join('');
   showModal(`
     <div class="modal-title">Add Existing Item to "${esc(key)}"</div>
     <div class="form-group">
-      <label class="form-label">Search items</label>
-      <input id="addExistingSearch" class="form-input" placeholder="Type to filter by name or barcode…" autocomplete="off"
-        oninput="filterAddExistingSelect('${esc(key)}', ${nextNum})">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Select item <span id="addExistingCount" style="font-weight:400;color:var(--text-muted);font-size:11px">(${_addExistingAllItems.length} available)</span></label>
-      <select id="addExistingSelect" class="form-input" size="6" style="height:auto"
-        onchange="updateAddExistingName('${esc(key)}', ${nextNum})">
-        ${buildOptions(_addExistingAllItems)}
+      <label class="form-label">Select item</label>
+      <select id="addExistingSelect" class="form-input" onchange="updateAddExistingName('${esc(key)}', ${nextNum})">
+        <option value="">— Choose an item —</option>
+        ${optionsHtml}
       </select>
     </div>
     <div class="form-group">
@@ -1636,25 +1619,6 @@ async function addExistingToGroup(key) {
       <button class="btn-primary" onclick="confirmAddExisting('${esc(key)}')">Add to Group</button>
     </div>
   `, { persistent: true });
-  document.getElementById('addExistingSearch')?.focus();
-}
-
-function filterAddExistingSelect(key, nextNum) {
-  const search = document.getElementById('addExistingSearch');
-  const sel = document.getElementById('addExistingSelect');
-  const countEl = document.getElementById('addExistingCount');
-  if (!search || !sel) return;
-  const q = search.value.trim().toLowerCase();
-  const filtered = q
-    ? _addExistingAllItems.filter(i =>
-        i.name.toLowerCase().includes(q) ||
-        (i.barcode || 'CIS-' + String(i.id).padStart(6, '0')).toLowerCase().includes(q))
-    : _addExistingAllItems;
-  const prevVal = sel.value;
-  sel.innerHTML = '<option value="">— Choose an item —</option>' +
-    filtered.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.barcode || 'CIS-' + String(i.id).padStart(6,'0'))})</option>`).join('');
-  if (prevVal && filtered.some(i => String(i.id) === prevVal)) sel.value = prevVal;
-  if (countEl) countEl.textContent = `(${filtered.length} of ${_addExistingAllItems.length})`;
 }
 
 function updateAddExistingName(key, nextNum) {
@@ -1686,7 +1650,6 @@ async function confirmAddExisting(key) {
 
 let _grpLastSelected = null;
 let _unitLastSelected = null;
-let _addExistingAllItems = [];
 
 function toggleGroupPanelSelect(itemId, event) {
   const cards = [...document.querySelectorAll('#detailPanel .grp-card[data-item-id]')];
@@ -2120,7 +2083,7 @@ function renderItems() {
       else if (item.location_id !== loc.id && item.location !== locFilter) continue;
     }
     if (q) {
-      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location} ${item.product_number || ''} ${item.group_key || ''}`;
+      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location} ${item.product_number || ''}`;
       if (!searchMatch(hay, q)) continue;
     }
     renderVisible.push(item);
@@ -2334,7 +2297,6 @@ function renderUnits(equipmentId, units) {
     return;
   }
 
-  for (const u of units) _unitCache.set(u.id, u);
   const cardsHtml = units.map(u => {
     const label   = u.barcode || u.serial_number || ('Unit #' + u.id);
     const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
@@ -2351,7 +2313,7 @@ function renderUnits(equipmentId, units) {
         ${hasAvail ? `<button class="btn-cart unit-cart-btn${_unitCart.has(u.id) ? ' in-cart' : ''}" id="cartBtn-U-${u.id}" data-eid="${equipmentId}" data-uid="${u.id}" title="${_unitCart.has(u.id) ? 'Remove from cart' : 'Add to cart'}" onclick="event.stopPropagation();toggleUnitCart(${equipmentId},${u.id})">🛒</button>` : ''}
         ${isAdminUser ? `
           <div style="display:flex;gap:4px;margin-left:4px;flex-wrap:wrap">
-            <button class="btn-outline btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();editUnit(${equipmentId},${u.id})">Edit</button>
+            <button class="btn-outline btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}','${(u.name||'').replace(/'/g,"\\'")}')">Edit</button>
             <button class="btn-outline btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();printLabel(${equipmentId})">Label</button>
             <button class="btn-outline btn-sm btn-red" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();deleteUnit(${equipmentId},${u.id})">✕</button>
           </div>
@@ -2492,7 +2454,7 @@ function addUnit(equipmentId) {
       <div class="form-group">
         <label class="form-label">How many units to add?</label>
         <input id="bulkUnitQty" class="form-input" type="number" min="1" max="500" value="1"
-          oninput="renderBulkUnitRows(${equipmentId}, ${jsArg(baseName)})">
+          oninput="renderBulkUnitRows(${equipmentId}, '${esc(baseName).replace(/'/g,"\\'")}')">
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Name, serial &amp; barcode per unit — leave blank for any you don't have yet.</div>
       <div id="bulkUnitRows" style="max-height:300px;overflow-y:auto;padding-right:4px"></div>
@@ -2556,16 +2518,14 @@ async function saveNewUnit(equipmentId) {
   } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
-function editUnit(equipmentId, uid) {
-  const u = _unitCache.get(uid);
-  if (!u) { toast('Unit not found — please refresh', 'error'); return; }
+function editUnit(equipmentId, uid, serial, barcode, notes, name) {
   showModal(`
     <div class="modal-title">Edit Unit</div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">Unit Name</label><input id="editUnitName" class="form-input" value="${esc(u.name || '')}"></div>
-      <div class="form-group"><label class="form-label">Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(u.serial_number || '')}"></div>
-      <div class="form-group"><label class="form-label">Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(u.barcode || '')}"></div>
-      <div class="form-group"><label class="form-label">Notes</label><input id="editUnitNotes" class="form-input" value="${esc(u.notes || '')}"></div>
+      <div class="form-group"><label class="form-label">Unit Name</label><input id="editUnitName" class="form-input" value="${esc(name || '')}"></div>
+      <div class="form-group"><label class="form-label">Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(serial)}"></div>
+      <div class="form-group"><label class="form-label">Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(barcode)}"></div>
+      <div class="form-group"><label class="form-label">Notes</label><input id="editUnitNotes" class="form-input" value="${esc(notes)}"></div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
         <button class="btn-primary" onclick="saveEditUnit(${equipmentId},${uid})">Save</button>
@@ -2944,7 +2904,7 @@ async function loadBulkUnitPicker(equipmentId) {
       const identifier = u.barcode ? u.barcode : (u.serial_number ? 'SN: ' + u.serial_number : '');
       const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
       return `
-        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id}, ${jsArg(noteVal)})">\n          <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(displayName)}</div>\n          ${identifier ? `<div style="font-size:11px;font-family:var(--mono);color:var(--accent);margin-top:1px">${esc(identifier)}</div>` : ''}\n          ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(u.notes)}</div>` : ''}\n        </div>`;
+        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id},'${noteVal.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">\n          <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(displayName)}</div>\n          ${identifier ? `<div style="font-size:11px;font-family:var(--mono);color:var(--accent);margin-top:1px">${esc(identifier)}</div>` : ''}\n          ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(u.notes)}</div>` : ''}\n        </div>`;
     }).join('');
     container.innerHTML = anyCard + unitCards;
   } catch {
@@ -3093,28 +3053,18 @@ function openReturnModal(id) {
 }
 
 async function confirmReturn(id) {
-  // Scope the modal-body lookup and disable the confirm button so a
-  // double-click can't fire the checkin twice (server is transactional, but
-  // we still want clear UX with no flicker between clicks).
-  const modal = document.getElementById('modalContent');
-  const btn = modal?.querySelector('.btn-primary');
-  if (btn) btn.disabled = true;
   try {
     const data = await api(`/api/equipment/${id}/checkin`, { method: 'POST', body: { source: 'Manual' } });
-    const body = modal?.querySelector('.modal-body');
-    if (body) body.classList.add('hidden');
-    document.getElementById('retSuccess')?.classList.remove('hidden');
+    document.querySelector('.modal-body').classList.add('hidden');
+    document.getElementById('retSuccess').classList.remove('hidden');
     if (data.nextInQueue) {
       const msgEl = document.getElementById('retQueueMsg');
-      if (msgEl) {
-        msgEl.textContent = `📣 ${data.nextInQueue.username} has been notified!`;
-        msgEl.classList.remove('hidden');
-      }
+      msgEl.textContent = `📣 ${data.nextInQueue.username} has been notified!`;
+      msgEl.classList.remove('hidden');
       toast(`📣 Next up: ${data.nextInQueue.username} has been notified`, 'purple');
     }
     setTimeout(() => { closeModal(); loadItems(); closeDetail(); }, 1800);
   } catch (err) {
-    if (btn) btn.disabled = false;
     toast(err.error || 'Return failed', 'error');
   }
 }
@@ -3151,17 +3101,14 @@ async function loadRepairQueue() {
 }
 
 async function doMarkRepaired(itemId) {
-  // api() throws on non-2xx — without a try-catch the unhandled rejection
-  // left the repair button apparently "stuck" with no feedback.
-  try {
-    await api(`/api/equipment/${itemId}/repair`, { method: 'POST', body: {} });
-    toast('Marked as repaired', 'success');
-    loadRepairQueue();
-    loadRepairsView();
-    loadItems();
-  } catch (err) {
-    toast(err.error || 'Failed to mark as repaired', 'error');
-  }
+  const r = await api(`/api/equipment/${itemId}/repair`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({})
+  });
+  if (r?.error) { toast(r.error, 'error'); return; }
+  toast('Marked as repaired');
+  loadRepairQueue();
+  loadRepairsView();
+  loadItems();
 }
 
 // ── Repairs Tab ────────────────────────────────────────────────────────
@@ -3673,7 +3620,7 @@ function openAddItemModal() {
         <input id="addGroupNew" class="form-input hidden" placeholder="New group name" style="margin-top:6px">
       </div>
       <div class="form-group"><label class="form-label">Name <span style="color:var(--red)">*</span></label>
-        <input id="addName" class="form-input" placeholder="e.g. HP EliteBook 840" autofocus oninput="onAddNameChange()"></div>
+        <input id="addName" class="form-input" placeholder="e.g. HP EliteBook 840" autofocus></div>
       <div class="form-group"><label class="form-label">Category</label>
         <select id="addCat" class="form-input">
           <option value="">— Select category —</option>
@@ -3740,10 +3687,7 @@ function onAddGroupChange() {
     const m = i.name.match(/^#(\d+)/);
     return m ? Math.max(max, parseInt(m[1])) : max;
   }, 0);
-  if (nameInput && (!nameInput.value.trim() || nameInput.dataset.autofilled === '1')) {
-    nameInput.value = `#${maxNum + 1} ${val}`;
-    nameInput.dataset.autofilled = '1';
-  }
+  if (nameInput) nameInput.value = `#${maxNum + 1} ${val}`;
 }
 
 function onAddQtyChange() {
@@ -3767,7 +3711,7 @@ function onAddQtyChange() {
           div.innerHTML = `
             <div style="display:grid;grid-template-columns:28px 1fr;gap:6px;align-items:center;margin-bottom:5px">
               <span style="font-size:11px;color:var(--text-muted);text-align:right;font-weight:600">${i+1}</span>
-              <input class="form-input unit-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}" oninput="this.dataset.manual='1'">
+              <input class="form-input unit-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
               <input class="form-input unit-serial" placeholder="Serial #" style="font-size:12px">
@@ -3783,18 +3727,6 @@ function onAddQtyChange() {
     single?.classList.remove('hidden');
     multi?.classList.add('hidden');
   }
-}
-
-function onAddNameChange() {
-  const nameInput = document.getElementById('addName');
-  if (nameInput) delete nameInput.dataset.autofilled;
-  const baseName = nameInput?.value.trim() || '';
-  document.querySelectorAll('#addUnitRows .unit-row').forEach((row, i) => {
-    const nameEl = row.querySelector('.unit-name');
-    if (nameEl && !nameEl.dataset.manual) {
-      nameEl.value = baseName ? `${baseName} ${i + 1}` : '';
-    }
-  });
 }
 
 async function submitAddItem() {
@@ -4009,7 +3941,7 @@ async function submitEdit(id) {
     await api(`/api/equipment/${id}`, { method: 'PUT', body });
     toast('Item updated', 'success');
     closeModal();
-    await loadItems();
+    loadItems();
   } catch (err) {
     toast(err.error || 'Update failed', 'error');
   }

@@ -10,11 +10,6 @@
   <link rel="stylesheet" href="/css/app.css">
   <meta name="theme-color" content="#0f1117">
   <link rel="icon" type="image/jpeg" href="/images/logo.jpg">
-  <style>
-    .grp-card { transition: background 0.1s, border-color 0.1s; }
-    .grp-card:hover { background: var(--bg-hover, var(--bg-card)) !important; }
-    .grp-card-selected { background: color-mix(in srgb, var(--accent) 15%, var(--bg-base)) !important; border-color: var(--accent) !important; }
-  </style>
 </head>
 <body>
 
@@ -141,12 +136,6 @@
         <div class="nav-item" data-view="queue" onclick="switchView('queue')">
           My Queue <span id="queueBadge" class="badge badge-purple hidden">0</span>
         </div>
-        <div class="nav-item" data-view="my-equipment" onclick="switchView('my-equipment')">
-          My Equipment
-        </div>
-        <div class="nav-item" data-view="my-reservations" onclick="switchView('my-reservations')">
-          My Reservations
-        </div>
       </div>
       <div class="nav-section">
         <div class="nav-label">Support</div>
@@ -168,7 +157,7 @@
       </div>
       <div class="nav-section" id="adminNav" style="display:none">
         <div class="nav-label">Admin</div>
-        <div class="nav-item" id="navUsers" data-view="users" onclick="switchView('users')">
+        <div class="nav-item" data-view="users" onclick="switchView('users')">
           Users
         </div>
         <div class="nav-item" data-view="locations" onclick="switchView('locations')">
@@ -177,20 +166,8 @@
         <div class="nav-item" data-view="categories" onclick="switchView('categories')">
           Categories
         </div>
-        <div class="nav-item" data-view="groups" onclick="switchView('groups')">
-          Groups
-        </div>
         <div class="nav-item" data-view="audit" onclick="switchView('audit')">
           Audit Log
-        </div>
-        <div class="nav-item" data-view="admin-settings" onclick="switchView('admin-settings')">
-          Period Settings
-        </div>
-        <div class="nav-item" data-view="admin-reservations" onclick="switchView('admin-reservations')">
-          All Reservations
-        </div>
-        <div class="nav-item" data-view="repairs" onclick="switchView('repairs')">
-          Repairs
         </div>
       </div>
     </nav>
@@ -219,7 +196,6 @@
           <div class="chip" data-status="available" onclick="setStatusFilter('available')">Available</div>
           <div class="chip" data-status="checked_out" onclick="setStatusFilter('checked_out')">Out</div>
           <div class="chip" data-status="overdue" onclick="setStatusFilter('overdue')">Overdue</div>
-          <div class="chip active" data-status="grouped" onclick="toggleGroupedView()" style="margin-left:8px;border-left:1px solid var(--border);padding-left:12px">Grouped</div>
         </div>
         <button class="btn-primary ml-auto" id="addItemBtn" style="display:none" onclick="openAddItemModal()">+ Add Item</button>
       </div>
@@ -235,7 +211,6 @@
         <table>
           <thead>
             <tr>
-              <th class="cb-cell"><input type="checkbox" id="selectAllCb" class="row-cb" title="Select all" onclick="toggleSelectAll(this)"></th>
               <th style="width:110px">ID</th>
               <th>Item</th>
               <th>Category</th>
@@ -247,13 +222,6 @@
           </thead>
           <tbody id="itemsBody"></tbody>
         </table>
-      </div>
-      <div id="selectionBar" class="hidden">
-        <span class="sel-count" id="selCount">0 selected</span>
-        <button class="btn-primary btn-sm" onclick="massPrintLabels()">&#x1F5A8; Print Labels</button>
-        <button id="massGroupBtn" class="btn-outline btn-sm" style="display:none" onclick="massGroupItems()" title="Combine selected items into a group (or add them to an existing one)">&#x1F4E6; Group</button>
-        <button id="massDeleteBtn" class="btn-outline btn-sm" style="color:var(--red);border-color:var(--red);display:none" onclick="massDeleteItems()">&#x1F5D1; Delete</button>
-        <button class="btn-outline btn-sm" onclick="clearSelection()">&#x2715; Clear</button>
       </div>
       <div class="table-footer">
         <span id="itemCount">0 items</span>
@@ -298,15 +266,8 @@
           <div id="manualResults"></div>
         </div>
         <div class="currently-out mt-12">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <h3 style="margin:0">Currently Checked Out</h3>
-            <button class="btn-outline btn-sm btn-red" id="massReturnBtn" style="display:none" onclick="confirmMassReturn()">Return All</button>
-          </div>
+          <h3>Currently Checked Out</h3>
           <div id="currentlyOutList"></div>
-        </div>
-        <div class="currently-out mt-12" id="repairQueueSection" style="display:none">
-          <h3 style="margin:0 0 8px">Needs Repair / Damaged</h3>
-          <div id="repairQueue"></div>
         </div>
       </div>
     </div>
@@ -316,22 +277,6 @@
       <div style="padding:24px">
         <h2 class="view-heading">Overdue Items</h2>
         <div id="overdueList"></div>
-      </div>
-    </div>
-
-    <!-- ═══ MY EQUIPMENT VIEW ═══ -->
-    <div id="view-my-equipment" class="hidden">
-      <div style="padding:24px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 class="view-heading">My Equipment</h2>
-          <div id="myEquipAdminCtrl" style="display:none">
-            <select id="myEquipUserSel" class="form-input" style="width:200px;padding:6px 10px;font-size:12px" onchange="loadMyEquipment()">
-              <option value="">Loading…</option>
-            </select>
-          </div>
-        </div>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">Everything currently checked out to you, with one-tap return.</p>
-        <div id="myEquipmentList"></div>
       </div>
     </div>
 
@@ -427,53 +372,11 @@
       </div>
     </div>
 
-    <!-- ═══ GROUPS VIEW (admin) ═══ -->
-    <div id="view-groups" class="hidden">
-      <div class="admin-view">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 class="view-heading">Groups</h2>
-          <button class="btn-primary" onclick="openCreateGroupFromTab()">+ New Group</button>
-        </div>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Groups bundle similar items (like the CPUs drawer). Click a group to open it, manage models, print drawer QR codes, or add more items.</p>
-        <div class="search-box" style="max-width:100%;margin-bottom:12px">
-          <span class="search-icon">🔍</span>
-          <input id="groupsSearchInput" type="search" placeholder="Search groups…" oninput="renderGroups()">
-        </div>
-        <div id="groupsList"></div>
-      </div>
-    </div>
-
-    <!-- ═══ ADMIN SETTINGS VIEW (admin) ═══ -->
-    <div id="view-admin-settings" class="hidden">
-      <div class="admin-view">
-        <h2 class="view-heading" style="margin-bottom:20px">Period Settings</h2>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">Configure AM/PM auto-return times. Items checked out as "AM period" or "PM period" are automatically returned at these times on school days.</p>
-        <div id="adminSettingsContent"></div>
-      </div>
-    </div>
-
     <!-- ═══ AUDIT VIEW (admin) ═══ -->
     <div id="view-audit" class="hidden">
       <div class="admin-view">
         <h2 class="view-heading" style="margin-bottom:16px">Audit Log</h2>
         <div id="auditList"></div>
-      </div>
-    </div>
-
-    <!-- ═══ REPAIRS VIEW (admin) ═══ -->
-    <div id="view-repairs" class="hidden">
-      <div class="admin-view">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 class="view-heading">Repairs</h2>
-          <div style="display:flex;gap:8px;align-items:center">
-            <div class="cat-chips" id="repairFilterChips" style="margin:0">
-              <div class="chip active" data-rfilter="all" onclick="setRepairFilter('all')">All</div>
-              <div class="chip" data-rfilter="needs_repair" onclick="setRepairFilter('needs_repair')">Needs Repair</div>
-              <div class="chip" data-rfilter="damaged" onclick="setRepairFilter('damaged')">Damaged</div>
-            </div>
-          </div>
-        </div>
-        <div id="repairsViewList"></div>
       </div>
     </div>
 
@@ -526,25 +429,6 @@
       <div id="auditHistoryList"></div>
     </div>
 
-    <!-- ═══ MY RESERVATIONS VIEW ═══ -->
-    <div id="view-my-reservations" class="hidden">
-      <div style="padding:24px">
-        <h2 class="view-heading">My Reservations</h2>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">Upcoming equipment reservations.</p>
-        <button class="btn-primary btn-sm" onclick="openMakeReservationFlow()" style="margin-bottom:16px">+ Make Reservation</button>
-        <div id="myReservationsList"></div>
-      </div>
-    </div>
-
-    <!-- ═══ ADMIN RESERVATIONS VIEW ═══ -->
-    <div id="view-admin-reservations" class="hidden">
-      <div style="padding:24px">
-        <h2 class="view-heading">All Reservations</h2>
-        <div id="resFilterBar" style="margin-bottom:16px"></div>
-        <div id="adminReservationsList"></div>
-      </div>
-    </div>
-
   </div><!-- /main-content -->
 </div><!-- /app-layout -->
 
@@ -554,7 +438,7 @@
 </div>
 
 <!-- ═══ Modal (shared) ═══ -->
-<div class="modal-overlay" id="modalOverlay" onclick="if(!event.target.closest('#modalContent')&&!this.dataset.persistent)closeModal()">
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modalContent"></div>
 </div>
 

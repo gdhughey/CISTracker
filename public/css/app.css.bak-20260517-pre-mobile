@@ -557,43 +557,6 @@ td { padding: 12px 16px; vertical-align: middle; }
   display: flex; align-items: center; gap: 14px;
 }
 .scan-result .item-info { flex: 1; }
-
-/* ── Group scan picker ── */
-.grp-scan-result {
-  background: var(--bg-surface); border: 1px solid var(--border);
-  border-radius: var(--r); margin-bottom: 16px; overflow: hidden;
-  animation: scan-slide-in 0.18s ease;
-}
-@keyframes scan-slide-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
-}
-.grp-scan-header {
-  padding: 12px 14px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 10px;
-}
-.grp-scan-list { max-height: 280px; overflow-y: auto; }
-.grp-scan-opt {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; border-bottom: 1px solid var(--border);
-  cursor: pointer; transition: background 0.12s, border-left 0.12s, padding-left 0.12s;
-  animation: scan-slide-in 0.15s ease both;
-}
-.grp-scan-opt:last-child { border-bottom: none; }
-.grp-scan-opt:not(.grp-scan-opt-out):hover {
-  background: var(--accent-soft);
-  border-left: 3px solid var(--accent);
-  padding-left: 11px;
-}
-.grp-scan-opt-out { opacity: 0.38; cursor: default; pointer-events: none; }
-.grp-scan-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.grp-scan-divider {
-  padding: 4px 14px; font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--text-faint); background: var(--bg-base);
-  border-bottom: 1px solid var(--border);
-}
-
 .currently-out h3 {
   font-size: 12px; font-weight: 600; margin-bottom: 12px;
   color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
@@ -946,58 +909,11 @@ input[type="range"]::-moz-range-track {
     cursor: pointer; padding: 2px 6px; line-height: 1;
   }
   .main-content { width: 100%; min-width: 0; }
-  /* Top bar: stack search above chips, give each row real breathing room and finger-friendly hit areas. */
-  .top-bar {
-    flex-wrap: wrap;
-    padding: 12px 14px;
-    gap: 10px;
-    row-gap: 12px;
-  }
-  .search-box {
-    flex: 1 1 100%;
-    max-width: 100%;
-    order: -1;
-  }
-  .search-box input {
-    padding: 11px 14px 11px 38px;
-    font-size: 14px;
-  }
-  .search-box .search-icon { font-size: 15px; }
-  .status-chips {
-    flex: 1 1 auto;
-    min-width: 0;
-    margin-left: 0;
-    gap: 8px;
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 2px;
-  }
+  .top-bar { flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+  .search-box { max-width: 100%; order: -1; }
+  .status-chips { margin-left: 0; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
   .status-chips::-webkit-scrollbar { display: none; }
-  .chip {
-    padding: 8px 16px;
-    font-size: 13px;
-    min-height: 36px;
-    display: inline-flex;
-    align-items: center;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-  /* The "Grouped" chip uses inline left-border styling — neutralize that on phone
-     so it doesn't draw a stray separator when chips horizontally scroll. */
-  .status-chips .chip[data-status="grouped"] {
-    margin-left: 0 !important;
-    border-left: 1px solid var(--border-input) !important;
-    padding-left: 16px !important;
-  }
-  #addItemBtn {
-    margin-left: auto;
-    padding: 9px 14px;
-    font-size: 13px;
-    min-height: 36px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
+  #addItemBtn { margin-left: auto; }
   .stats-bar { padding: 12px 14px 4px; gap: 8px; flex-wrap: wrap; }
   .stat-card { min-width: calc(50% - 4px); flex: 1; padding: 14px; }
   .stat-num { font-size: 22px; }

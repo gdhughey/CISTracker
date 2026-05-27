@@ -12,6 +12,7 @@ const { validate } = require('../middleware/validate');
 const { stripHtml } = require('../utils/sanitize');
 const sessionService = require('../services/sessionService');
 const emailService = require('../services/emailService');
+const broadcastService = require('../services/broadcastService');
 
 // Generates a strong 14-char temp password that meets the app's complexity
 // rules (uppercase, lowercase, digit, symbol, ≥10 chars). Mirrors the
@@ -31,9 +32,8 @@ function genTempPassword() {
 
 const router = express.Router();
 
-// Owner role gets full inventory management access (models, categories, locations, overdue).
-// Pure admin-only routes (user management, audit log) re-apply requireRole('admin') individually.
-router.use(requireAuth, requireRole(['admin', 'owner']));
+// requireAuth for all; individual routes add requireRole as needed
+router.use(requireAuth);
 
 const studentGroupEnum = z.enum(['am', 'pm', 'allday', 'staff', 'none']);
 
@@ -41,23 +41,23 @@ const createUserSchema = z.object({
   username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/),
   email: z.string().email(),
   password: z.string().optional(), // auto-generated if omitted
-  role: z.enum(['admin', 'user']).default('user'),
+  role: z.enum(['admin', 'user', 'owner']).default('user'),
   student_group: studentGroupEnum.default('none'),
 });
 
 const updateUserSchema = z.object({
-  role: z.enum(['admin', 'user']).optional(),
+  role: z.enum(['admin', 'user', 'owner']).optional(),
   student_group: studentGroupEnum.optional(),
   reset_password: z.boolean().optional(), // true = auto-gen new temp password
   unlock: z.boolean().optional(),
   email: z.string().email().max(254).optional(),
 });
 
-router.get('/users', requireRole('admin'), (_req, res) => {
+router.get('/users', requireRole(['admin','owner']), (_req, res) => {
   res.json({ users: userService.listAll() });
 });
 
-router.get('/users/:id(\\d+)', requireRole('admin'), (req, res) => {
+router.get('/users/:id(\\d+)', requireRole(['admin','owner']), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const user = userService.getById(id);
   if (!user) return res.status(404).json({ error: 'Not found' });
@@ -68,7 +68,21 @@ router.get('/users/:id(\\d+)', requireRole('admin'), (req, res) => {
   });
 });
 
-router.post('/users', requireRole('admin'), validate(createUserSchema), async (req, res) => {
+// Broadcast message (admin/owner POST to set, DELETE to clear)
+router.post('/broadcast', requireRole(['admin','owner']), (req, res) => {
+  const msg = (req.body.message || '').trim();
+  const ttl = Math.min(Math.max(parseInt(req.body.ttl_minutes || 10, 10), 1), 60);
+  broadcastService.set(msg || null, ttl * 60000);
+  req.audit('admin_broadcast', msg || '(cleared)', { ttl_minutes: ttl });
+  res.json({ ok: true });
+});
+
+router.delete('/broadcast', requireRole(['admin','owner']), (req, res) => {
+  broadcastService.clear();
+  res.json({ ok: true });
+});
+
+router.post('/users', requireRole(['admin','owner']), validate(createUserSchema), async (req, res) => {
   if (userService.getByUsername(req.body.username)) return res.status(409).json({ error: 'Username taken' });
   if (userService.getByEmail(req.body.email)) return res.status(409).json({ error: 'Email already registered' });
   const tempPw = genTempPassword();
@@ -81,11 +95,15 @@ router.post('/users', requireRole('admin'), validate(createUserSchema), async (r
   res.status(201).json({ user: userService.pickPublic(userService.getById(user.id)), tempPassword: tempPw });
 });
 
-router.put('/users/:id(\\d+)', requireRole('admin'), validate(updateUserSchema), async (req, res) => {
+router.put('/users/:id(\\d+)', requireRole(['admin','owner']), validate(updateUserSchema), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const user = userService.getById(id);
   if (!user) return res.status(404).json({ error: 'Not found' });
   if (req.body.role) {
+    // Only owners can assign or revoke the 'owner' role
+    if ((req.body.role === 'owner' || user.role === 'owner') && req.user.role !== 'owner') {
+      return res.status(403).json({ error: 'Only an owner can assign or change the owner role' });
+    }
     userService.updateRole(id, req.body.role);
     req.audit('admin_change_role', user.username, { newRole: req.body.role });
     // Kill their sessions so the role change takes effect immediately
@@ -129,7 +147,7 @@ router.put('/users/:id(\\d+)', requireRole('admin'), validate(updateUserSchema),
   res.json(result);
 });
 
-router.delete('/users/:id(\\d+)', requireRole('admin'), (req, res) => {
+router.delete('/users/:id(\\d+)', requireRole(['admin','owner']), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (id === req.user.id) return res.status(400).json({ error: "You can't delete yourself" });
   const user = userService.getById(id);
@@ -148,7 +166,7 @@ const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 const VALID_ROLES_CSV  = new Set(['admin', 'user']);
 const VALID_GROUPS_CSV = new Set(['am', 'pm', 'allday', 'staff', 'none']);
 
-router.post('/users/import', requireRole('admin'), csvUpload.single('file'), async (req, res) => {
+router.post('/users/import', requireRole(['admin','owner']), csvUpload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const text = req.file.buffer.toString('utf8');
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -201,12 +219,12 @@ router.post('/users/import', requireRole('admin'), csvUpload.single('file'), asy
   res.json(results);
 });
 
-router.get('/overdue', (req, res) => {
+router.get('/overdue', requireRole(['admin','owner']), (req, res) => {
   const days = parseInt(req.query.days, 10) || 3;
   res.json({ items: equipmentService.getOverdue(days) });
 });
 
-router.get('/audit', requireRole('admin'), (req, res) => {
+router.get('/audit', requireRole(['admin','owner']), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   res.json({ entries: auditService.recent(limit) });
 });
@@ -225,7 +243,7 @@ router.get('/locations', (_req, res) => {
   res.json({ locations: rows });
 });
 
-router.post('/locations', validate(locationSchema), (req, res) => {
+router.post('/locations', requireRole(['admin','owner']), validate(locationSchema), (req, res) => {
   const { name, building, room, description } = req.body;
   try {
     const info = db.prepare(`
@@ -243,7 +261,7 @@ router.post('/locations', validate(locationSchema), (req, res) => {
   }
 });
 
-router.put('/locations/:id(\\d+)', validate(locationSchema), (req, res) => {
+router.put('/locations/:id(\\d+)', requireRole(['admin','owner']), validate(locationSchema), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const loc = db.prepare('SELECT * FROM locations WHERE id = ?').get(id);
   if (!loc) return res.status(404).json({ error: 'Not found' });
@@ -268,7 +286,7 @@ router.put('/locations/:id(\\d+)', validate(locationSchema), (req, res) => {
   }
 });
 
-router.delete('/locations/:id(\\d+)', (req, res) => {
+router.delete('/locations/:id(\\d+)', requireRole(['admin','owner']), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const loc = db.prepare('SELECT * FROM locations WHERE id = ?').get(id);
   if (!loc) return res.status(404).json({ error: 'Not found' });
@@ -288,7 +306,7 @@ router.get('/categories', (_req, res) => {
   res.json({ categories: categoryService.listAll() });
 });
 
-router.post('/categories', validate(categorySchema), (req, res) => {
+router.post('/categories', requireRole(['admin','owner']), validate(categorySchema), (req, res) => {
   try {
     const cat = categoryService.create(req.body.name);
     req.audit('category_create', req.body.name);
@@ -299,7 +317,7 @@ router.post('/categories', validate(categorySchema), (req, res) => {
   }
 });
 
-router.put('/categories/:id(\\d+)', validate(categorySchema), (req, res) => {
+router.put('/categories/:id(\\d+)', requireRole(['admin','owner']), validate(categorySchema), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!categoryService.getById(id)) return res.status(404).json({ error: 'Not found' });
   const cat = categoryService.update(id, req.body.name);
@@ -307,7 +325,7 @@ router.put('/categories/:id(\\d+)', validate(categorySchema), (req, res) => {
   res.json({ category: cat });
 });
 
-router.delete('/categories/:id(\\d+)', requireRole('admin'), (req, res) => {
+router.delete('/categories/:id(\\d+)', requireRole(['admin','owner']), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const cat = categoryService.getById(id);
   if (!cat) return res.status(404).json({ error: 'Not found' });
@@ -329,7 +347,7 @@ router.get('/models', (_req, res) => {
   res.json({ models: modelService.listAll() });
 });
 
-router.get('/models/:id(\\d+)', (req, res) => {
+router.get('/models/:id(\\d+)', requireRole(['admin','owner']), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const model = modelService.getById(id);
   if (!model) return res.status(404).json({ error: 'Not found' });
@@ -337,13 +355,13 @@ router.get('/models/:id(\\d+)', (req, res) => {
   res.json({ model, units });
 });
 
-router.post('/models', requireRole('admin'), validate(modelSchema), (req, res) => {
+router.post('/models', requireRole(['admin','owner']), validate(modelSchema), (req, res) => {
   const model = modelService.create(req.body);
   req.audit('model_create', model.name);
   res.status(201).json({ model });
 });
 
-router.put('/models/:id(\\d+)', requireRole('admin'), validate(modelSchema.partial()), (req, res) => {
+router.put('/models/:id(\\d+)', requireRole(['admin','owner']), validate(modelSchema.partial()), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!modelService.getById(id)) return res.status(404).json({ error: 'Not found' });
   const model = modelService.update(id, req.body);
@@ -351,13 +369,30 @@ router.put('/models/:id(\\d+)', requireRole('admin'), validate(modelSchema.parti
   res.json({ model });
 });
 
-router.delete('/models/:id(\\d+)', requireRole('admin'), (req, res) => {
+router.delete('/models/:id(\\d+)', requireRole(['admin','owner']), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const model = modelService.getById(id);
   if (!model) return res.status(404).json({ error: 'Not found' });
   modelService.remove(id);
   req.audit('model_delete', model.name);
   res.json({ ok: true });
+});
+
+
+// ── Period Settings ────────────────────────────────────────────────────────
+router.get('/period-settings', (req, res, next) => {
+  try {
+    const periodService = require('../services/periodService');
+    res.json(periodService.getSettings());
+  } catch (err) { next(err); }
+});
+
+router.put('/period-settings', requireRole(['admin','owner']), (req, res, next) => {
+  try {
+    const periodService = require('../services/periodService');
+    periodService.updateSettings(req.body);
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

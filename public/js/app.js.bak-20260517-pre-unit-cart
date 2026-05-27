@@ -23,8 +23,7 @@ let renderVisible = []; // filtered item list (not yet all in DOM)
 let renderShown = 0;    // how many rows are currently rendered
 
 // Mass checkout cart
-const _cart = new Set(); // Set of equipment IDs (HP-Compaq-style: each distinct row)
-const _unitCart = new Map(); // unit_id (number) → parent equipment_id (number) — independent per-unit cart for bulk items
+const _cart = new Set(); // Set of equipment IDs
 let _periodSettings = { am_end_time: '11:30', pm_end_time: '15:00' };
 
 // Mass return cart
@@ -37,12 +36,6 @@ let _openGroupItems = [];
 let _openGroupKey = '';
 const _groupPanelSelected = new Set();
 const _unitPanelSelected = new Set();
-// Cache of unit objects keyed by unit id — populated by renderUnits so that
-// click handlers can look up unit data by id instead of having user-controlled
-// fields (serial, barcode, notes, name) interpolated into onclick attributes.
-// That interpolation was an XSS sink: a serial with `";onclick="alert(1)`
-// could break out of the attribute and inject script.
-const _unitCache = new Map();
 
 // ── Live refresh ────────────────────────────────────────────────────────
 let _refreshInterval = null;
@@ -424,8 +417,6 @@ async function showApp() {
   if (ME && (ME.role === 'admin' || ME.role === 'owner')) {
     const mdb = document.getElementById('massDeleteBtn');
     if (mdb) mdb.style.display = '';
-    const mgb = document.getElementById('massGroupBtn');
-    if (mgb) mgb.style.display = '';
   }
   // Load data
   initTableScroll();
@@ -712,7 +703,6 @@ function switchView(view) {
   if (view === 'users') loadUsers();
   if (view === 'locations') loadLocations();
   if (view === 'categories') loadCategories();
-  if (view === 'groups') loadGroups();
   if (view === 'audit') loadAudit();
   if (view === 'passkeys') loadPasskeys();
   if (view === 'service-tickets') loadServiceTickets();
@@ -743,24 +733,18 @@ function isMeAdmin() { return ME && (ME.role === 'admin' || ME.role === 'owner')
 
 async function loadItems() {
   try {
-    const [equipRes, modelsRes, catsRes, locsRes] = await Promise.allSettled([
+    const [{ items }, { models }, { categories }, { locations }] = await Promise.all([
       api('/api/equipment'),
       api('/api/admin/models'),
       api('/api/admin/categories'),
       api('/api/admin/locations'),
     ]);
-    if (equipRes.status === 'rejected') throw equipRes.reason;
-    ITEMS          = equipRes.value.items;
-    MODELS         = modelsRes.status  === 'fulfilled' ? (modelsRes.value.models      || []) : [];
-    CATEGORIES     = catsRes.status    === 'fulfilled' ? (catsRes.value.categories    || []) : [];
-    LOCATIONS_LIST = locsRes.status    === 'fulfilled' ? (locsRes.value.locations     || []) : [];
+    ITEMS = items;
+    MODELS = models;
+    CATEGORIES = categories;
+    LOCATIONS_LIST = locations;
     buildFilters();
     renderItems();
-    // If the Groups admin tab is currently visible, refresh it too — its data
-    // is derived from ITEMS, so it must reflect adds/edits/deletes.
-    if (typeof loadGroups === 'function' && !document.getElementById('view-groups')?.classList.contains('hidden')) {
-      loadGroups();
-    }
   } catch (err) {
     toast('Failed to load inventory', 'error');
   }
@@ -809,7 +793,7 @@ function buildFilters() {
     catContainer.innerHTML =
       `<button class="chip${catFilter === 'All' ? ' active' : ''}" onclick="setCatFilter('All')">All</button>` +
       CATEGORIES.map(c =>
-        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter(${jsArg(c.name)})">${esc(c.name)}</button>`
+        `<button class="chip${catFilter === c.name ? ' active' : ''}" onclick="setCatFilter('${c.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(c.name)}</button>`
       ).join('');
   }
 
@@ -828,7 +812,7 @@ function buildFilters() {
       const chipsHtml =
         `<button class="chip${locFilter === 'All' ? ' active' : ''}" onclick="setLocFilter('All')">All</button>` +
         allLocNames.map(name =>
-          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter(${jsArg(name)})">${esc(name)}</button>`
+          `<button class="chip${locFilter === name ? ' active' : ''}" onclick="setLocFilter('${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${esc(name)}</button>`
         ).join('');
       if (allLocNames.length > 5) {
         const activeLabel = locFilter !== 'All' ? ` · ${esc(locFilter)}` : '';
@@ -947,21 +931,9 @@ function getGroupKey(name) {
     .trim();
 }
 
-// Group items by their base name first (Gparted, Win 10 CD, Windows 11
-// Mutiboot...), THEN by their #N number within each base name. Without this
-// step, alphabetic sort interleaves "#1 Gparted, #1 Win 10 CD, #1 Windows...,
-// #2 Gparted, #2 Win 10 CD..." which is hard to scan. Bare names with no #N
-// prefix sort at the end.
+// Numeric-aware sort: "#2 Foo" < "#10 Foo" rather than alphabetic "#10" < "#2"
 function naturalSort(a, b) {
-  const parse = (n) => {
-    const m = (n || '').match(/^#(\d+)\s+(.*)$/);
-    return m ? { base: m[2], num: parseInt(m[1], 10) } : { base: n || '', num: Infinity };
-  };
-  const A = parse(a.name);
-  const B = parse(b.name);
-  const baseCmp = A.base.localeCompare(B.base, undefined, { sensitivity: 'base' });
-  if (baseCmp !== 0) return baseCmp;
-  return A.num - B.num;
+  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 }
 
 function makeItemRow(item, inGroup) {
@@ -1014,36 +986,20 @@ function makeItemRow(item, inGroup) {
 
 function renderGrouped() {
   const tbody = document.getElementById('itemsBody');
-  // Only group items that have an explicit group_key set. Items without one
-  // render as their own standalone rows — users opted out of grouping by not
-  // selecting a group when adding the item. They can convert later via the
-  // item's "Move" action or the Groups admin tab's "+ Item" button.
   const groups = new Map();
-  const standalones = [];
   for (const item of renderVisible) {
-    const explicitKey = (item.group_key || '').trim();
-    if (explicitKey) {
-      if (!groups.has(explicitKey)) groups.set(explicitKey, []);
-      groups.get(explicitKey).push(item);
-    } else {
-      standalones.push(item);
-    }
+    const key = item.group_key || getGroupKey(item.name);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
   }
-  // Build a unified list of entries (groups + standalone items) so we can
-  // interleave them in natural sort order based on their display key.
-  const entries = [];
+  const frag = document.createDocumentFragment();
   for (const [key, items] of groups) {
     items.sort(naturalSort);
-    entries.push({ kind: 'group', sortKey: key, key, items });
-  }
-  for (const item of standalones) {
-    entries.push({ kind: 'item', sortKey: item.name, item });
-  }
-  entries.sort((a, b) => a.sortKey.toLowerCase().localeCompare(b.sortKey.toLowerCase()));
-  const frag = document.createDocumentFragment();
-  for (const e of entries) {
-    if (e.kind === 'group') frag.appendChild(makeGroupRow(e.key, e.items));
-    else frag.appendChild(makeItemRow(e.item, false));
+    if (items.length === 1) {
+      frag.appendChild(makeItemRow(items[0], false));
+    } else {
+      frag.appendChild(makeGroupRow(key, items));
+    }
   }
   tbody.appendChild(frag);
 }
@@ -1160,31 +1116,6 @@ function openGroupDetail(key, items) {
     </div>`;
   }
 
-  // Extract model name: use product_number if set, otherwise strip the leading "#N " prefix.
-  // Items in groups are named "#1 AMD FX 9590", "#2 Intel i3-7100" etc.
-  function itemModel(it) {
-    if (it.product_number && it.product_number.trim()) return it.product_number.trim();
-    return it.name.replace(/^#\d+\s+/, '').trim() || null;
-  }
-
-  // Build a grouped HTML string: model sub-headers when multiple models exist.
-  function buildGroupedRows(list) {
-    const byModel = new Map();
-    for (const it of list) {
-      const m = itemModel(it) || '(unknown)';
-      if (!byModel.has(m)) byModel.set(m, []);
-      byModel.get(m).push(it);
-    }
-    if (byModel.size <= 1) return list.map(buildGroupCard).join('');
-    let html = '';
-    for (const [model, its] of byModel) {
-      const avail = its.filter(i => getItemStatus(i) === 'available').length;
-      html += `<div style="font-size:11px;font-weight:700;color:var(--text-sec);letter-spacing:.03em;padding:10px 0 4px;border-bottom:1px solid var(--border);margin-bottom:4px;text-transform:uppercase">${esc(model)} <span style="font-weight:400;color:var(--text-muted)">${avail}/${its.length} avail</span></div>`;
-      html += its.map(buildGroupCard).join('');
-    }
-    return html;
-  }
-
   function renderGroupItemList(q) {
     const el = document.getElementById('grpItemList');
     if (!el) return;
@@ -1201,10 +1132,10 @@ function openGroupDetail(key, items) {
       el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;text-align:center">No items match</div>';
       return;
     }
-    el.innerHTML = buildGroupedRows(matches);
+    el.innerHTML = matches.map(buildGroupCard).join('');
   }
 
-  const itemRows = buildGroupedRows(sorted);
+  const itemRows = sorted.map(buildGroupCard).join('');
   const adminHtml = `
     <div class="detail-section">
       ${isPriv ? '<h4>Admin</h4>' : ''}
@@ -1212,7 +1143,6 @@ function openGroupDetail(key, items) {
         <button class="btn-outline btn-sm" id="grpAddItem">+ New Item</button>
         <button class="btn-outline btn-sm" id="grpAddExisting">+ Existing Item</button>
         <button class="btn-outline btn-sm" id="grpPrintAll">Print All Labels</button>
-        <button class="btn-outline btn-sm" id="grpPrintGroupQR">Print Group QR</button>
         ${isPriv ? `<button class="btn-outline btn-sm" id="grpRename">Rename Group</button>` : ''}
         ${isPriv ? `<button class="btn-outline btn-sm btn-red" id="grpDeleteAll">Delete All</button>` : ''}
       </div>
@@ -1254,7 +1184,6 @@ function openGroupDetail(key, items) {
   selBar.innerHTML = `
     <span id="grpSelCount" style="font-size:13px;font-weight:500;flex:1"></span>
     <button class="btn-primary btn-sm" onclick="printGroupSelected()">Print Labels</button>
-    ${isPriv ? `<button class="btn-outline btn-sm" onclick="setModelForGroupSelected()" title="Assign a model / product number to the selected items so they form a sub-group">Set Model</button>` : ''}
     <button class="btn-sm" style="font-size:12px;background:#d97706;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600" onclick="reportGroupSelected()">Report Damage</button>
     ${isPriv ? `<button class="btn-sm" style="font-size:12px;background:#f04a5a;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600" onclick="deleteGroupSelected()">Delete</button>` : ''}
     <button class="btn-sm" style="font-size:12px;background:var(--bg-elevated);color:var(--text-sec);border:1px solid var(--border-input);padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:500" onclick="_groupPanelSelected.clear();refreshGroupPanelSelection()">Clear</button>
@@ -1275,8 +1204,6 @@ function openGroupDetail(key, items) {
   });
   const addItemBtn = panel.querySelector('#grpAddItem');
   if (addItemBtn) addItemBtn.addEventListener('click', () => addItemToGroup(sorted[0]));
-  const grpQrBtn = panel.querySelector('#grpPrintGroupQR');
-  if (grpQrBtn) grpQrBtn.addEventListener('click', () => printGroupQR(key));
   const addExistingBtn = panel.querySelector('#grpAddExisting');
   if (addExistingBtn) addExistingBtn.addEventListener('click', () => addExistingToGroup(key));
   const renameBtn = panel.querySelector('#grpRename');
@@ -1327,22 +1254,10 @@ async function addItemToGroup(templateItem) {
       </select>
     </div>
     <div class="form-group">
-      <label class="form-label">Quantity</label>
-      <input id="addGrpQty" class="form-input" type="number" min="1" max="100" value="1"
-             oninput="onAddGrpQtyChange()">
-    </div>
-    <div class="form-group hidden" id="addGrpUnitsWrap">
-      <label class="form-label">Per-Unit Details</label>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
-        Each row becomes a separate equipment record. Leave serial / barcode blank to auto-generate.
-      </div>
-      <div id="addGrpUnitRows" style="max-height:260px;overflow-y:auto;padding-right:4px"></div>
-    </div>
-    <div class="form-group" id="addGrpSerialWrap">
       <label class="form-label">Serial / Asset Tag <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
       <input id="addGrpSerial" class="form-input" placeholder="Serial number or asset tag">
     </div>
-    <div class="form-group" id="addGrpBarcodeWrap">
+    <div class="form-group">
       <label class="form-label">Barcode / CIS# <span style="color:var(--text-muted);font-weight:400">(leave blank to auto-generate)</span></label>
       <input id="addGrpBarcode" class="form-input" placeholder="Auto-generated if blank">
     </div>
@@ -1357,53 +1272,6 @@ async function addItemToGroup(templateItem) {
   `, { persistent: true });
 }
 
-// Live-update the in-group Add Item modal when the user changes the quantity.
-// qty > 1: hide the single serial / barcode inputs and show one row per unit
-// with its own name / serial / barcode inputs. Existing user-entered values
-// in unit rows are preserved when the count grows or shrinks.
-function onAddGrpQtyChange() {
-  const qty = Math.max(1, Math.min(100, parseInt(document.getElementById('addGrpQty')?.value, 10) || 1));
-  const unitsWrap = document.getElementById('addGrpUnitsWrap');
-  const rowsEl    = document.getElementById('addGrpUnitRows');
-  const serialWrap  = document.getElementById('addGrpSerialWrap');
-  const barcodeWrap = document.getElementById('addGrpBarcodeWrap');
-  if (qty > 1) {
-    serialWrap?.classList.add('hidden');
-    barcodeWrap?.classList.add('hidden');
-    unitsWrap?.classList.remove('hidden');
-    if (!rowsEl) return;
-    const typedName = document.getElementById('addGrpName')?.value?.trim() || '';
-    const m = typedName.match(/^#(\d+)\s+(.*)$/);
-    const startNum = m ? parseInt(m[1], 10) : 1;
-    const baseName = m ? m[2] : typedName;
-    const existing = [...rowsEl.querySelectorAll('.grp-unit-row')];
-    if (qty > existing.length) {
-      for (let i = existing.length; i < qty; i++) {
-        const div = document.createElement('div');
-        div.className = 'grp-unit-row';
-        div.style.cssText = 'margin-bottom:8px;padding:6px 8px;background:var(--bg-base);border:1px solid var(--border);border-radius:8px';
-        const defaultName = baseName ? `#${startNum + i} ${baseName}` : '';
-        div.innerHTML = `
-          <div style="display:grid;grid-template-columns:28px 1fr;gap:6px;align-items:center;margin-bottom:5px">
-            <span style="font-size:11px;color:var(--text-muted);text-align:right;font-weight:600">${i+1}</span>
-            <input class="form-input grp-unit-name" placeholder="Item name" style="font-size:13px" value="${esc(defaultName)}">
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-            <input class="form-input grp-unit-serial" placeholder="Serial # (optional)" style="font-size:12px">
-            <input class="form-input grp-unit-barcode" placeholder="CIS# (auto if blank)" style="font-size:12px">
-          </div>`;
-        rowsEl.appendChild(div);
-      }
-    } else {
-      while (rowsEl.children.length > qty) rowsEl.removeChild(rowsEl.lastChild);
-    }
-  } else {
-    unitsWrap?.classList.add('hidden');
-    serialWrap?.classList.remove('hidden');
-    barcodeWrap?.classList.remove('hidden');
-  }
-}
-
 async function submitAddItemToGroup(templateId) {
   const templateItem = ITEMS.find(i => i.id === templateId);
   if (!templateItem) return;
@@ -1413,7 +1281,6 @@ async function submitAddItemToGroup(templateId) {
   const notesEl = document.getElementById('addGrpNotes');
   const name = nameEl?.value?.trim();
   if (!name) { toast('Item name is required', 'error'); nameEl?.focus(); return; }
-  const qty = Math.max(1, Math.min(100, parseInt(document.getElementById('addGrpQty')?.value, 10) || 1));
   // Resolve category name (not ID) and location name+ID
   const catVal = document.getElementById('addGrpCategory')?.value;
   const locVal = document.getElementById('addGrpLocation')?.value;
@@ -1424,7 +1291,8 @@ async function submitAddItemToGroup(templateId) {
   const location = location_id
     ? (LOCATIONS_LIST.find(l => l.id === location_id)?.name || templateItem.location || '')
     : (templateItem.location || '');
-  const baseBody = {
+  const body = {
+    name,
     category,
     location,
     location_id,
@@ -1432,60 +1300,15 @@ async function submitAddItemToGroup(templateId) {
     notes: notesEl?.value?.trim() || '',
     group_key: _openGroupKey,
   };
+  if (serialEl?.value?.trim()) body.serial_number = serialEl.value.trim();
+  if (barcodeEl?.value?.trim()) body.barcode = barcodeEl.value.trim();
   const btn = document.querySelector('#modalContent .btn-primary');
   if (btn) btn.disabled = true;
   try {
-    if (qty > 1) {
-      // Multi-row mode: each per-unit row becomes its own equipment record.
-      // The unit's name field is required; serial / barcode are optional and
-      // each blank barcode is replaced server-side with the next CIS ID.
-      const rows = [...document.querySelectorAll('#addGrpUnitRows .grp-unit-row')];
-      const m = name.match(/^#(\d+)\s+(.*)$/);
-      const startNum = m ? parseInt(m[1], 10) : 1;
-      const baseName = m ? m[2] : name;
-      const created = [];
-      let failedAt = null;
-      for (let i = 0; i < qty; i++) {
-        const r = rows[i];
-        const rowName = r?.querySelector('.grp-unit-name')?.value?.trim()
-          || (baseName ? `#${startNum + i} ${baseName}` : '');
-        if (!rowName) {
-          failedAt = { i: i + 1, err: { error: 'Name is required on every unit row' } };
-          break;
-        }
-        const body = { ...baseBody, name: rowName };
-        const rs = r?.querySelector('.grp-unit-serial')?.value?.trim();
-        const rb = r?.querySelector('.grp-unit-barcode')?.value?.trim();
-        if (rs) body.serial_number = rs;
-        if (rb) body.barcode = rb;
-        try {
-          const { item } = await api('/api/equipment', { method: 'POST', body });
-          created.push(item);
-        } catch (err) {
-          failedAt = { i: i + 1, err };
-          break;
-        }
-      }
-      if (failedAt) {
-        toast(`Added ${created.length} of ${qty} — stopped at row ${failedAt.i}: ${failedAt.err.error || 'Failed'}`, 'error');
-      } else {
-        toast(`Added ${created.length} items to group`, 'success');
-      }
-      await loadItems();
-      const byKey = ITEMS.filter(i => (i.group_key || getGroupKey(i.name)) === _openGroupKey);
-      _openGroupItems = byKey;
-      closeModal();
-      openGroupDetail(_openGroupKey, _openGroupItems);
-      return;
-    }
-    // qty === 1: single-row flow with optional serial / barcode + label preview
-    const body = { ...baseBody, name };
-    if (serialEl?.value?.trim()) body.serial_number = serialEl.value.trim();
-    if (barcodeEl?.value?.trim()) body.barcode = barcodeEl.value.trim();
     const { item } = await api('/api/equipment', { method: 'POST', body });
     await loadItems();
     // Build group panel items: by group key + always include newly created item by ID
-    const byKey = ITEMS.filter(i => (i.group_key || getGroupKey(i.name)) === _openGroupKey);
+    const byKey = ITEMS.filter(i => getGroupKey(i.name) === _openGroupKey);
     const newItem = ITEMS.find(i => i.id === item.id);
     if (newItem && !byKey.find(i => i.id === newItem.id)) byKey.push(newItem);
     _openGroupItems = byKey;
@@ -1525,17 +1348,12 @@ async function renameGroup(key, items) {
   const newName = prompt(`Rename group "${key}" to:`, key);
   if (!newName || !newName.trim() || newName.trim() === key) return;
   const trimmed = newName.trim();
-  if (!confirm(`Rename "${key}" → "${trimmed}"?\nThis will update ${items.length} item${items.length > 1 ? 's' : ''}.`)) return;
+  if (!confirm(`Rename "${key}" → "${trimmed}"?\nThis will update ${items.length} item name${items.length > 1 ? 's' : ''}.`)) return;
   let failed = 0;
   for (const item of items) {
-    // Always update group_key so the group itself is renamed; also rewrite
-    // the visible name when it contains the old key so "#1 OldName" becomes
-    // "#1 NewName". Without the group_key change the items kept the old
-    // group_key and stayed grouped under the previous label after rename.
-    const newItemName = item.name.includes(key) ? item.name.replace(key, trimmed) : item.name;
-    const body = { group_key: trimmed };
-    if (newItemName !== item.name) body.name = newItemName;
-    try { await api(`/api/equipment/${item.id}`, { method: 'PUT', body }); }
+    const updated = item.name.includes(key) ? item.name.replace(key, trimmed) : item.name;
+    if (updated === item.name) continue;
+    try { await api(`/api/equipment/${item.id}`, { method: 'PUT', body: { name: updated } }); }
     catch { failed++; }
   }
   if (failed) toast(`${failed} item(s) failed to rename`, 'error');
@@ -1593,12 +1411,10 @@ function updateMoveNameSuggestion(itemId) {
 
 async function confirmMoveItem(itemId) {
   const newName = (document.getElementById('moveItemName')?.value || '').trim();
-  // Read the target group from the dropdown; empty value means "no group (standalone)".
-  const targetKey = (document.getElementById('moveGroupSelect')?.value || '').trim();
   if (!newName) { toast('Name cannot be empty', 'error'); return; }
   try {
-    await api(`/api/equipment/${itemId}`, { method: 'PUT', body: { name: newName, group_key: targetKey } });
-    toast(targetKey ? 'Item moved' : 'Item ungrouped', 'success');
+    await api(`/api/equipment/${itemId}`, { method: 'PUT', body: { name: newName } });
+    toast('Item moved', 'success');
     closeModal();
     closeDetail();
     await loadItems();
@@ -1607,23 +1423,17 @@ async function confirmMoveItem(itemId) {
 
 async function addExistingToGroup(key) {
   const groupItemIds = new Set(_openGroupItems.map(i => i.id));
-  _addExistingAllItems = ITEMS.filter(i => !groupItemIds.has(i.id)).sort((a, b) => a.name.localeCompare(b.name));
-  if (!_addExistingAllItems.length) { toast('No other items to add', 'info'); return; }
+  const others = ITEMS.filter(i => !groupItemIds.has(i.id)).sort((a, b) => a.name.localeCompare(b.name));
+  if (!others.length) { toast('No other items to add', 'info'); return; }
+  const optionsHtml = others.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.barcode || 'CIS-' + String(i.id).padStart(6,'0'))})</option>`).join('');
   const nextNum = _openGroupItems.reduce((max, i) => { const m = i.name.match(/^#(\d+)/); return m ? Math.max(max, parseInt(m[1])) : max; }, 0) + 1;
-  const buildOptions = (items) => '<option value="">— Choose an item —</option>' +
-    items.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.barcode || 'CIS-' + String(i.id).padStart(6,'0'))})</option>`).join('');
   showModal(`
     <div class="modal-title">Add Existing Item to "${esc(key)}"</div>
     <div class="form-group">
-      <label class="form-label">Search items</label>
-      <input id="addExistingSearch" class="form-input" placeholder="Type to filter by name or barcode…" autocomplete="off"
-        oninput="filterAddExistingSelect('${esc(key)}', ${nextNum})">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Select item <span id="addExistingCount" style="font-weight:400;color:var(--text-muted);font-size:11px">(${_addExistingAllItems.length} available)</span></label>
-      <select id="addExistingSelect" class="form-input" size="6" style="height:auto"
-        onchange="updateAddExistingName('${esc(key)}', ${nextNum})">
-        ${buildOptions(_addExistingAllItems)}
+      <label class="form-label">Select item</label>
+      <select id="addExistingSelect" class="form-input" onchange="updateAddExistingName('${esc(key)}', ${nextNum})">
+        <option value="">— Choose an item —</option>
+        ${optionsHtml}
       </select>
     </div>
     <div class="form-group">
@@ -1636,25 +1446,6 @@ async function addExistingToGroup(key) {
       <button class="btn-primary" onclick="confirmAddExisting('${esc(key)}')">Add to Group</button>
     </div>
   `, { persistent: true });
-  document.getElementById('addExistingSearch')?.focus();
-}
-
-function filterAddExistingSelect(key, nextNum) {
-  const search = document.getElementById('addExistingSearch');
-  const sel = document.getElementById('addExistingSelect');
-  const countEl = document.getElementById('addExistingCount');
-  if (!search || !sel) return;
-  const q = search.value.trim().toLowerCase();
-  const filtered = q
-    ? _addExistingAllItems.filter(i =>
-        i.name.toLowerCase().includes(q) ||
-        (i.barcode || 'CIS-' + String(i.id).padStart(6, '0')).toLowerCase().includes(q))
-    : _addExistingAllItems;
-  const prevVal = sel.value;
-  sel.innerHTML = '<option value="">— Choose an item —</option>' +
-    filtered.map(i => `<option value="${i.id}">${esc(i.name)} (${esc(i.barcode || 'CIS-' + String(i.id).padStart(6,'0'))})</option>`).join('');
-  if (prevVal && filtered.some(i => String(i.id) === prevVal)) sel.value = prevVal;
-  if (countEl) countEl.textContent = `(${filtered.length} of ${_addExistingAllItems.length})`;
 }
 
 function updateAddExistingName(key, nextNum) {
@@ -1674,9 +1465,7 @@ async function confirmAddExisting(key) {
   if (!itemId) { toast('Select an item', 'error'); return; }
   if (!newName) { toast('Name cannot be empty', 'error'); return; }
   try {
-    // Set group_key explicitly so the item is recognized as part of the group
-    // regardless of name pattern — auto-grouping by name is no longer used.
-    await api(`/api/equipment/${itemId}`, { method: 'PUT', body: { name: newName, group_key: key } });
+    await api(`/api/equipment/${itemId}`, { method: 'PUT', body: { name: newName } });
     toast('Item added to group', 'success');
     closeModal();
     closeDetail();
@@ -1686,7 +1475,6 @@ async function confirmAddExisting(key) {
 
 let _grpLastSelected = null;
 let _unitLastSelected = null;
-let _addExistingAllItems = [];
 
 function toggleGroupPanelSelect(itemId, event) {
   const cards = [...document.querySelectorAll('#detailPanel .grp-card[data-item-id]')];
@@ -1762,67 +1550,6 @@ async function printGroupSelected() {
   await massPrintLabels();
   _selectedItems.clear();
   for (const id of orig) _selectedItems.add(id);
-}
-
-// Bulk-assign a product_number to selected items so they form a sub-group
-// (e.g. all "AMD FX 9590" items in the CPUs group). The product_number is what
-// the Print Group QR picker and the group panel's model sub-headers key on.
-async function setModelForGroupSelected() {
-  const ids = [..._groupPanelSelected];
-  if (!ids.length) return;
-  const items = ids.map(id => ITEMS.find(i => i.id === id)).filter(Boolean);
-  // Pre-fill with the most common existing product_number, or with the model
-  // derived from the first selected item's name (stripping the "#N " prefix).
-  const pnCounts = new Map();
-  for (const it of items) {
-    const pn = (it.product_number || '').trim();
-    if (pn) pnCounts.set(pn, (pnCounts.get(pn) || 0) + 1);
-  }
-  let suggested = '';
-  if (pnCounts.size) {
-    suggested = [...pnCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-  } else {
-    suggested = (items[0]?.name || '').replace(/^#\d+\s+/, '').trim();
-  }
-  const existingModels = [...new Set(
-    ITEMS.map(i => (i.product_number || '').trim()).filter(Boolean)
-  )].sort();
-  const datalistOpts = existingModels.map(m => `<option value="${esc(m)}">`).join('');
-  showModal(`
-    <div class="modal-title">Set Model / Sub-group</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">${items.length} item${items.length > 1 ? 's' : ''} selected. Assign a model / product number so they form a sub-group inside this drawer. The Print Group QR picker will offer this model as a drawer label.</div>
-    <div class="form-group">
-      <label class="form-label">Model / Product Number</label>
-      <input id="bulkModelInput" class="form-input" value="${esc(suggested)}" list="bulkModelList" placeholder="e.g. AMD FX 9590, dc7900, GTX 1080" autofocus>
-      <datalist id="bulkModelList">${datalistOpts}</datalist>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Tip: leave blank and Save to clear the model from these items.</div>
-    </div>
-    <div class="form-actions">
-      <button class="btn-outline" onclick="closeModal()">Cancel</button>
-      <button class="btn-primary" onclick="confirmSetModelForGroupSelected()">Save</button>
-    </div>
-  `, { persistent: true });
-}
-
-async function confirmSetModelForGroupSelected() {
-  const ids = [..._groupPanelSelected];
-  if (!ids.length) { closeModal(); return; }
-  const val = (document.getElementById('bulkModelInput')?.value || '').trim();
-  let failed = 0;
-  for (const id of ids) {
-    try { await api(`/api/equipment/${id}`, { method: 'PUT', body: { product_number: val } }); }
-    catch { failed++; }
-  }
-  if (failed) toast(`${failed} of ${ids.length} item${ids.length > 1 ? 's' : ''} failed to update`, 'error');
-  else toast(val ? `Model set to "${val}" on ${ids.length} item${ids.length > 1 ? 's' : ''}` : `Model cleared on ${ids.length} item${ids.length > 1 ? 's' : ''}`, 'success');
-  closeModal();
-  const refreshKey = _openGroupKey;
-  await loadItems();
-  // Reopen the group panel so the user sees the new sub-group structure.
-  if (refreshKey) {
-    const refreshed = ITEMS.filter(i => (i.group_key || '').trim() === refreshKey);
-    if (refreshed.length) openGroupDetail(refreshKey, refreshed);
-  }
 }
 
 async function deleteGroupSelected() {
@@ -1933,7 +1660,7 @@ function toggleSelect(id, cb, e) {
       const parentTr = gcb.closest('tr');
       const key = parentTr?._groupKey;
       if (!key) return;
-      const groupItems = renderVisible.filter(it => (it.group_key || '').trim() === key);
+      const groupItems = renderVisible.filter(it => getGroupKey(it.name) === key);
       const allSel = groupItems.length > 0 && groupItems.every(it => _selectedItems.has(it.id));
       const someSel = !allSel && groupItems.some(it => _selectedItems.has(it.id));
       gcb.checked = allSel;
@@ -1951,7 +1678,7 @@ function toggleSelect(id, cb, e) {
 }
 
 function toggleGroupSelect(key, cb) {
-  const groupItems = renderVisible.filter(it => (it.group_key || '').trim() === key);
+  const groupItems = renderVisible.filter(it => getGroupKey(it.name) === key);
   for (const it of groupItems) {
     if (cb.checked) _selectedItems.add(it.id);
     else _selectedItems.delete(it.id);
@@ -2024,70 +1751,6 @@ function massDeleteItems() {
   confirmMassDelete(ids);
 }
 
-// Bulk-assign selected items to a group (existing or new). This is the "I
-// forgot to click + New group when adding items" rescue path: pick some
-// standalone items in the inventory view, click Group, choose a target.
-function massGroupItems() {
-  const ids = [..._selectedItems];
-  if (!ids.length) return;
-  const existingKeys = [...new Set(ITEMS.map(i => (i.group_key || '').trim()).filter(Boolean))].sort();
-  const opts = existingKeys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
-  showModal(`
-    <div class="modal-title">Group ${ids.length} Item${ids.length > 1 ? 's' : ''}</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Combine the selected items into a group. They'll share a group label and appear together as one drawer in the inventory and Groups tab.</div>
-    <div class="form-group">
-      <label class="form-label">Target group</label>
-      <select id="massGroupSel" class="form-input" onchange="onMassGroupTargetChange()">
-        <option value="">— Choose —</option>
-        ${opts}
-        <option value="__new__">＋ New group…</option>
-        <option value="__clear__">— Ungroup (no group) —</option>
-      </select>
-      <input id="massGroupNew" class="form-input hidden" placeholder="New group name (e.g. GPUs)" style="margin-top:6px">
-    </div>
-    <div class="form-actions">
-      <button class="btn-outline" onclick="closeModal()">Cancel</button>
-      <button class="btn-primary" onclick="confirmMassGroup()">Apply</button>
-    </div>
-  `, { persistent: true });
-}
-
-function onMassGroupTargetChange() {
-  const sel = document.getElementById('massGroupSel');
-  const newInput = document.getElementById('massGroupNew');
-  if (!sel || !newInput) return;
-  if (sel.value === '__new__') {
-    newInput.classList.remove('hidden');
-    newInput.focus();
-  } else {
-    newInput.classList.add('hidden');
-  }
-}
-
-async function confirmMassGroup() {
-  const ids = [..._selectedItems];
-  if (!ids.length) { closeModal(); return; }
-  const sel = document.getElementById('massGroupSel');
-  let target = (sel?.value || '').trim();
-  if (!target) { toast('Choose a target group', 'error'); return; }
-  if (target === '__new__') {
-    target = (document.getElementById('massGroupNew')?.value || '').trim();
-    if (!target) { toast('Enter a new group name', 'error'); return; }
-  } else if (target === '__clear__') {
-    target = '';
-  }
-  let failed = 0;
-  for (const id of ids) {
-    try { await api(`/api/equipment/${id}`, { method: 'PUT', body: { group_key: target } }); }
-    catch { failed++; }
-  }
-  if (failed) toast(`${failed} of ${ids.length} failed to update`, 'error');
-  else toast(target ? `${ids.length} item${ids.length > 1 ? 's' : ''} added to "${target}"` : `${ids.length} item${ids.length > 1 ? 's' : ''} ungrouped`, 'success');
-  closeModal();
-  clearSelection();
-  await loadItems();
-}
-
 async function confirmMassDelete(ids) {
   let failed = 0;
   for (const id of ids) {
@@ -2120,7 +1783,7 @@ function renderItems() {
       else if (item.location_id !== loc.id && item.location !== locFilter) continue;
     }
     if (q) {
-      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location} ${item.product_number || ''} ${item.group_key || ''}`;
+      const hay = `${item.name} ${item.barcode} ${item.serial_number} ${item.category} ${item.type} ${item.location} ${item.product_number || ''}`;
       if (!searchMatch(hay, q)) continue;
     }
     renderVisible.push(item);
@@ -2334,7 +1997,6 @@ function renderUnits(equipmentId, units) {
     return;
   }
 
-  for (const u of units) _unitCache.set(u.id, u);
   const cardsHtml = units.map(u => {
     const label   = u.barcode || u.serial_number || ('Unit #' + u.id);
     const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
@@ -2348,10 +2010,10 @@ function renderUnits(equipmentId, units) {
           <div style="font-size:11px;font-family:var(--mono);color:var(--accent);margin-top:1px">${esc(unitIdentifier)}</div>
           ${u.notes ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">${esc(u.notes)}</div>` : ''}
         </div>
-        ${hasAvail ? `<button class="btn-cart unit-cart-btn${_unitCart.has(u.id) ? ' in-cart' : ''}" id="cartBtn-U-${u.id}" data-eid="${equipmentId}" data-uid="${u.id}" title="${_unitCart.has(u.id) ? 'Remove from cart' : 'Add to cart'}" onclick="event.stopPropagation();toggleUnitCart(${equipmentId},${u.id})">🛒</button>` : ''}
+        ${hasAvail ? `<button class="btn-cart unit-cart-btn${_cart.has(equipmentId) ? ' in-cart' : ''}" data-eid="${equipmentId}" title="${_cart.has(equipmentId) ? 'Remove from cart' : 'Add to cart'}" onclick="event.stopPropagation();toggleCartForUnits(${equipmentId})">🛒</button>` : ''}
         ${isAdminUser ? `
           <div style="display:flex;gap:4px;margin-left:4px;flex-wrap:wrap">
-            <button class="btn-outline btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();editUnit(${equipmentId},${u.id})">Edit</button>
+            <button class="btn-outline btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();editUnit(${equipmentId},${u.id},'${(u.serial_number||'').replace(/'/g,"\\'")}','${(u.barcode||'').replace(/'/g,"\\'")}','${(u.notes||'').replace(/'/g,"\\'")}','${(u.name||'').replace(/'/g,"\\'")}')">Edit</button>
             <button class="btn-outline btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();printLabel(${equipmentId})">Label</button>
             <button class="btn-outline btn-sm btn-red" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();deleteUnit(${equipmentId},${u.id})">✕</button>
           </div>
@@ -2492,7 +2154,7 @@ function addUnit(equipmentId) {
       <div class="form-group">
         <label class="form-label">How many units to add?</label>
         <input id="bulkUnitQty" class="form-input" type="number" min="1" max="500" value="1"
-          oninput="renderBulkUnitRows(${equipmentId}, ${jsArg(baseName)})">
+          oninput="renderBulkUnitRows(${equipmentId}, '${esc(baseName).replace(/'/g,"\\'")}')">
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Name, serial &amp; barcode per unit — leave blank for any you don't have yet.</div>
       <div id="bulkUnitRows" style="max-height:300px;overflow-y:auto;padding-right:4px"></div>
@@ -2556,16 +2218,14 @@ async function saveNewUnit(equipmentId) {
   } catch (err) { toast(err.error || 'Failed', 'error'); }
 }
 
-function editUnit(equipmentId, uid) {
-  const u = _unitCache.get(uid);
-  if (!u) { toast('Unit not found — please refresh', 'error'); return; }
+function editUnit(equipmentId, uid, serial, barcode, notes, name) {
   showModal(`
     <div class="modal-title">Edit Unit</div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">Unit Name</label><input id="editUnitName" class="form-input" value="${esc(u.name || '')}"></div>
-      <div class="form-group"><label class="form-label">Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(u.serial_number || '')}"></div>
-      <div class="form-group"><label class="form-label">Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(u.barcode || '')}"></div>
-      <div class="form-group"><label class="form-label">Notes</label><input id="editUnitNotes" class="form-input" value="${esc(u.notes || '')}"></div>
+      <div class="form-group"><label class="form-label">Unit Name</label><input id="editUnitName" class="form-input" value="${esc(name || '')}"></div>
+      <div class="form-group"><label class="form-label">Serial Number</label><input id="editUnitSerial" class="form-input mono" value="${esc(serial)}"></div>
+      <div class="form-group"><label class="form-label">Barcode</label><input id="editUnitBarcode" class="form-input mono" value="${esc(barcode)}"></div>
+      <div class="form-group"><label class="form-label">Notes</label><input id="editUnitNotes" class="form-input" value="${esc(notes)}"></div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
         <button class="btn-primary" onclick="saveEditUnit(${equipmentId},${uid})">Save</button>
@@ -2944,7 +2604,7 @@ async function loadBulkUnitPicker(equipmentId) {
       const identifier = u.barcode ? u.barcode : (u.serial_number ? 'SN: ' + u.serial_number : '');
       const noteVal = [u.barcode, u.serial_number].filter(Boolean).join(' / ');
       return `
-        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id}, ${jsArg(noteVal)})">\n          <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(displayName)}</div>\n          ${identifier ? `<div style="font-size:11px;font-family:var(--mono);color:var(--accent);margin-top:1px">${esc(identifier)}</div>` : ''}\n          ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(u.notes)}</div>` : ''}\n        </div>`;
+        <div class="unit-pick-card" id="unitCard-${u.id}" onclick="selectBulkUnit(${u.id},'${noteVal.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">\n          <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(displayName)}</div>\n          ${identifier ? `<div style="font-size:11px;font-family:var(--mono);color:var(--accent);margin-top:1px">${esc(identifier)}</div>` : ''}\n          ${u.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(u.notes)}</div>` : ''}\n        </div>`;
     }).join('');
     container.innerHTML = anyCard + unitCards;
   } catch {
@@ -3093,28 +2753,18 @@ function openReturnModal(id) {
 }
 
 async function confirmReturn(id) {
-  // Scope the modal-body lookup and disable the confirm button so a
-  // double-click can't fire the checkin twice (server is transactional, but
-  // we still want clear UX with no flicker between clicks).
-  const modal = document.getElementById('modalContent');
-  const btn = modal?.querySelector('.btn-primary');
-  if (btn) btn.disabled = true;
   try {
     const data = await api(`/api/equipment/${id}/checkin`, { method: 'POST', body: { source: 'Manual' } });
-    const body = modal?.querySelector('.modal-body');
-    if (body) body.classList.add('hidden');
-    document.getElementById('retSuccess')?.classList.remove('hidden');
+    document.querySelector('.modal-body').classList.add('hidden');
+    document.getElementById('retSuccess').classList.remove('hidden');
     if (data.nextInQueue) {
       const msgEl = document.getElementById('retQueueMsg');
-      if (msgEl) {
-        msgEl.textContent = `📣 ${data.nextInQueue.username} has been notified!`;
-        msgEl.classList.remove('hidden');
-      }
+      msgEl.textContent = `📣 ${data.nextInQueue.username} has been notified!`;
+      msgEl.classList.remove('hidden');
       toast(`📣 Next up: ${data.nextInQueue.username} has been notified`, 'purple');
     }
     setTimeout(() => { closeModal(); loadItems(); closeDetail(); }, 1800);
   } catch (err) {
-    if (btn) btn.disabled = false;
     toast(err.error || 'Return failed', 'error');
   }
 }
@@ -3151,17 +2801,14 @@ async function loadRepairQueue() {
 }
 
 async function doMarkRepaired(itemId) {
-  // api() throws on non-2xx — without a try-catch the unhandled rejection
-  // left the repair button apparently "stuck" with no feedback.
-  try {
-    await api(`/api/equipment/${itemId}/repair`, { method: 'POST', body: {} });
-    toast('Marked as repaired', 'success');
-    loadRepairQueue();
-    loadRepairsView();
-    loadItems();
-  } catch (err) {
-    toast(err.error || 'Failed to mark as repaired', 'error');
-  }
+  const r = await api(`/api/equipment/${itemId}/repair`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({})
+  });
+  if (r?.error) { toast(r.error, 'error'); return; }
+  toast('Marked as repaired');
+  loadRepairQueue();
+  loadRepairsView();
+  loadItems();
 }
 
 // ── Repairs Tab ────────────────────────────────────────────────────────
@@ -3650,14 +3297,7 @@ function setResAdminFilter(s) {
 // ── Add item modal ─────────────────────────────────────────────────────
 function openAddItemModal() {
   const isAdmin = ME?.role === 'admin' || ME?.role === 'owner';
-  // Prefer explicit group_key (set when user picked a group) so custom-named
-  // items don't pollute the dropdown with phantom one-off groups derived from
-  // their names. Only fall back to name-pattern for items that have no
-  // group_key set.
-  const groupKeys = [...new Set([
-    ...ITEMS.map(i => (i.group_key || '').trim()).filter(k => k),
-    ...ITEMS.filter(i => !(i.group_key || '').trim()).map(i => getGroupKey(i.name)),
-  ])].filter(k => k).sort();
+  const groupKeys = [...new Set(ITEMS.map(i => getGroupKey(i.name)))].sort();
   const groupOptions = groupKeys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -3673,7 +3313,7 @@ function openAddItemModal() {
         <input id="addGroupNew" class="form-input hidden" placeholder="New group name" style="margin-top:6px">
       </div>
       <div class="form-group"><label class="form-label">Name <span style="color:var(--red)">*</span></label>
-        <input id="addName" class="form-input" placeholder="e.g. HP EliteBook 840" autofocus oninput="onAddNameChange()"></div>
+        <input id="addName" class="form-input" placeholder="e.g. HP EliteBook 840" autofocus></div>
       <div class="form-group"><label class="form-label">Category</label>
         <select id="addCat" class="form-input">
           <option value="">— Select category —</option>
@@ -3729,20 +3369,16 @@ function onAddGroupChange() {
   newInput?.classList.add('hidden');
   if (!val) return; // no group — leave name alone
 
-  // Auto-suggest next name in group. Match items by explicit group_key first
-  // (so custom-named members like "#1 Gparted" count toward the group),
-  // falling back to name-pattern for legacy items without group_key.
-  const groupItems = ITEMS.filter(i => {
-    const k = (i.group_key || '').trim() || getGroupKey(i.name);
-    return k === val;
-  });
+  // Auto-suggest next name in group
+  const groupItems = ITEMS.filter(i => getGroupKey(i.name) === val);
   const maxNum = groupItems.reduce((max, i) => {
     const m = i.name.match(/^#(\d+)/);
     return m ? Math.max(max, parseInt(m[1])) : max;
   }, 0);
-  if (nameInput && (!nameInput.value.trim() || nameInput.dataset.autofilled === '1')) {
+  if (nameInput && !nameInput.value.trim()) {
     nameInput.value = `#${maxNum + 1} ${val}`;
-    nameInput.dataset.autofilled = '1';
+  } else if (nameInput) {
+    nameInput.value = `#${maxNum + 1} ${val}`;
   }
 }
 
@@ -3767,7 +3403,7 @@ function onAddQtyChange() {
           div.innerHTML = `
             <div style="display:grid;grid-template-columns:28px 1fr;gap:6px;align-items:center;margin-bottom:5px">
               <span style="font-size:11px;color:var(--text-muted);text-align:right;font-weight:600">${i+1}</span>
-              <input class="form-input unit-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}" oninput="this.dataset.manual='1'">
+              <input class="form-input unit-name" placeholder="Unit name" style="font-size:13px" value="${esc(baseName ? baseName + ' ' + (i+1) : '')}">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
               <input class="form-input unit-serial" placeholder="Serial #" style="font-size:12px">
@@ -3783,18 +3419,6 @@ function onAddQtyChange() {
     single?.classList.remove('hidden');
     multi?.classList.add('hidden');
   }
-}
-
-function onAddNameChange() {
-  const nameInput = document.getElementById('addName');
-  if (nameInput) delete nameInput.dataset.autofilled;
-  const baseName = nameInput?.value.trim() || '';
-  document.querySelectorAll('#addUnitRows .unit-row').forEach((row, i) => {
-    const nameEl = row.querySelector('.unit-name');
-    if (nameEl && !nameEl.dataset.manual) {
-      nameEl.value = baseName ? `${baseName} ${i + 1}` : '';
-    }
-  });
 }
 
 async function submitAddItem() {
@@ -3832,16 +3456,6 @@ async function submitAddItem() {
     if (hasAny) units = collected;
   }
 
-  // If user picked an existing group OR typed a new group name, attach it as
-  // group_key so renderGrouped can collapse items together even when names
-  // diverge (e.g. "#2 USB Flash drives/CD images" vs "Win Server 25 Iso").
-  let groupKey = '';
-  if (addGroupSel === '__new__' && addGroupNew) {
-    groupKey = addGroupNew;
-  } else if (addGroupSel && addGroupSel !== '__new__') {
-    groupKey = addGroupSel;
-  }
-
   const basePayload = {
     name,
     category,
@@ -3849,7 +3463,6 @@ async function submitAddItem() {
     location_id,
     notes: document.getElementById('addNotes')?.value.trim() || '',
     product_number: document.getElementById('addProductNumber')?.value.trim() || '',
-    group_key: groupKey,
   };
 
   // Single unit or bulk-no-serials: use existing single payload
@@ -3875,66 +3488,42 @@ async function submitAddItem() {
         toast(`${name} added with ${units.length} units`, 'success');
         closeModal();
         loadItems();
-      } else if (qty > 1) {
-        // qty > 1 with no per-unit serials: create N separate equipment rows
-        // numbered #N so each USB / CD / unit gets its own asset ID and can
-        // be checked out individually.
-        const m = name.match(/^#(\d+)\s+(.*)$/);
-        const startNum = m ? parseInt(m[1], 10) : 1;
-        const baseName = m ? m[2] : name;
-        const created = [];
-        let failedAt = null;
-        for (let i = 0; i < qty; i++) {
-          const rowName = `#${startNum + i} ${baseName}`;
-          try {
-            const { item } = await api('/api/equipment', {
-              method: 'POST',
-              body: { ...basePayload, name: rowName, serial_number: '', barcode: '', quantity: 1 },
-            });
-            created.push(item);
-          } catch (err) {
-            failedAt = { i: i + 1, err };
-            break;
-          }
-        }
-        createdItems = created;
-        if (failedAt) {
-          toast(`Added ${created.length} of ${qty} — stopped at row ${failedAt.i}: ${failedAt.err.error || 'Failed'}`, 'error');
-        } else {
-          toast(`Added ${created.length} items`, 'success');
-        }
-        closeModal();
-        loadItems();
       } else {
-        // Single row (qty === 1) — show label preview after insert
+        // Single row (qty=1) or bulk row (qty>1, no individual serials)
         const { item } = await api('/api/equipment', { method: 'POST', body: payload });
         createdItems = [item];
-        toast('Item added', 'success');
-        try {
-          const label = await api(`/api/equipment/${item.id}/label`);
-          _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
-          document.getElementById('addStep1').classList.add('hidden');
-          const step2 = document.getElementById('addStep2');
-          step2.classList.remove('hidden');
-          step2.innerHTML = `
-            <div class="success-icon" style="margin-bottom:12px">✓</div>
-            <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
-            <div class="label-preview">
-              <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
-              <div class="label-info">
-                <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
-                <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
-                <div class="label-id">${esc(label.asset_id)}</div>
-                <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
+        toast(qty > 1 ? `Added ${qty}× ${item.name}` : 'Item added', 'success');
+        // Show label step only for single items
+        if (qty === 1) {
+          try {
+            const label = await api(`/api/equipment/${item.id}/label`);
+            _pendingPrint = { label, name: item.name, category: item.category || '', serial: item.serial_number || '' };
+            document.getElementById('addStep1').classList.add('hidden');
+            const step2 = document.getElementById('addStep2');
+            step2.classList.remove('hidden');
+            step2.innerHTML = `
+              <div class="success-icon" style="margin-bottom:12px">✓</div>
+              <div style="text-align:center;font-size:15px;font-weight:600;margin-bottom:16px">Item Created</div>
+              <div class="label-preview">
+                <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
+                <div class="label-info">
+                  <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker</div>
+                  <div style="font-weight:600;margin:2px 0">${esc(item.name)}</div>
+                  <div class="label-id">${esc(label.asset_id)}</div>
+                  <div style="font-size:10px;color:#666;margin-top:2px">${esc(item.category || '')} ${item.serial_number ? '· ' + item.serial_number : ''}</div>
+                </div>
               </div>
-            </div>
-            <div class="form-actions">
-              <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
-              <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
-            </div>
-          `;
-        } catch {
-          toast('Item created but label failed to load', 'info');
+              <div class="form-actions">
+                <button class="btn-outline" onclick="closeModal();loadItems()">Skip</button>
+                <button class="btn-primary" onclick="printPendingLabel()">🖨 Print Label</button>
+              </div>
+            `;
+          } catch {
+            toast('Item created but label failed to load', 'info');
+            closeModal();
+            loadItems();
+          }
+        } else {
           closeModal();
           loadItems();
         }
@@ -4009,7 +3598,7 @@ async function submitEdit(id) {
     await api(`/api/equipment/${id}`, { method: 'PUT', body });
     toast('Item updated', 'success');
     closeModal();
-    await loadItems();
+    loadItems();
   } catch (err) {
     toast(err.error || 'Update failed', 'error');
   }
@@ -4063,135 +3652,6 @@ function printPendingLabel() {
   if (!_pendingPrint) return;
   const { label, name, category, serial } = _pendingPrint;
   doPrintLabel(label, name, category, serial);
-}
-
-// Generate and print a group QR label. Scanning the QR routes through the
-// /api/equipment/lookup endpoint, which detects the "GRP:" prefix and picks
-// the next available item in the group for checkout.
-async function printGroupQR(groupKey) {
-  try {
-    const { models } = await api(`/api/equipment/group-models?key=${encodeURIComponent(groupKey)}`);
-
-    // Derive model suggestions from items in this group that lack product_number.
-    // Items are named "#N ModelName" (e.g. "#1 AMD FX 9590") — strip the leading #N to get the model.
-    const groupItems = (typeof ITEMS !== 'undefined' ? ITEMS : [])
-      .filter(i => (i.group_key || getGroupKey(i.name)) === groupKey && !i.product_number);
-    const nameModels = [...new Set(
-      groupItems.map(i => i.name.replace(/^#\d+\s+/, '').trim()).filter(m => m)
-    )].sort();
-
-    // Known models (have product_number set) — shown with availability counts
-    const knownRows = models.map(m => `
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:13px">${esc(m.product_number)}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${m.available} available · ${m.total} total</div>
-        </div>
-        <button class="btn-outline btn-sm" onclick="window._grpQrPick(${jsArg(m.product_number)})">Print QR</button>
-      </div>`).join('');
-
-    // Name-derived suggestions for items that don't yet have a product_number
-    const knownPNs = new Set(models.map(m => m.product_number));
-    const suggestRows = nameModels.filter(m => !knownPNs.has(m)).map(m => `
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:13px">${esc(m)}</div>
-          <div style="font-size:11px;color:var(--text-muted)">Detected from item names · no product # set yet</div>
-        </div>
-        <button class="btn-outline btn-sm" onclick="window._grpQrPick(${jsArg(m)})">Print QR</button>
-      </div>`).join('');
-
-    const hasAnyModel = knownRows || suggestRows;
-    const modelSection = hasAnyModel
-      ? `<div style="margin-bottom:4px">${knownRows}${suggestRows}</div>`
-      : `<div style="font-size:11px;color:var(--text-muted);padding:6px 0 10px">No model names detected yet — use the input below.</div>`;
-
-    showModal(`
-      <div class="modal-title">Print Group QR</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Choose a model/drawer to label, or print a whole-group QR.</div>
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:13px">Whole Group</div>
-          <div style="font-size:11px;color:var(--text-muted)">Auto-picks any available item</div>
-        </div>
-        <button class="btn-outline btn-sm" onclick="window._grpQrPick(null)">Print QR</button>
-      </div>
-      ${modelSection}
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <div style="font-size:12px;font-weight:600;margin-bottom:4px">Enter model / product number</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Type the model name or product # for a specific drawer. To add more later, set the same Product Number on new items when adding them.</div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input id="grpQrCustomInput" type="text" class="form-input" placeholder="e.g. dc7900 or HP-1234"
-            style="flex:1;font-size:13px;padding:6px 10px"
-            onkeydown="if(event.key==='Enter')window._grpQrPickCustom()">
-          <button class="btn-primary btn-sm" onclick="window._grpQrPickCustom()">Print QR</button>
-        </div>
-      </div>
-      <div class="form-actions" style="margin-top:12px">
-        <button class="btn-outline" onclick="closeModal()">Cancel</button>
-      </div>
-    `, { persistent: true });
-
-    window._grpQrPick = async (productNumber) => {
-      closeModal();
-      await _showGroupQRModal(groupKey, productNumber);
-    };
-    window._grpQrPickCustom = async () => {
-      const val = (document.getElementById('grpQrCustomInput')?.value || '').trim();
-      if (!val) { toast('Enter a model name or product number', 'error'); return; }
-      closeModal();
-      await _showGroupQRModal(groupKey, val);
-    };
-  } catch (err) {
-    toast(err.error || 'Failed to load group models', 'error');
-  }
-}
-
-async function _showGroupQRModal(groupKey, productNumber) {
-  try {
-    const url = `/api/equipment/group-label?key=${encodeURIComponent(groupKey)}`
-      + (productNumber ? `&model=${encodeURIComponent(productNumber)}` : '');
-    const label = await api(url);
-    window._pendingGroupPrint = { qrDataUrl: label.qr_data_url, assetId: label.asset_id, groupKey };
-    const subtitle = productNumber
-      ? `Model <strong style="color:var(--text)">${esc(productNumber)}</strong> · ${label.member_count} unit${label.member_count === 1 ? '' : 's'}`
-      : `All items in <strong style="color:var(--text)">${esc(groupKey)}</strong> · ${label.member_count} unit${label.member_count === 1 ? '' : 's'}`;
-    showModal(`
-      <div class="modal-title">Group QR Label</div>
-      <div style="text-align:center;font-size:13px;color:var(--text-muted);margin-bottom:14px">${subtitle}</div>
-      <div class="label-preview" style="margin:0 auto">
-        <img class="qr-img" src="${label.qr_data_url}" alt="QR Code">
-        <div class="label-info">
-          <div style="font-size:9px;color:#888;text-transform:uppercase">CISTracker · ${productNumber ? 'Model' : 'Group'}</div>
-          <div style="font-weight:600;margin:2px 0">${esc(productNumber || groupKey)}</div>
-          <div class="label-id">${esc(label.asset_id)}</div>
-          <div style="font-size:10px;color:#666;margin-top:2px">${productNumber ? 'Auto-pick next · ' + esc(groupKey) : 'Auto-pick next available'}</div>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn-outline" onclick="closeModal()">Close</button>
-        <button class="btn-primary" onclick="printPendingGroupLabel()">🖨 Print</button>
-      </div>
-    `, { persistent: true });
-  } catch (err) {
-    toast(err.error || 'Failed to generate QR', 'error');
-  }
-}
-
-function printPendingGroupLabel() {
-  if (!window._pendingGroupPrint) return;
-  const { qrDataUrl, assetId, groupKey } = window._pendingGroupPrint;
-  doPrintGroupLabel(qrDataUrl, assetId, groupKey);
-}
-
-function doPrintGroupLabel(qrDataUrl, assetId, groupKey) {
-  const frame = document.createElement('iframe');
-  frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:40mm;height:30mm;border:none;';
-  document.body.appendChild(frame);
-  const doc = frame.contentDocument;
-  doc.write(buildLabelsDoc([{ qr: qrDataUrl, id: assetId, name: 'GROUP: ' + groupKey, serial: '', category: 'Auto-pick' }]));
-  doc.close();
-  setTimeout(() => { frame.contentWindow.print(); setTimeout(() => frame.remove(), 2000); }, 250);
 }
 
 async function printLabel(id) {
@@ -4410,108 +3870,27 @@ function resetScanArea() {
 async function handleScannedCode(code) {
   const resultDiv = document.getElementById('scanResult');
   try {
-    const res = await api(`/api/equipment/lookup?code=${encodeURIComponent(code)}`);
-    const { item, group } = res;
+    const { item } = await api(`/api/equipment/lookup?code=${encodeURIComponent(code)}`);
     resultDiv.classList.remove('hidden');
-    if (group) {
-      window._grpScanKey = group.key;
-      window._grpScanModel = group.model || null;
-      showGroupScanPicker(resultDiv, group.key, group.model || null);
-    } else {
-      window._grpScanKey = null;
-      _renderScanItem(resultDiv, item, null);
-    }
-  } catch (err) {
-    resultDiv.classList.remove('hidden');
-    const msg = err?.error || `No item found for "${code}"`;
-    resultDiv.innerHTML = `<div class="scan-result" style="border-color:var(--red)"><div style="color:var(--red)">✕ ${esc(msg)}</div></div>`;
-  }
-}
-
-function _renderScanItem(resultDiv, item, groupKey) {
-  const st = getItemStatus(item);
-  const groupBanner = groupKey
-    ? `<div style="grid-column:1/-1;font-size:11px;color:var(--text-muted);margin-bottom:6px">
-         📦 <strong style="color:var(--text)">${esc(groupKey)}</strong>
-         · <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:0;font-family:var(--font)" onclick="_grpScanReset()">← pick different</button>
-       </div>`
-    : '';
-  resultDiv.innerHTML = `
-    <div class="scan-result">
-      ${groupBanner}
-      <div style="font-size:24px;color:var(--green)">✓</div>
-      <div class="item-info">
-        <div style="font-weight:600">${esc(item.name)}</div>
-        <div style="font-family:var(--mono);font-size:12px;color:var(--accent)">${esc(item.barcode)}</div>
-        ${item.serial_number ? `<div style="font-family:var(--mono);font-size:11px;color:var(--text-sec)">${esc(item.serial_number)}</div>` : ''}
-      </div>
-      <span class="status-badge status-${st}"><span class="dot"></span>${statusLabel(st)}</span>
-      ${st === 'available'
-        ? `<button class="btn-primary" onclick="openCheckoutModal(${item.id})">Check Out</button>`
-        : `<button class="btn-outline btn-green" onclick="openReturnModal(${item.id})">Return</button>`}
-    </div>
-  `;
-}
-
-function showGroupScanPicker(resultDiv, groupKey, model = null) {
-  let allItems = ITEMS.filter(i => (i.group_key || getGroupKey(i.name)) === groupKey);
-  if (model) allItems = allItems.filter(i => i.product_number === model);
-  const available = allItems.filter(i => i.status === 'available').sort(naturalSort);
-  const unavail   = allItems.filter(i => i.status !== 'available').sort(naturalSort);
-
-  const renderRow = (it) => {
-    const st = getItemStatus(it);
-    const isAvail = st === 'available';
-    const serial = it.serial_number
-      ? `<div style="font-family:var(--mono);font-size:11px;color:${isAvail ? 'var(--accent)' : 'var(--text-muted)'};">${esc(it.serial_number)}</div>`
-      : `<div style="font-size:11px;color:var(--text-faint)">no serial</div>`;
-    const who = !isAvail && it.checked_out_username
-      ? `<div style="font-size:10px;color:var(--text-faint);margin-top:1px">with ${esc(it.checked_out_username)}</div>`
-      : '';
-    return `
-      <div class="grp-scan-opt${isAvail ? '' : ' grp-scan-opt-out'}"
-           onclick="${isAvail ? `_grpScanPick(${it.id})` : ''}">
-        <div class="grp-scan-dot" style="background:${isAvail ? 'var(--green)' : 'var(--border-input)'}"></div>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</div>
-          ${serial}${who}
+    const st = getItemStatus(item);
+    resultDiv.innerHTML = `
+      <div class="scan-result">
+        <div style="font-size:24px;color:var(--green)">✓</div>
+        <div class="item-info">
+          <div style="font-weight:600">${esc(item.name)}</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--accent)">${esc(item.barcode)}</div>
         </div>
-        <span class="status-badge status-${st}" style="flex-shrink:0"><span class="dot"></span>${statusLabel(st)}</span>
+        <span class="status-badge status-${st}"><span class="dot"></span>${st === 'available' ? 'Available' : 'Checked Out'}</span>
+        ${st === 'available'
+          ? `<button class="btn-primary" onclick="openCheckoutModal(${item.id})">Check Out</button>`
+          : `<button class="btn-outline btn-green" onclick="openReturnModal(${item.id})">Return</button>`}
       </div>
     `;
-  };
-
-  const body = allItems.length === 0
-    ? `<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">No items found in this group</div>`
-    : `${available.map(renderRow).join('')}
-       ${unavail.length && available.length ? '<div class="grp-scan-divider">Checked Out</div>' : ''}
-       ${unavail.map(renderRow).join('')}`;
-
-  resultDiv.innerHTML = `
-    <div class="grp-scan-result">
-      <div class="grp-scan-header">
-        <span style="font-size:20px">📦</span>
-        <div style="flex:1">
-          <div style="font-weight:700;font-size:14px">${esc(model || groupKey)}</div>
-          ${model ? `<div style="font-size:10px;color:var(--text-faint)">${esc(groupKey)}</div>` : ''}
-          <div style="font-size:11px;color:var(--text-muted)">${available.length} available · ${allItems.length} total</div>
-        </div>
-        <span style="font-size:11px;color:var(--accent);font-weight:600;letter-spacing:0.02em">pick one ↓</span>
-      </div>
-      <div class="grp-scan-list">${body}</div>
-    </div>
-  `;
+  } catch {
+    resultDiv.classList.remove('hidden');
+    resultDiv.innerHTML = `<div class="scan-result" style="border-color:var(--red)"><div style="color:var(--red)">✕ No item found for "${esc(code)}"</div></div>`;
+  }
 }
-
-window._grpScanPick = function(itemId) {
-  const item = ITEMS.find(i => i.id === itemId);
-  if (!item) return;
-  _renderScanItem(document.getElementById('scanResult'), item, window._grpScanKey);
-};
-
-window._grpScanReset = function() {
-  showGroupScanPicker(document.getElementById('scanResult'), window._grpScanKey, window._grpScanModel || null);
-};
 
 // ═══════════════════════════════════════════════════════════════════════
 //  OVERDUE
@@ -5356,163 +4735,6 @@ async function confirmChangeUserGroup(id) {
 
 let _allLocations = [];
 
-// ═══════════════════════════════════════════════════════════════════════
-//  GROUPS (admin) — manage equipment groups (e.g. the CPUs drawer)
-//
-//  Groups are derived from the `group_key` field on equipment items. To
-//  "create" a group the user names it and then assigns items to it. The
-//  add-equipment form already supports a "+ New group…" option in the Group
-//  dropdown — this tab surfaces all groups centrally and offers shortcuts to
-//  rename, open, add to, print QR, or ungroup.
-// ═══════════════════════════════════════════════════════════════════════
-
-let _allGroups = [];
-
-function deriveAllGroups() {
-  // Only return groups whose items have an explicit group_key set. Items
-  // without a group_key are standalone — they don't constitute a "group"
-  // even if their names share a pattern.
-  const map = new Map();
-  for (const it of ITEMS) {
-    const key = (it.group_key || '').trim();
-    if (!key) continue;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(it);
-  }
-  return [...map.entries()]
-    .map(([key, items]) => {
-      const avail = items.filter(i => getItemStatus(i) === 'available').length;
-      const models = new Set();
-      for (const it of items) {
-        const fromPn = (it.product_number || '').trim();
-        const fromName = it.name.replace(/^#\d+\s+/, '').trim();
-        const m = fromPn || fromName;
-        if (m && m !== key) models.add(m);
-      }
-      const cats = new Set(items.map(i => i.category).filter(Boolean));
-      const locs = new Set(items.map(i => i.location).filter(Boolean));
-      return {
-        key,
-        items,
-        count: items.length,
-        avail,
-        out: items.length - avail,
-        models: [...models].sort(),
-        category: cats.size === 1 ? [...cats][0] : (cats.size > 1 ? `${cats.size} categories` : '—'),
-        location: locs.size === 1 ? [...locs][0] : (locs.size > 1 ? `${locs.size} locations` : '—'),
-      };
-    })
-    .sort((a, b) => a.key.localeCompare(b.key));
-}
-
-async function loadGroups() {
-  _allGroups = deriveAllGroups();
-  renderGroups();
-}
-
-function renderGroups() {
-  const container = document.getElementById('groupsList');
-  if (!container) return;
-  const q = (document.getElementById('groupsSearchInput')?.value || '').trim().toLowerCase();
-  const list = q
-    ? _allGroups.filter(g =>
-        g.key.toLowerCase().includes(q) ||
-        g.models.some(m => m.toLowerCase().includes(q)) ||
-        (g.category || '').toLowerCase().includes(q))
-    : _allGroups;
-  if (!list.length) {
-    container.innerHTML = q
-      ? '<div class="empty-state"><p>No groups match your search.</p></div>'
-      : '<div class="empty-state"><p>No groups yet. Click <strong>+ New Group</strong> to create one.</p></div>';
-    return;
-  }
-  container.innerHTML = list.map(g => {
-    const modelChips = g.models.slice(0, 5).map(m =>
-      `<span style="font-size:10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--text-sec)">${esc(m)}</span>`
-    ).join('');
-    const moreModels = g.models.length > 5
-      ? `<span style="font-size:10px;color:var(--text-muted);align-self:center">+${g.models.length - 5} more</span>` : '';
-    const statusLine = `${g.count} item${g.count !== 1 ? 's' : ''} · ${g.models.length} model${g.models.length !== 1 ? 's' : ''} · <span style="color:var(--green)">${g.avail} avail</span>${g.out ? ` · <span style="color:var(--amber)">${g.out} out</span>` : ''}`;
-    const k = jsArg(g.key);
-    return `
-      <div class="user-row" onclick="openGroupFromTab(${k})" style="cursor:pointer;align-items:flex-start;padding:14px;gap:10px">
-        <div class="user-info" style="flex:1;min-width:0">
-          <div class="user-name" style="font-size:15px">${esc(g.key)}</div>
-          <div class="user-email" style="margin-top:4px">${statusLine}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(g.category)} · ${esc(g.location)}</div>
-          ${g.models.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${modelChips}${moreModels}</div>` : ''}
-        </div>
-        <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;max-width:260px" onclick="event.stopPropagation()">
-          <button class="btn-outline btn-sm" onclick="addExistingToGroupFromTab(${k})" title="Add an existing item to this group">+ Item</button>
-          <button class="btn-outline btn-sm" onclick="printGroupQR(${k})" title="Print drawer QR for this group">QR</button>
-          <button class="btn-outline btn-sm" onclick="renameGroupFromTab(${k})" title="Rename this group">Rename</button>
-          <button class="btn-outline btn-sm btn-red" onclick="ungroupGroupFromTab(${k})" title="Remove the group label from these items (keeps items)">Ungroup</button>
-        </div>
-      </div>`;
-  }).join('');
-}
-
-function openGroupFromTab(key) {
-  const items = ITEMS.filter(i => (i.group_key || '').trim() === key);
-  if (!items.length) { toast('Group has no items', 'error'); return; }
-  openGroupDetail(key, items);
-}
-
-function openCreateGroupFromTab() {
-  openAddItemModal();
-  // Pre-select "+ New group…" so the user lands on the new-group input.
-  setTimeout(() => {
-    const sel = document.getElementById('addGroup');
-    if (!sel) return;
-    sel.value = '__new__';
-    onAddGroupChange();
-    document.getElementById('addGroupNew')?.focus();
-  }, 0);
-}
-
-async function renameGroupFromTab(key) {
-  const items = ITEMS.filter(i => (i.group_key || '').trim() === key);
-  if (!items.length) { toast('Group not found', 'error'); return; }
-  const newName = prompt(`Rename group "${key}" to:`, key);
-  if (!newName || !newName.trim() || newName.trim() === key) return;
-  const trimmed = newName.trim();
-  if (!confirm(`Rename "${key}" → "${trimmed}"?\nThis will update ${items.length} item${items.length > 1 ? 's' : ''}.`)) return;
-  let failed = 0;
-  for (const it of items) {
-    const newItemName = it.name.includes(key) ? it.name.replace(key, trimmed) : it.name;
-    const body = { group_key: trimmed };
-    if (newItemName !== it.name) body.name = newItemName;
-    try { await api(`/api/equipment/${it.id}`, { method: 'PUT', body }); }
-    catch { failed++; }
-  }
-  if (failed) toast(`${failed} item(s) failed to rename`, 'error');
-  else toast(`Group renamed to "${trimmed}"`, 'success');
-  await loadItems();
-  loadGroups();
-}
-
-async function ungroupGroupFromTab(key) {
-  const items = ITEMS.filter(i => (i.group_key || '').trim() === key);
-  if (!items.length) { toast('Group not found', 'error'); return; }
-  if (!confirm(`Remove the "${key}" group label from ${items.length} item${items.length > 1 ? 's' : ''}?\n\nThe items will remain in inventory but won't be grouped together anymore.`)) return;
-  let failed = 0;
-  for (const it of items) {
-    try { await api(`/api/equipment/${it.id}`, { method: 'PUT', body: { group_key: '' } }); }
-    catch { failed++; }
-  }
-  if (failed) toast(`${failed} item(s) failed to ungroup`, 'error');
-  else toast(`Group "${key}" cleared from ${items.length} item${items.length > 1 ? 's' : ''}`, 'success');
-  await loadItems();
-  loadGroups();
-}
-
-function addExistingToGroupFromTab(key) {
-  const items = ITEMS.filter(i => (i.group_key || '').trim() === key);
-  _openGroupItems = [...items];
-  _openGroupKey = key;
-  addExistingToGroup(key);
-}
-
 async function loadAdminSettings() {
   const container = document.getElementById('adminSettingsContent');
   if (!container) return;
@@ -6048,14 +5270,6 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
-}
-
-// Safely embed a JS value (string/number/array/object) as an argument inside an
-// HTML attribute like onclick="fn(${jsArg(value)})". JSON.stringify produces
-// the literal, then double-quotes are HTML-entity-encoded so the attribute
-// parser doesn't terminate early.
-function jsArg(v) {
-  return JSON.stringify(v).replace(/"/g, '&quot;');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -7102,54 +6316,28 @@ function toggleCart(id) {
   updateCartFab();
 }
 
-// Per-unit cart for bulk items: each unit card behaves like its own HP-Compaq row.
-// One click adds/removes that single unit; the cart rolls up by parent equipment at checkout.
-function toggleUnitCart(equipmentId, unitId) {
-  if (_unitCart.has(unitId)) {
-    _unitCart.delete(unitId);
-  } else {
-    const eq = ITEMS.find(i => i.id === equipmentId);
-    if (!eq) { toast('Item not found', 'error'); return; }
-    const avail = Math.max(0, (eq.quantity || 1) - (eq.checked_out_count || 0));
-    const alreadyCarted = (_cart.has(equipmentId) ? 1 : 0)
-      + [..._unitCart.values()].filter(eid => eid === equipmentId).length;
-    if (alreadyCarted >= avail) {
-      toast(`Only ${avail} available — cart already has ${alreadyCarted}`, 'error');
-      return;
-    }
-    _unitCart.set(unitId, equipmentId);
-  }
-  const btn = document.getElementById(`cartBtn-U-${unitId}`);
-  if (btn) {
-    const on = _unitCart.has(unitId);
-    btn.classList.toggle('in-cart', on);
-    btn.title = on ? 'Remove from cart' : 'Add to cart';
-  }
-  updateCartFab();
+function toggleCartForUnits(equipmentId) {
+  toggleCart(equipmentId);
+  const inCart = _cart.has(equipmentId);
+  document.querySelectorAll(`.unit-cart-btn[data-eid="${equipmentId}"]`).forEach(b => {
+    b.classList.toggle('in-cart', inCart);
+    b.title = inCart ? 'Remove from cart' : 'Add to cart';
+  });
 }
 
 function updateCartFab() {
   const fab = document.getElementById('cartFab');
   const badge = document.getElementById('cartBadge');
   if (!fab) return;
-  const n = _cart.size + _unitCart.size;
+  const n = _cart.size;
   badge.textContent = n;
   fab.classList.toggle('hidden', n === 0);
 }
 
 async function openCartModal() {
-  if (_cart.size === 0 && _unitCart.size === 0) return;
-  // Mixed entries: equipment-level rows + per-unit rows (parent equipment looked up by eqId)
-  const entries = [];
-  for (const id of _cart) {
-    const item = ITEMS.find(i => i.id === id);
-    if (item) entries.push({ kind: 'E', eqId: id, unitId: null, item });
-  }
-  for (const [unitId, eqId] of _unitCart) {
-    const item = ITEMS.find(i => i.id === eqId);
-    if (item) entries.push({ kind: 'U', eqId, unitId, item });
-  }
-  const totalCount = entries.length;
+  if (_cart.size === 0) return;
+  const ids = [..._cart];
+  const cartItems = ids.map(id => ITEMS.find(i => i.id === id)).filter(Boolean);
 
   const modal = document.getElementById('modalContent');
   const isAdmin = isMeAdmin();
@@ -7161,25 +6349,21 @@ async function openCartModal() {
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
       <div>
         <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Mass Checkout</div>
-        <div style="font-size:16px;font-weight:700;color:var(--text)">${totalCount} item${totalCount !== 1 ? 's' : ''} selected</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text)">${cartItems.length} item${cartItems.length !== 1 ? 's' : ''} selected</div>
       </div>
       <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px" onclick="closeModal()">×</button>
     </div>
 
     <div class="cart-item-list" id="cartItemList">
-      ${entries.map(e => {
-        const rowKey = e.kind === 'E' ? `E-${e.eqId}` : `U-${e.unitId}`;
-        const removeArg = e.kind === 'E' ? `'E',${e.eqId}` : `'U',${e.unitId}`;
-        const unitTag  = e.kind === 'U' ? ` <span style="font-size:10px;color:var(--text-muted);font-weight:500">· unit #${e.unitId}</span>` : '';
-        return `
-        <div class="cart-item-row" id="cartRow-${rowKey}">
+      ${cartItems.map(item => `
+        <div class="cart-item-row" id="cartRow-${item.id}">
           <div style="flex:1">
-            <div class="cart-item-name">${esc(e.item.name)}${unitTag}</div>
-            <div class="cart-item-id">${esc(e.item.barcode || 'ID-' + e.eqId)}</div>
+            <div class="cart-item-name">${esc(item.name)}</div>
+            <div class="cart-item-id">${esc(item.barcode || 'ID-' + item.id)}</div>
           </div>
-          <button class="cart-remove-btn" onclick="cartRemoveItem(${removeArg})" title="Remove">✕</button>
-        </div>`;
-      }).join('')}
+          <button class="cart-remove-btn" onclick="cartRemoveItem(${item.id})" title="Remove">✕</button>
+        </div>
+      `).join('')}
     </div>
 
     <div id="cartCheckoutForm">
@@ -7210,7 +6394,7 @@ async function openCartModal() {
       </div>
       <div class="form-actions">
         <button class="btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn-primary" id="cartSubmitBtn" onclick="confirmBatchCheckout()">Checkout ${totalCount} Item${totalCount !== 1 ? 's' : ''} →</button>
+        <button class="btn-primary" id="cartSubmitBtn" onclick="confirmBatchCheckout()">Checkout ${cartItems.length} Item${cartItems.length !== 1 ? 's' : ''} →</button>
       </div>
     </div>
 
@@ -7225,22 +6409,12 @@ async function openCartModal() {
   requestAnimationFrame(() => updateCartDurationLabel(defaultDays));
 }
 
-function cartRemoveItem(kind, id) {
-  // Backwards-compat: old signature was cartRemoveItem(equipmentId) with a single arg.
-  if (id === undefined && typeof kind === 'number') { id = kind; kind = 'E'; }
-  if (kind === 'E') {
-    _cart.delete(id);
-    const btn = document.getElementById(`cartBtn-${id}`);
-    if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
-    const row = document.getElementById(`cartRow-E-${id}`);
-    if (row) row.remove();
-  } else {
-    _unitCart.delete(id);
-    const btn = document.getElementById(`cartBtn-U-${id}`);
-    if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
-    const row = document.getElementById(`cartRow-U-${id}`);
-    if (row) row.remove();
-  }
+function cartRemoveItem(id) {
+  _cart.delete(id);
+  const row = document.getElementById(`cartRow-${id}`);
+  if (row) row.remove();
+  const btn = document.getElementById(`cartBtn-${id}`);
+  if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
   updateCartFab();
   const remaining = document.querySelectorAll('#cartItemList .cart-item-row').length;
   if (remaining === 0) { closeModal(); return; }
@@ -7295,9 +6469,7 @@ async function confirmMassReturn() {
 }
 
 async function confirmBatchCheckout() {
-  // Equipment-level entries pass through as-is; each unit-cart entry contributes
-  // its parent equipment_id (repeats are fine — backend decrements once per ID).
-  const ids = [..._cart, ...Array.from(_unitCart.values())];
+  const ids = [..._cart];
   if (!ids.length) return;
   const days = parseInt(document.getElementById('cartDuration')?.value || '7', 10);
   const notes = (document.getElementById('cartNotes')?.value || '').trim();
@@ -7312,23 +6484,12 @@ async function confirmBatchCheckout() {
     const { results } = await api('/api/equipment/batch-checkout', { method: 'POST', body });
     const succeeded = results.filter(r => r.success).length;
     const failed    = results.filter(r => !r.success);
-    // Clear cart for successfully checked-out items. Prefer clearing equipment-level
-    // entries first; if none for that ID, remove one matching unit-cart entry.
+    // Clear cart for successfully checked-out items
     for (const r of results) {
-      if (!r.success) continue;
-      if (_cart.has(r.id)) {
+      if (r.success) {
         _cart.delete(r.id);
         const btn = document.getElementById(`cartBtn-${r.id}`);
         if (btn) { btn.classList.remove('in-cart'); btn.title = 'Add to cart'; }
-      } else {
-        for (const [uid, eid] of _unitCart) {
-          if (eid === r.id) {
-            _unitCart.delete(uid);
-            const ub = document.getElementById(`cartBtn-U-${uid}`);
-            if (ub) { ub.classList.remove('in-cart'); ub.title = 'Add to cart'; }
-            break;
-          }
-        }
       }
     }
     updateCartFab();

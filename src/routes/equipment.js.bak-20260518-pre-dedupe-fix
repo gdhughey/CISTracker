@@ -83,138 +83,9 @@ router.get('/next-asset-id', requireRole(['admin','owner']), (req, res) => {
 router.get('/lookup', (req, res) => {
   const code = String(req.query.code || '').trim();
   if (!code) return res.status(400).json({ error: 'code is required' });
-  // Model-specific group scan: GRPM:{group_key}::{product_number}
-  if (/^GRPM:/i.test(code)) {
-    const rest = code.replace(/^GRPM:/i, '').trim();
-    const sepIdx = rest.indexOf('::');
-    if (sepIdx < 0) return res.status(400).json({ error: 'Invalid GRPM code format' });
-    const groupKey = rest.slice(0, sepIdx).trim();
-    const productNumber = rest.slice(sepIdx + 2).trim();
-    if (!groupKey || !productNumber) return res.status(400).json({ error: 'Invalid GRPM code' });
-    const members = db.prepare(`
-      SELECT e.*, u.username AS checked_out_username,
-             max(0, e.quantity - e.checked_out_count) AS available_count
-      FROM equipment e
-      LEFT JOIN users u ON u.id = e.checked_out_by
-      WHERE lower(trim(e.group_key)) = lower(trim(?))
-        AND e.product_number = ?
-      ORDER BY e.name
-    `).all(groupKey, productNumber);
-    if (!members.length) {
-      return res.status(404).json({ error: `No "${productNumber}" items found in group "${groupKey}"` });
-    }
-    const total = members.length;
-    const available = members.filter(m => {
-      const qty = m.quantity || 1;
-      return (qty - (m.checked_out_count || 0)) > 0 && m.status === 'available';
-    });
-    if (!available.length) {
-      return res.status(409).json({
-        error: `No available ${productNumber} units in "${groupKey}"`,
-        group: { key: groupKey, model: productNumber, total, available: 0 },
-      });
-    }
-    return res.json({
-      item: available[0],
-      group: { key: groupKey, model: productNumber, total, available: available.length },
-    });
-  }
-  // Group scan: codes prefixed "GRP:" identify a group (group_key) rather
-  // than a single equipment row. Pick the first available item in that
-  // group so the caller can check one out without manually choosing.
-  if (/^GRP:/i.test(code)) {
-    const groupKey = code.replace(/^GRP:/i, '').trim();
-    if (!groupKey) return res.status(400).json({ error: 'Group key is empty' });
-    const members = db.prepare(`
-      SELECT e.*, u.username AS checked_out_username,
-             max(0, e.quantity - e.checked_out_count) AS available_count
-      FROM equipment e
-      LEFT JOIN users u ON u.id = e.checked_out_by
-      WHERE lower(trim(group_key)) = lower(trim(?))
-      ORDER BY e.name
-    `).all(groupKey);
-    if (!members.length) {
-      return res.status(404).json({ error: `No items in group "${groupKey}"` });
-    }
-    const total = members.length;
-    const available = members.filter(m => {
-      const qty = m.quantity || 1;
-      return (qty - (m.checked_out_count || 0)) > 0 && m.status === 'available';
-    });
-    if (!available.length) {
-      return res.status(409).json({
-        error: `No available items in group "${groupKey}"`,
-        group: { key: groupKey, total, available: 0 },
-      });
-    }
-    const pick = available[0];
-    return res.json({
-      item: pick,
-      group: { key: groupKey, total, available: available.length },
-    });
-  }
   const item = equipmentService.findByIdentifier({ barcode: code, serial_number: code });
   if (!item) return res.status(404).json({ error: 'No equipment matches that code' });
   res.json({ item });
-});
-
-// List distinct product_number values (models) within a group.
-router.get('/group-models', requireRole(['admin','owner']), (req, res) => {
-  const key = String(req.query.key || '').trim();
-  if (!key) return res.status(400).json({ error: 'key is required' });
-  const models = db.prepare(`
-    SELECT product_number,
-           COUNT(*) AS total,
-           SUM(CASE WHEN status = 'available' AND (quantity - COALESCE(checked_out_count, 0)) > 0 THEN 1 ELSE 0 END) AS available
-    FROM equipment
-    WHERE lower(trim(group_key)) = lower(trim(?))
-      AND trim(product_number) != ''
-    GROUP BY product_number
-    ORDER BY product_number
-  `).all(key);
-  const unassigned = db.prepare(
-    `SELECT COUNT(*) AS n FROM equipment WHERE lower(trim(group_key)) = lower(trim(?)) AND trim(product_number) = ''`
-  ).get(key);
-  res.json({ models, unassigned: unassigned.n });
-});
-
-// Generate a printable QR label that, when scanned, picks the next available
-// item out of the named group (or a specific model within it) for checkout.
-router.get('/group-label', requireRole(['admin','owner']), async (req, res, next) => {
-  try {
-    const key = String(req.query.key || '').trim();
-    const model = String(req.query.model || '').trim();
-    if (!key) return res.status(400).json({ error: 'key is required' });
-
-    let count, code, labelName;
-    if (model) {
-      count = db.prepare(
-        'SELECT COUNT(*) AS n FROM equipment WHERE lower(trim(group_key)) = lower(trim(?)) AND product_number = ?'
-      ).get(key, model);
-      if (!count || count.n === 0) {
-        return res.status(404).json({ error: `No "${model}" items in group "${key}"` });
-      }
-      code = `GRPM:${key}::${model}`;
-      labelName = model;
-    } else {
-      count = db.prepare(
-        'SELECT COUNT(*) AS n FROM equipment WHERE lower(trim(group_key)) = lower(trim(?))'
-      ).get(key);
-      if (!count || count.n === 0) {
-        return res.status(404).json({ error: `No items in group "${key}"` });
-      }
-      code = `GRP:${key}`;
-      labelName = `Group: ${key}`;
-    }
-
-    const qr = await QRCode.toDataURL(code, {
-      errorCorrectionLevel: 'M',
-      margin: 1,
-      scale: 8,
-      color: { dark: '#000000', light: '#FFFFFF' },
-    });
-    res.json({ asset_id: code, name: labelName, qr_data_url: qr, member_count: count.n });
-  } catch (err) { next(err); }
 });
 
 // Render a printable QR label for an existing equipment row. The QR
@@ -245,24 +116,6 @@ router.get('/:id(\\d+)', (req, res) => {
 router.post('/', requireRole(['admin','owner']), validate(createSchema), (req, res) => {
   const body = { ...req.body };
   if (!body.barcode) body.barcode = equipmentService.nextAssetId();
-  // Explicit Add Item must NOT silently merge into an existing row. The
-  // service-level findByIdentifier dedupe is still used by the checkout-scan
-  // path; here we surface duplicates as a clear 409 so the admin knows the
-  // item already exists instead of seeing a "successful" create that
-  // produced no new row.
-  const dupe = equipmentService.findByIdentifier({
-    barcode: body.barcode,
-    serial_number: body.serial_number,
-  });
-  if (dupe) {
-    const onField = dupe.barcode && body.barcode &&
-      dupe.barcode.trim().toLowerCase() === body.barcode.trim().toLowerCase()
-      ? 'barcode' : 'serial number';
-    return res.status(409).json({
-      error: `Duplicate ${onField}: already used by "${dupe.name}" (${dupe.barcode || 'no barcode'})`,
-      existing_id: dupe.id,
-    });
-  }
   const item = equipmentService.create(body);
   req.audit('equipment_create', String(item.id), {
     name: item.name,

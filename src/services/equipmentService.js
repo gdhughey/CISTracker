@@ -53,8 +53,6 @@ function getById(id) {
 
 // Look up an existing equipment row by barcode and/or serial number.
 // Returns null if nothing matches OR if both identifiers are blank.
-// Falls back to searching equipment_units (individual unit barcodes) and
-// returns the parent equipment row when a unit match is found.
 function findByIdentifier({ barcode, serial_number }) {
   const bc = (barcode || '').trim();
   const sn = (serial_number || '').trim();
@@ -64,30 +62,16 @@ function findByIdentifier({ barcode, serial_number }) {
   if (bc) { conds.push('lower(trim(barcode)) = lower(trim(?))'); params.push(bc); }
   if (sn) { conds.push('lower(trim(serial_number)) = lower(trim(?))'); params.push(sn); }
   // Match if either identifier matches (logical OR).
-  const direct = db.prepare(`
+  return db.prepare(`
     SELECT e.*, u.username AS checked_out_username
     FROM equipment e
     LEFT JOIN users u ON u.id = e.checked_out_by
     WHERE ${conds.join(' OR ')}
     LIMIT 1
   `).get(...params) || null;
-  if (direct) return direct;
-
-  // Fallback: check equipment_units table (individual unit barcodes).
-  // If a unit's barcode matches, return its parent equipment row so the
-  // checkout/checkin flow works unchanged.
-  if (bc) {
-    try {
-      const unit = db.prepare(
-        'SELECT equipment_id FROM equipment_units WHERE lower(trim(barcode)) = lower(trim(?)) LIMIT 1'
-      ).get(bc);
-      if (unit && unit.equipment_id) return getById(unit.equipment_id);
-    } catch { /* equipment_units table may not exist */ }
-  }
-  return null;
 }
 
-function create({ name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, product_number, quantity }) {
+function create({ name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, product_number, quantity, group_key }) {
   // Server-side dedupe: if a barcode or serial number is supplied and an
   // equipment row already exists with that identifier, return that row
   // instead of creating a duplicate. This prevents the checkout flow from
@@ -97,14 +81,14 @@ function create({ name, type, serial_number, barcode, category, location, locati
   const existing = findByIdentifier({ barcode, serial_number });
   if (existing) return existing;
   const info = db.prepare(`
-    INSERT INTO equipment (name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, product_number, quantity)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, type || '', serial_number || '', barcode || '', category || '', location || '', location_id || null, model_id || null, image_path || null, notes || '', product_number || '', quantity || 1);
+    INSERT INTO equipment (name, type, serial_number, barcode, category, location, location_id, model_id, image_path, notes, product_number, quantity, group_key)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, type || '', serial_number || '', barcode || '', category || '', location || '', location_id || null, model_id || null, image_path || null, notes || '', product_number || '', quantity || 1, group_key || '');
   return getById(info.lastInsertRowid);
 }
 
 function update(id, fields) {
-  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'location', 'location_id', 'model_id', 'notes', 'image_path', 'product_number'];
+  const allowed = ['name', 'type', 'serial_number', 'barcode', 'category', 'location', 'location_id', 'model_id', 'notes', 'image_path', 'product_number', 'group_key'];
   const sets = [];
   const params = [];
   for (const key of allowed) {
@@ -126,20 +110,7 @@ function remove(id) {
     // tickets.equipment_id is nullable so NULL is cleaner than deleting the ticket.
     db.prepare('UPDATE tickets SET equipment_id = NULL WHERE equipment_id = ?').run(id);
     db.prepare('DELETE FROM checkout_log WHERE equipment_id = ?').run(id);
-    try { db.prepare('DELETE FROM equipment_units WHERE equipment_id = ?').run(id); } catch {}
     db.prepare('DELETE FROM equipment WHERE id = ?').run(id);
-  });
-  tx();
-}
-
-function bulkRemove(ids) {
-  const tx = db.transaction(() => {
-    for (const id of ids) {
-      db.prepare('UPDATE tickets SET equipment_id = NULL WHERE equipment_id = ?').run(id);
-      db.prepare('DELETE FROM checkout_log WHERE equipment_id = ?').run(id);
-      try { db.prepare('DELETE FROM equipment_units WHERE equipment_id = ?').run(id); } catch {}
-      db.prepare('DELETE FROM equipment WHERE id = ?').run(id);
-    }
   });
   tx();
 }
@@ -149,7 +120,7 @@ function bulkRemove(ids) {
 // performedById identifies the actor (admin in kiosk mode, otherwise same as
 // borrower). The checkout_log keeps both: performed_by = actor, checkout_user
 // = borrower username, so audits show who actually scanned/clicked.
-function checkout(equipmentId, userId, username, notes = '', source = 'Manual', performedById = null, durationDays = 7) {
+function checkout(equipmentId, userId, username, notes = '', source = 'Manual', performedById = null, durationDays = 7, checkoutType = 'allday') {
   const actorId = performedById || userId;
   const due = new Date();
   due.setUTCDate(due.getUTCDate() + Math.max(1, Math.min(30, durationDays || 7)));
@@ -173,17 +144,25 @@ function checkout(equipmentId, userId, username, notes = '', source = 'Manual', 
     } else {
       // Single item — original behaviour
       if (eq.status !== 'available') throw Object.assign(new Error('Equipment is already checked out'), { status: 409 });
+      // Derive checkout_type from user's student_group if caller didn't specify
+      let resolvedType = checkoutType || 'allday';
+      if (!checkoutType || checkoutType === 'allday') {
+        const u = db.prepare('SELECT student_group FROM users WHERE id = ?').get(userId);
+        if (u && (u.student_group === 'am' || u.student_group === 'pm')) resolvedType = u.student_group;
+      }
       db.prepare(`
         UPDATE equipment
         SET status = 'checked_out', checked_out_by = ?, checked_out_at = datetime('now'),
-            due_date = ?, checked_out_count = 1, updated_at = datetime('now')
+            due_date = ?, checked_out_count = 1, checkout_type = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(userId, dueDate, equipmentId);
+      `).run(userId, dueDate, resolvedType, equipmentId);
     }
     db.prepare(`
-      INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
-      VALUES (?, 'checkout', ?, ?, ?, ?)
-    `).run(equipmentId, actorId, username, notes, source);
+      INSERT INTO checkout_log
+        (equipment_id, action, performed_by, checkout_user, notes, source, status_before, status_after, delta_json)
+      VALUES (?, 'checkout', ?, ?, ?, ?, 'available', 'checked_out', ?)
+    `).run(equipmentId, actorId, username, notes, source,
+           JSON.stringify({ duration_days: durationDays, checkout_type: resolvedType || checkoutType || 'allday' }));
   });
   tx();
   return getById(equipmentId);
@@ -218,13 +197,14 @@ function checkin(equipmentId, actingUser, notes = '', source = 'Manual') {
       db.prepare(`
         UPDATE equipment
         SET status = 'available', checked_out_by = NULL, checked_out_at = NULL,
-            due_date = NULL, checked_out_count = 0, updated_at = datetime('now')
+            due_date = NULL, checked_out_count = 0, checkout_type = 'allday', updated_at = datetime('now')
         WHERE id = ?
       `).run(equipmentId);
     }
     db.prepare(`
-      INSERT INTO checkout_log (equipment_id, action, performed_by, checkout_user, notes, source)
-      VALUES (?, 'checkin', ?, ?, ?, ?)
+      INSERT INTO checkout_log
+        (equipment_id, action, performed_by, checkout_user, notes, source, status_before, status_after)
+      VALUES (?, 'checkin', ?, ?, ?, ?, 'checked_out', 'available')
     `).run(equipmentId, actingUser.id, actingUser.username, notes, source);
     try {
       const queueService = require('./queueService');
@@ -279,11 +259,11 @@ function getCheckoutsForUser(userId) {
   `).all(userId);
 }
 
-function batchCheckout(equipmentIds, userId, username, notes, source, performedById, durationDays) {
+function batchCheckout(equipmentIds, userId, username, notes, source, performedById, durationDays, checkoutType = 'allday') {
   const results = [];
   for (const id of equipmentIds) {
     try {
-      const item = checkout(id, userId, username, notes, source, performedById, durationDays);
+      const item = checkout(id, userId, username, notes, source, performedById, durationDays, checkoutType);
       results.push({ id, success: true, item });
     } catch (err) {
       results.push({ id, success: false, error: err.message });
@@ -297,7 +277,7 @@ function batchCheckin(equipmentIds, actingUser, notes) {
   for (const id of equipmentIds) {
     try {
       const result = checkin(id, actingUser, notes, 'Manual');
-      results.push({ id, success: true, item: result.item });
+      results.push({ id, success: true, item: result.item, nextInQueue: result.nextInQueue || null });
     } catch (err) {
       results.push({ id, success: false, error: err.message });
     }
@@ -309,8 +289,44 @@ function clearLog() {
   db.prepare('DELETE FROM checkout_log').run();
 }
 
+function markDamaged(equipmentId, actingUser, conditionNotes = '', severe = false) {
+  const item = db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
+  if (!item) throw Object.assign(new Error('Equipment not found'), { status: 404 });
+  const newStatus = severe ? 'damaged' : 'needs_repair';
+  db.prepare(`
+    UPDATE equipment SET status = ?, condition_notes = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(newStatus, conditionNotes, equipmentId);
+  db.prepare(`
+    INSERT INTO checkout_log
+      (equipment_id, action, performed_by, checkout_user, notes, status_before, status_after, delta_json)
+    VALUES (?, 'damaged', ?, ?, ?, ?, ?, ?)
+  `).run(
+    equipmentId,
+    actingUser.id, actingUser.username,
+    conditionNotes,
+    item.status, newStatus,
+    JSON.stringify({ condition_notes: conditionNotes, severe })
+  );
+  return db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
+}
+
+function markRepaired(equipmentId, actingUser) {
+  const item = db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
+  if (!item) throw Object.assign(new Error('Equipment not found'), { status: 404 });
+  db.prepare(`
+    UPDATE equipment SET status = 'available', condition_notes = '', updated_at = datetime('now') WHERE id = ?
+  `).run(equipmentId);
+  db.prepare(`
+    INSERT INTO checkout_log
+      (equipment_id, action, performed_by, checkout_user, status_before, status_after)
+    VALUES (?, 'repaired', ?, ?, ?, 'available')
+  `).run(equipmentId, actingUser.id, actingUser.username, item.status);
+  return db.prepare('SELECT * FROM equipment WHERE id = ?').get(equipmentId);
+}
+
 module.exports = {
-  listAll, getById, create, update, remove, bulkRemove, findByIdentifier,
+  listAll, getById, create, update, remove, findByIdentifier,
   checkout, checkin, batchCheckout, batchCheckin, getLog, clearLog, getOverdue, getCheckoutsForUser,
+  markDamaged, markRepaired,
   nextAssetId,
 };

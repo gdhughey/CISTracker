@@ -69,6 +69,23 @@ router.post('/:id(\\d+)/approve', requireRole('admin'), validate(resolveSchema),
 
     const execute = (payload) => {
       if (ticket.type === 'add_item') {
+        // Surface duplicates as 409 here too — otherwise approve() would
+        // silently merge into an existing row via equipmentService.create's
+        // findByIdentifier fallback, leaving the requester thinking a new
+        // item was added when really nothing changed.
+        const dupe = equipmentService.findByIdentifier({
+          barcode: payload.barcode,
+          serial_number: payload.serial_number,
+        });
+        if (dupe) {
+          const reqBc = (payload.barcode || '').trim().toLowerCase();
+          const onField = dupe.barcode && reqBc &&
+            dupe.barcode.trim().toLowerCase() === reqBc ? 'barcode' : 'serial number';
+          throw Object.assign(
+            new Error(`Duplicate ${onField}: already used by "${dupe.name}" (${dupe.barcode || 'no barcode'})`),
+            { status: 409 }
+          );
+        }
         equipmentService.create({
           name:          payload.name || '',
           type:          payload.type || '',

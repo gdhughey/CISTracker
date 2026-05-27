@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS word_blacklist (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  word     TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  added_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

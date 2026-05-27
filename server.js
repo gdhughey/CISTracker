@@ -26,6 +26,9 @@ const serviceTicketRoutes  = require('./src/routes/serviceTickets');
 const inventoryAuditRoutes = require('./src/routes/inventoryAudit');
 
 require('./src/services/reminderService');
+require('./src/services/periodService').scheduleAutoReturns();
+
+const broadcastService = require('./src/services/broadcastService');
 
 const app = express();
 
@@ -54,6 +57,9 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 // Healthcheck (no auth, no rate limit)
 app.get('/healthz', (_req, res) => res.json({ ok: true, version: '0.1.0' }));
+
+// Public broadcast poll (no auth/CSRF — read-only, non-sensitive)
+app.get('/api/broadcast', (_req, res) => res.json(broadcastService.get() || { message: null }));
 
 // API
 app.use('/api', apiLimiter, verifyToken);
