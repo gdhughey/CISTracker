@@ -17,7 +17,7 @@ function getById(id) {
 }
 
 function getByUsername(username) {
-  return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  return db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
 }
 
 function getByEmail(email) {
